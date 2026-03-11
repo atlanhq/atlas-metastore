@@ -38,3 +38,52 @@ class RepairSuite:
             "guids": [guid],
         }, params={"indexType": "SINGLE"})
         assert_status_in(resp, [200, 204, 400, 404])
+
+    @test("repair_single_by_guid", tags=["repair"], order=4)
+    def test_repair_single_by_guid(self, client, ctx):
+        """POST /repair/single-index with guid param."""
+        guid = ctx.get_entity_guid("ds1")
+        assert guid, "ds1 GUID not found"
+        resp = client.post("/repair/single-index", params={"guid": guid})
+        assert_status_in(resp, [200, 204, 400, 404])
+
+    @test("repair_batch_multiple", tags=["repair"], order=5)
+    def test_repair_batch_multiple(self, client, ctx):
+        """POST /repair/batch with multiple GUIDs."""
+        guid1 = ctx.get_entity_guid("ds1")
+        guid2 = ctx.get_entity_guid("ds2")
+        if not guid1 or not guid2:
+            from core.assertions import SkipTestError
+            raise SkipTestError("ds1/ds2 GUIDs not available")
+        resp = client.post("/repair/batch", json_data={
+            "guids": [guid1, guid2],
+        }, params={"indexType": "SINGLE"})
+        assert_status_in(resp, [200, 204, 400, 404])
+
+    @test("repair_all_classifications", tags=["repair"], order=6)
+    def test_repair_all_classifications(self, client, ctx):
+        """POST /repair/all-classifications endpoint."""
+        resp = client.post("/repair/all-classifications")
+        assert_status_in(resp, [200, 204, 400, 404])
+
+    @test("repair_has_lineage", tags=["repair"], order=7)
+    def test_repair_has_lineage(self, client, ctx):
+        """POST /repair/has-lineage endpoint."""
+        resp = client.post("/repair/has-lineage")
+        assert_status_in(resp, [200, 204, 400, 404])
+
+    @test("repair_nonexistent", tags=["repair", "negative"], order=8)
+    def test_repair_nonexistent(self, client, ctx):
+        """Repair with nonexistent qualifiedName."""
+        resp = client.post("/repair/single-index", params={
+            "qualifiedName": "nonexistent/qn/that/does/not/exist/12345",
+        })
+        assert_status_in(resp, [200, 204, 400, 404])
+
+    @test("repair_composite_invalid", tags=["repair", "negative"], order=9)
+    def test_repair_composite_invalid(self, client, ctx):
+        """Repair composite index with invalid property name."""
+        resp = client.post("/repair/composite-index", json_data={
+            "propertyName": "nonExistentProperty_XYZ",
+        })
+        assert_status_in(resp, [200, 204, 400, 404])

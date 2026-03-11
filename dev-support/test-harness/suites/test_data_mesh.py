@@ -118,7 +118,12 @@ class DataMeshSuite:
         assert domain_guid, "domain1 GUID not found in context"
         entity = build_data_product_entity(name=self.product_name, domain_guid=domain_guid)
         resp = client.post("/entity", json_data={"entity": entity})
-        assert_status_in(resp, [200, 400, 403])
+        if resp.status_code in (400, 403):
+            raise SkipTestError(
+                f"DataProduct creation returned {resp.status_code} — "
+                f"preprocessor/Keycloak not configured"
+            )
+        assert_status(resp, 200)
         if resp.status_code == 200:
             body = resp.json()
             creates = body.get("mutatedEntities", {}).get("CREATE", [])

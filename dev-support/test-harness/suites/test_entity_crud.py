@@ -47,7 +47,7 @@ class EntityCrudSuite:
             assert isinstance(body["guidAssignments"], dict), "guidAssignments should be a dict"
 
         guid = entities[0]["guid"]
-        ctx.register_entity("ds1", guid, "DataSet")
+        ctx.register_entity("ds1", guid, "DataSet", qualifiedName=self.ds1_qn)
         ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
 
         # Read-after-write: verify persisted entity matches what was sent
@@ -85,7 +85,9 @@ class EntityCrudSuite:
         guid = ctx.get_entity_guid("ds1")
         if not guid:
             raise Exception("No ds1 entity registered")
-        events, total = poll_audit_events(client, guid, action_filter="ENTITY_CREATE", max_wait=60, interval=10)
+        qn = ctx.get_entity_qn("ds1")
+        events, total = poll_audit_events(client, guid, action_filter="ENTITY_CREATE",
+                                          max_wait=60, interval=10, qualifiedName=qn)
         if events is None:
             raise SkipTestError("Audit endpoint not available (404/405)")
         if not events:
@@ -115,7 +117,7 @@ class EntityCrudSuite:
             entities = creates or updates
             if entities:
                 guid = entities[0]["guid"]
-                ctx.register_entity("custom_type_entity", guid, custom_type)
+                ctx.register_entity("custom_type_entity", guid, custom_type, qualifiedName=qn)
                 ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
                 assert entities[0].get("typeName") == custom_type, (
                     f"Expected typeName={custom_type}, got {entities[0].get('typeName')}"
@@ -142,7 +144,7 @@ class EntityCrudSuite:
         updates = body.get("mutatedEntities", {}).get("UPDATE", [])
         entities = creates or updates
         guid = entities[0]["guid"]
-        ctx.register_entity("ds2", guid, "DataSet")
+        ctx.register_entity("ds2", guid, "DataSet", qualifiedName=self.ds2_qn)
         ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
 
         # Read-after-write: verify persisted entity matches what was sent
@@ -173,7 +175,7 @@ class EntityCrudSuite:
             entities = creates or updates
             if entities:
                 guid = entities[0]["guid"]
-                ctx.register_entity("process1", guid, "Process")
+                ctx.register_entity("process1", guid, "Process", qualifiedName=self.process_qn)
                 ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
 
                 # Read-after-write: verify persisted process entity
@@ -361,7 +363,9 @@ class EntityCrudSuite:
         guid = ctx.get_entity_guid("ds1")
         if not guid:
             raise Exception("No ds1 entity registered")
-        events, total = poll_audit_events(client, guid, action_filter="ENTITY_UPDATE", max_wait=60, interval=10)
+        qn = ctx.get_entity_qn("ds1")
+        events, total = poll_audit_events(client, guid, action_filter="ENTITY_UPDATE",
+                                          max_wait=60, interval=10, qualifiedName=qn)
         if events is None:
             raise SkipTestError("Audit endpoint not available (404/405)")
         if not events:

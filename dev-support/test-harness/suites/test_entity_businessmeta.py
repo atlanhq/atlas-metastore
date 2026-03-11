@@ -10,6 +10,7 @@ from core.data_factory import (
     build_business_metadata_def, build_multi_attr_business_metadata_def,
     build_dataset_entity, unique_name, unique_qn, unique_type_name,
 )
+from core.typedef_helpers import create_typedef_verified
 
 
 @suite("entity_businessmeta", depends_on_suites=["entity_crud"],
@@ -17,22 +18,14 @@ from core.data_factory import (
 class EntityBusinessMetaSuite:
 
     def setup(self, client, ctx):
-        # Create a BM type — client already retries on 500/503
+        # Create BM typedef with verify-after-500 + type cache wait
         self.bm_name = unique_type_name("HarnessBM")
         payload = {"businessMetadataDefs": [build_business_metadata_def(name=self.bm_name)]}
-        self.bm_ok = False
-        resp = client.post("/types/typedefs", json_data=payload)
-        if resp.status_code in (200, 409):
-            self.bm_ok = True
-        else:
-            print(f"  [bm-setup] BM typedef creation returned {resp.status_code} — tests will SKIP")
-        if self.bm_ok:
-            # Wait for type cache — verify typedef is queryable
-            for _ in range(3):
-                time.sleep(15)
-                check = client.get(f"/types/businessmetadatadef/name/{self.bm_name}")
-                if check.status_code == 200:
-                    break
+        self.bm_ok, _resp = create_typedef_verified(
+            client, payload, max_wait=60, interval=15,
+        )
+        if not self.bm_ok:
+            print(f"  [bm-setup] BM typedef creation failed — tests will SKIP")
         ctx.register_cleanup(
             lambda: client.delete(f"/types/typedef/name/{self.bm_name}")
         )
@@ -71,15 +64,11 @@ class EntityBusinessMetaSuite:
 
     @test("add_multi_attr_business_metadata", tags=["businessmeta"], order=1.5)
     def test_add_multi_attr_business_metadata(self, client, ctx):
-        # Create multi-attr BM typedef — client already retries on 500/503
         self.multi_bm_name = unique_type_name("HarnessMultiBM")
         payload = {"businessMetadataDefs": [build_multi_attr_business_metadata_def(name=self.multi_bm_name)]}
-        resp = client.post("/types/typedefs", json_data=payload)
-        if resp.status_code in (500, 503):
+        ok, resp = create_typedef_verified(client, payload, max_wait=45, interval=15)
+        if not ok:
             raise SkipTestError(f"Multi-attr BM typedef creation failed ({resp.status_code})")
-        if resp.status_code not in (200, 409):
-            raise SkipTestError(f"Multi-attr BM typedef creation returned {resp.status_code}")
-        time.sleep(15)
         ctx.register_cleanup(
             lambda: client.delete(f"/types/typedef/name/{self.multi_bm_name}")
         )
@@ -267,14 +256,11 @@ class EntityBusinessMetaSuite:
         # Create a throwaway BM typedef (not the main one used by other tests)
         throwaway_bm = unique_type_name("ThrowawayBM")
         payload = {"businessMetadataDefs": [build_business_metadata_def(name=throwaway_bm)]}
-        resp = client.post("/types/typedefs", json_data=payload)
-        if resp.status_code in (500, 503):
+        ok, resp = create_typedef_verified(client, payload, max_wait=45, interval=15)
+        if not ok:
             raise SkipTestError(
-                f"Throwaway BM typedef creation returned {resp.status_code} — "
-                f"backend may not support typedef creation via this credential"
+                f"Throwaway BM typedef creation failed ({resp.status_code})"
             )
-
-        time.sleep(15)
 
         # Delete the throwaway BM typedef
         resp = client.delete(f"/types/typedef/name/{throwaway_bm}")

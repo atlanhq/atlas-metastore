@@ -29,14 +29,22 @@ class TestContext:
 
     # ---- entity registry ----
 
-    def register_entity(self, name, guid, type_name=None):
+    def register_entity(self, name, guid, type_name=None, qualifiedName=None):
         with self._lock:
-            self._entities[name] = {"guid": guid, "typeName": type_name}
+            self._entities[name] = {
+                "guid": guid, "typeName": type_name,
+                "qualifiedName": qualifiedName,
+            }
 
     def get_entity_guid(self, name) -> Optional[str]:
         with self._lock:
             entry = self._entities.get(name)
             return entry["guid"] if entry else None
+
+    def get_entity_qn(self, name) -> Optional[str]:
+        with self._lock:
+            entry = self._entities.get(name)
+            return entry.get("qualifiedName") if entry else None
 
     def get_entity(self, name) -> Optional[Dict]:
         with self._lock:

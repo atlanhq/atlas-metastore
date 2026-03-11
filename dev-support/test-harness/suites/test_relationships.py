@@ -8,19 +8,7 @@ from core.assertions import (
     assert_field_equals, SkipTestError,
 )
 from core.data_factory import build_dataset_entity, build_relationship_def, unique_qn, unique_name, unique_type_name
-
-
-def _create_typedef_with_retry(client, payload, max_retries=2, backoff=10):
-    """POST /types/typedefs with retry on 500/503 (transient staging errors)."""
-    for attempt in range(max_retries + 1):
-        resp = client.post("/types/typedefs", json_data=payload)
-        if resp.status_code in (200, 409):
-            return resp
-        if resp.status_code in (500, 503) and attempt < max_retries:
-            time.sleep(backoff * (attempt + 1))
-            continue
-        return resp
-    return resp
+from core.typedef_helpers import create_typedef_verified
 
 
 @suite("relationships", depends_on_suites=["entity_crud"],
@@ -124,15 +112,12 @@ class RelationshipsSuite:
         # Create a custom relationship def first
         rel_def_name = unique_type_name("TestRelDef")
         payload = {"relationshipDefs": [build_relationship_def(name=rel_def_name)]}
-        resp = _create_typedef_with_retry(client, payload)
-        assert_status_in(resp, [200, 409])
-        if resp.status_code == 200:
+        ok, resp = create_typedef_verified(client, payload, max_wait=45, interval=15)
+        if ok:
             ctx.register_cleanup(
                 lambda: client.delete(f"/types/typedef/name/{rel_def_name}")
             )
             ctx.set("direct_rel_def_name", rel_def_name)
-
-            time.sleep(15)
 
             # Create relationship instance
             rel_payload = {
@@ -241,7 +226,8 @@ class RelationshipsSuite:
                             lambda g=rel_guid: client.delete(f"/relationship/guid/{g}")
                         )
 
-    @test("delete_relationship", tags=["relationship", "crud"], order=10)
+    @test("delete_relationship", tags=["relationship", "crud"], order=10,
+          depends_on=["get_relationship_by_guid"])
     def test_delete_relationship(self, client, ctx):
         rel_guid = ctx.get("test_rel_guid")
         assert rel_guid, "test_rel_guid not found — get_relationship_by_guid must have failed"

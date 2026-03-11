@@ -235,3 +235,146 @@ class AdminSuite:
         except Exception as e:
             raise SkipTestError(f"Feature flag delete not reachable: {e}")
         assert_status_in(resp, [200, 204, 404])
+
+    @test("get_session_structure", tags=["admin"], order=6)
+    def test_get_session_structure(self, client, ctx):
+        """Validate session response structure has user identity fields."""
+        resp = client.get("/session", admin=True)
+        assert_status_in(resp, [200, 500])
+        if resp.status_code != 200:
+            raise SkipTestError("Session endpoint returned non-200")
+        body = resp.json()
+        assert isinstance(body, dict) and body, "Expected non-empty dict session response"
+        # Check for common user identity keys
+        identity_keys = {"userName", "user", "userId", "name", "principal", "sub"}
+        found = identity_keys & set(body.keys())
+        assert found, (
+            f"Session response should contain user identity field "
+            f"(one of {identity_keys}), got keys: {list(body.keys())}"
+        )
+
+    @test("get_health_components", tags=["admin"], order=7)
+    def test_get_health_components(self, client, ctx):
+        """Validate health response includes component statuses."""
+        resp = client.get("/health", admin=True)
+        assert_status(resp, 200)
+        body = resp.json()
+        assert isinstance(body, dict), f"Expected dict, got {type(body).__name__}"
+        # Health response should have some component or status field
+        has_components = any(
+            k in body for k in ("components", "status", "healthy", "checks")
+        )
+        assert has_components, (
+            f"Health response missing component/status fields, got keys: {list(body.keys())}"
+        )
+
+    @test("get_metrics_entity_counts", tags=["admin"], order=8)
+    def test_get_metrics_entity_counts(self, client, ctx):
+        """Verify metrics response contains entity count gauges."""
+        resp = client.get("/metrics", admin=True, timeout=90)
+        if resp.status_code != 200:
+            raise SkipTestError(f"Metrics endpoint returned {resp.status_code}")
+        body = resp.json()
+        metrics = body.get("data", body) if isinstance(body, dict) else body
+        assert isinstance(metrics, dict), f"Expected dict metrics, got {type(metrics).__name__}"
+        # Look for entity-related metrics
+        has_entity_metrics = any(
+            k for k in metrics.keys()
+            if "entity" in k.lower() or "general" in k.lower()
+        )
+        assert has_entity_metrics, (
+            f"Metrics should contain entity-related sections, "
+            f"got keys: {list(metrics.keys())[:15]}"
+        )
+
+    @test("get_metrics_typedef_counts", tags=["admin"], order=9)
+    def test_get_metrics_typedef_counts(self, client, ctx):
+        """Verify metrics response contains typedef count gauges."""
+        resp = client.get("/metrics", admin=True, timeout=90)
+        if resp.status_code != 200:
+            raise SkipTestError(f"Metrics endpoint returned {resp.status_code}")
+        body = resp.json()
+        metrics = body.get("data", body) if isinstance(body, dict) else body
+        assert isinstance(metrics, dict), f"Expected dict metrics, got {type(metrics).__name__}"
+        # Look for typedef-related metrics in any section
+        all_values = str(metrics)
+        has_type_metrics = "type" in all_values.lower() or "typedef" in all_values.lower()
+        assert has_type_metrics, (
+            f"Metrics should reference type/typedef data somewhere, "
+            f"got keys: {list(metrics.keys())[:15]}"
+        )
+
+    @test("get_server_properties", tags=["admin"], order=19)
+    def test_get_server_properties(self, client, ctx):
+        """GET /admin/server-properties — validate server configuration."""
+        resp = client.get("/server-properties", admin=True)
+        assert_status_in(resp, [200, 404, 500])
+        if resp.status_code == 200:
+            body = resp.json()
+            assert isinstance(body, dict), f"Expected dict, got {type(body).__name__}"
+
+    @test("thread_dump_structure", tags=["admin"], order=22)
+    def test_thread_dump_structure(self, client, ctx):
+        """Verify /admin/stack returns meaningful thread dump content."""
+        resp = client.get("/stack", admin=True)
+        assert_status_in(resp, [200, 500])
+        if resp.status_code != 200:
+            raise SkipTestError(f"Stack endpoint returned {resp.status_code}")
+        body_str = str(resp.body)
+        # Thread dump should contain thread names
+        assert len(body_str) > 200, (
+            f"Thread dump suspiciously short: {len(body_str)} chars"
+        )
+        # Should mention common JVM thread pool names
+        thread_indicators = ["main", "atlas", "http", "pool", "Thread"]
+        found = any(ind.lower() in body_str.lower() for ind in thread_indicators)
+        assert found, "Thread dump should contain recognizable thread names"
+
+    @test("global_audit_search", tags=["admin", "audit"], order=23)
+    def test_global_audit_search(self, client, ctx):
+        """POST /entity/auditSearch — global audit search endpoint."""
+        resp = client.post("/entity/auditSearch", json_data={
+            "dsl": {
+                "from": 0,
+                "size": 5,
+                "sort": [{"created": {"order": "desc"}}],
+                "query": {
+                    "bool": {
+                        "filter": {
+                            "bool": {
+                                "must": [
+                                    {"term": {"action": "ENTITY_CREATE"}},
+                                ]
+                            }
+                        }
+                    }
+                },
+            },
+            "suppressLogs": True,
+        })
+        assert_status_in(resp, [200, 400, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            assert isinstance(body, (dict, list)), (
+                f"Expected dict or list from global audit, got {type(body).__name__}"
+            )
+            audits = body.get("entityAudits", []) if isinstance(body, dict) else []
+            if audits:
+                assert audits[0].get("action") == "ENTITY_CREATE", (
+                    f"Expected ENTITY_CREATE, got {audits[0].get('action')}"
+                )
+
+    @test("metrics_prometheus_consistency", tags=["admin"], order=24)
+    def test_metrics_prometheus_consistency(self, client, ctx):
+        """Cross-check /metrics and /metrics/prometheus both report data."""
+        resp_json = client.get("/metrics", admin=True, timeout=90)
+        resp_prom = client.get("/metrics/prometheus", admin=True)
+        if resp_json.status_code != 200:
+            raise SkipTestError(f"Metrics JSON endpoint returned {resp_json.status_code}")
+        if resp_prom.status_code not in [200, 204]:
+            raise SkipTestError(f"Prometheus endpoint returned {resp_prom.status_code}")
+        json_body = resp_json.json()
+        assert isinstance(json_body, dict) and json_body, "JSON metrics should be non-empty dict"
+        if resp_prom.status_code == 200:
+            prom_body = str(resp_prom.body)
+            assert len(prom_body) > 50, "Prometheus metrics should have content"

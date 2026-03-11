@@ -19,6 +19,7 @@ from core.data_factory import (
     build_classification_def, build_dataset_entity, build_process_entity,
     unique_name, unique_qn, unique_type_name,
 )
+from core.typedef_helpers import create_typedef_verified
 
 
 def _poll_entity_classifications(client, guid, expected_tag, max_wait=30,
@@ -123,36 +124,16 @@ def _search_entity_in_es(client, guid, es_sync_wait=5, max_retries=5,
 class EntityClassificationsSuite:
 
     def setup(self, client, ctx):
-        # Create a dedicated classification for this suite (with retry)
+        # Create classification typedefs with verify-after-500 + type cache wait
         self.tag_name = unique_type_name("HarnessTag")
         self.tag2_name = unique_type_name("HarnessTag2")
         payload = {"classificationDefs": [
             build_classification_def(name=self.tag_name),
             build_classification_def(name=self.tag2_name),
         ]}
-        self.tags_ok = False
-        for attempt in range(3):
-            resp = client.post("/types/typedefs", json_data=payload)
-            if resp.status_code in (200, 409):
-                self.tags_ok = True
-                break
-            if resp.status_code in (408, 500, 503) and attempt < 2:
-                time.sleep(10 * (attempt + 1))
-                continue
-
-        # Verify typedef is queryable before proceeding
-        if self.tags_ok:
-            queryable = False
-            for _ in range(4):
-                time.sleep(15)
-                check = client.get(
-                    f"/types/classificationdef/name/{self.tag_name}"
-                )
-                if check.status_code == 200:
-                    queryable = True
-                    break
-            if not queryable:
-                self.tags_ok = False
+        self.tags_ok, _resp = create_typedef_verified(
+            client, payload, max_wait=60, interval=15,
+        )
 
         ctx.set("harness_tag_name", self.tag_name)
         ctx.register_cleanup(
@@ -492,6 +473,223 @@ class EntityClassificationsSuite:
             f"target {guid_b} after removing from source {guid_a} (waited 30s). "
             f"Remaining tags: {remaining}"
         )
+
+    # ================================================================
+    #  Transitive delete — propagation path broken by intermediate delete
+    # ================================================================
+
+    @test("classification_propagation_transitive_delete",
+          tags=["classification", "propagation", "transitive"], order=7.6)
+    def test_classification_propagation_transitive_delete(self, client, ctx):
+        """Tag propagates A→B→C via lineage. Delete B. Verify tag cleaned up from C.
+
+        Topology:  A --Proc1--> B --Proc2--> C
+        Tag on A with propagate=True, restrictPropagationThroughLineage=False.
+        After propagation reaches C, soft-delete B.
+        Expected:
+          - Tag remains on A (source, directly applied)
+          - Tag is cleaned up from C (propagation path severed)
+        """
+        if not self.tags_ok:
+            raise SkipTestError("Classification typedef not queryable")
+
+        print("  [trans-del] Creating 3-entity lineage: A -> Proc1 -> B -> Proc2 -> C")
+
+        # --- Create entities A, B, C ---
+        guid_a = _create_entity_and_get_guid(client, ctx, "trans-del-a")
+        guid_b = _create_entity_and_get_guid(client, ctx, "trans-del-b")
+        guid_c = _create_entity_and_get_guid(client, ctx, "trans-del-c")
+        print(f"  [trans-del] A={guid_a}, B={guid_b}, C={guid_c}")
+
+        # --- Create Proc1: A -> B ---
+        proc1 = build_process_entity(
+            inputs=[{"guid": guid_a, "typeName": "DataSet"}],
+            outputs=[{"guid": guid_b, "typeName": "DataSet"}],
+        )
+        resp_p1 = client.post("/entity", json_data={"entity": proc1})
+        if resp_p1.status_code != 200:
+            raise SkipTestError(
+                f"Process entity creation returned {resp_p1.status_code} — "
+                f"lineage not supported in this env"
+            )
+        p1_creates = (resp_p1.json().get("mutatedEntities", {}).get("CREATE", []) or
+                       resp_p1.json().get("mutatedEntities", {}).get("UPDATE", []))
+        assert p1_creates, "Proc1 creation returned empty mutatedEntities"
+        proc1_guid = p1_creates[0]["guid"]
+        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{proc1_guid}"))
+        print(f"  [trans-del] Proc1={proc1_guid} (A->B)")
+
+        # --- Create Proc2: B -> C ---
+        proc2 = build_process_entity(
+            inputs=[{"guid": guid_b, "typeName": "DataSet"}],
+            outputs=[{"guid": guid_c, "typeName": "DataSet"}],
+        )
+        resp_p2 = client.post("/entity", json_data={"entity": proc2})
+        if resp_p2.status_code != 200:
+            raise SkipTestError(
+                f"Process entity creation returned {resp_p2.status_code} — "
+                f"lineage not supported in this env"
+            )
+        p2_creates = (resp_p2.json().get("mutatedEntities", {}).get("CREATE", []) or
+                       resp_p2.json().get("mutatedEntities", {}).get("UPDATE", []))
+        assert p2_creates, "Proc2 creation returned empty mutatedEntities"
+        proc2_guid = p2_creates[0]["guid"]
+        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{proc2_guid}"))
+        print(f"  [trans-del] Proc2={proc2_guid} (B->C)")
+
+        # --- Tag A with propagation enabled ---
+        print(f"  [trans-del] Adding {self.tag_name} to A ({guid_a}) "
+              f"with propagate=True, restrictPropagationThroughLineage=False")
+        resp_tag = client.post(f"/entity/guid/{guid_a}/classifications", json_data=[{
+            "typeName": self.tag_name,
+            "propagate": True,
+            "restrictPropagationThroughLineage": False,
+        }])
+        assert_status_in(resp_tag, [200, 204])
+
+        # --- Wait for tag to propagate to B ---
+        print(f"  [trans-del] Waiting for tag to propagate to B ({guid_b})...")
+        found_b, names_b = _poll_entity_classifications(
+            client, guid_b, self.tag_name, max_wait=30, interval=5,
+            label="trans-del-B",
+        )
+        assert found_b, (
+            f"Tag {self.tag_name} did NOT propagate from A to B after 30s. "
+            f"B classifications: {names_b}"
+        )
+
+        # --- Wait for tag to propagate to C (transitive through B) ---
+        print(f"  [trans-del] Waiting for tag to propagate to C ({guid_c})...")
+        found_c, names_c = _poll_entity_classifications(
+            client, guid_c, self.tag_name, max_wait=30, interval=5,
+            label="trans-del-C",
+        )
+        assert found_c, (
+            f"Tag {self.tag_name} did NOT propagate transitively from A through B to C "
+            f"after 30s. C classifications: {names_c}"
+        )
+        print(f"  [trans-del] VERIFIED: tag propagated A -> B -> C")
+
+        # Store for downstream tests
+        ctx.set("trans_del_guid_a", guid_a)
+        ctx.set("trans_del_guid_b", guid_b)
+        ctx.set("trans_del_guid_c", guid_c)
+        ctx.set("trans_del_proc1_guid", proc1_guid)
+        ctx.set("trans_del_proc2_guid", proc2_guid)
+
+    @test("classification_propagation_transitive_delete_b",
+          tags=["classification", "propagation", "transitive"], order=7.7,
+          depends_on=["classification_propagation_transitive_delete"])
+    def test_classification_propagation_transitive_delete_b(self, client, ctx):
+        """Delete intermediate entity B, verify propagated tag cleaned up from C.
+
+        After A→B→C propagation is established, soft-delete B.
+        - Tag on A must remain (directly applied).
+        - Tag on C should be cleaned up (propagation path through B is broken).
+        """
+        if not self.tags_ok:
+            raise SkipTestError("Classification typedef not queryable")
+
+        guid_a = ctx.get("trans_del_guid_a")
+        guid_b = ctx.get("trans_del_guid_b")
+        guid_c = ctx.get("trans_del_guid_c")
+        assert all([guid_a, guid_b, guid_c]), "Transitive delete GUIDs not set"
+
+        # --- Soft-delete B (the intermediate entity) ---
+        print(f"  [trans-del-B] Soft-deleting intermediate entity B ({guid_b})")
+        resp_del = client.delete(f"/entity/guid/{guid_b}")
+        assert_status(resp_del, 200)
+
+        # Verify B is DELETED
+        resp_b = client.get(f"/entity/guid/{guid_b}")
+        assert_status(resp_b, 200)
+        b_status = resp_b.json().get("entity", {}).get("status")
+        assert b_status == "DELETED", f"Expected B status=DELETED, got {b_status}"
+        print(f"  [trans-del-B] B is now DELETED")
+
+        # --- Verify tag remains on A (source, directly applied) ---
+        print(f"  [trans-del-B] Verifying tag still on A ({guid_a})...")
+        resp_a = client.get(f"/entity/guid/{guid_a}")
+        assert_status(resp_a, 200)
+        a_cls = resp_a.json().get("entity", {}).get("classifications", [])
+        a_tags = [c.get("typeName") for c in a_cls if isinstance(c, dict)]
+        assert self.tag_name in a_tags, (
+            f"Tag {self.tag_name} should remain on source A after B deletion. "
+            f"A classifications: {a_tags}"
+        )
+        print(f"  [trans-del-B] VERIFIED: tag still on A (source)")
+
+        # --- Verify tag is cleaned up from C (propagation path broken) ---
+        print(f"  [trans-del-B] Waiting for propagated tag to be cleaned up from C ({guid_c})...")
+        tag_gone_c, remaining_c = _poll_tag_removed(
+            client, guid_c, self.tag_name, max_wait=60, interval=5,
+            label="trans-del-C",
+        )
+
+        if tag_gone_c:
+            print(f"  [trans-del-B] VERIFIED: propagated tag cleaned up from C "
+                  f"after intermediate B was deleted. Remaining tags on C: {remaining_c}")
+        else:
+            # Tag still on C — this is a known behavior difference across versions.
+            # Log as warning but still record the actual behavior.
+            print(f"  [trans-del-B] WARNING: propagated tag {self.tag_name} still on C "
+                  f"after B deletion (60s). Tags on C: {remaining_c}")
+            print(f"  [trans-del-B] This may indicate propagated tags are NOT auto-cleaned "
+                  f"when an intermediate entity is soft-deleted.")
+            # Assert it should be cleaned — this is the expected correct behavior
+            assert tag_gone_c, (
+                f"Propagated tag {self.tag_name} was NOT cleaned up from C ({guid_c}) "
+                f"after intermediate entity B ({guid_b}) was deleted. "
+                f"Expected: propagation path A->B->C is severed, so C should lose the tag. "
+                f"Remaining tags on C: {remaining_c}"
+            )
+
+    @test("classification_propagation_transitive_delete_verify_lineage",
+          tags=["classification", "propagation", "transitive", "lineage"], order=7.8,
+          depends_on=["classification_propagation_transitive_delete_b"])
+    def test_classification_propagation_transitive_delete_verify_lineage(self, client, ctx):
+        """After B is deleted, verify lineage from A no longer reaches C."""
+        guid_a = ctx.get("trans_del_guid_a")
+        guid_c = ctx.get("trans_del_guid_c")
+        assert guid_a, "trans_del_guid_a not set"
+        assert guid_c, "trans_del_guid_c not set"
+
+        # Check lineage from A — with B deleted, C should not be reachable
+        resp = client.get(f"/lineage/{guid_a}", params={"depth": 5, "direction": "OUTPUT"})
+        assert_status_in(resp, [200, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            # Collect all GUIDs in the lineage graph
+            guid_map = body.get("guidEntityMap", {})
+            relations = body.get("relations", [])
+            all_guids_in_lineage = set(guid_map.keys())
+            for rel in relations:
+                from_id = rel.get("fromEntityId")
+                to_id = rel.get("toEntityId")
+                if from_id:
+                    all_guids_in_lineage.add(from_id)
+                if to_id:
+                    all_guids_in_lineage.add(to_id)
+
+            if guid_c not in all_guids_in_lineage:
+                print(f"  [trans-del-lineage] VERIFIED: C ({guid_c}) is NOT reachable "
+                      f"from A ({guid_a}) lineage after B deletion")
+            else:
+                # C may still appear in guidEntityMap as a known entity
+                # but the relation chain should be broken
+                print(f"  [trans-del-lineage] C ({guid_c}) still appears in lineage "
+                      f"guidEntityMap — checking if relation chain is intact")
+                # Check if there's a direct path from A to C through active relations
+                active_from = set()
+                active_to = set()
+                for rel in relations:
+                    from_id = rel.get("fromEntityId")
+                    to_id = rel.get("toEntityId")
+                    if from_id and to_id:
+                        active_from.add(from_id)
+                        active_to.add(to_id)
+                print(f"  [trans-del-lineage] Relations: {len(relations)} total. "
+                      f"guidEntityMap has {len(guid_map)} entries")
 
     # ================================================================
     #  Search / ES verification

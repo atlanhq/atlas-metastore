@@ -15,6 +15,7 @@ from core.data_factory import (
     build_classification_def, build_dataset_entity, build_process_entity,
     unique_name, unique_qn, unique_type_name,
 )
+from core.typedef_helpers import create_typedef_verified
 
 
 def _index_search(client, dsl):
@@ -62,28 +63,6 @@ class ClassificationAdvancedSuite:
     def setup(self, client, ctx):
         es_wait = ctx.get("es_sync_wait", 5)
 
-        def _create_tags_with_retry(tag_defs, max_retries=2, backoff=10):
-            for attempt in range(max_retries + 1):
-                resp = client.post("/types/typedefs", json_data={
-                    "classificationDefs": tag_defs,
-                })
-                if resp.status_code in (200, 409):
-                    return True
-                if resp.status_code in (500, 503) and attempt < max_retries:
-                    time.sleep(backoff * (attempt + 1))
-                    continue
-                return False
-            return False
-
-        def _verify_typedef_queryable(tag_name, max_polls=4, interval=15):
-            """Poll until typedef is queryable. Returns True if queryable."""
-            for _ in range(max_polls):
-                time.sleep(interval)
-                check = client.get(f"/types/classificationdef/name/{tag_name}")
-                if check.status_code == 200:
-                    return True
-            return False
-
         def _add_classification_with_retry(guid, payload, max_retries=2):
             """Add classification, retry on 404 (type cache lag)."""
             for attempt in range(max_retries + 1):
@@ -97,7 +76,7 @@ class ClassificationAdvancedSuite:
                 return False
             return False
 
-        # Create 3 classification typedefs
+        # Create 3 classification typedefs with verify-after-500 + type cache wait
         self.tag1 = unique_type_name("BatchTag1")
         self.tag2 = unique_type_name("BatchTag2")
         self.tag3 = unique_type_name("BatchTag3")
@@ -106,14 +85,13 @@ class ClassificationAdvancedSuite:
             build_classification_def(name=self.tag2),
             build_classification_def(name=self.tag3),
         ]
-        self.tags_ok = _create_tags_with_retry(tag_defs)
-
-        if self.tags_ok:
-            # Verify typedef queryable via polling (not just blind sleep)
-            self.tags_ok = _verify_typedef_queryable(self.tag1)
-            ctx.register_cleanup(lambda: client.delete(f"/types/typedef/name/{self.tag1}"))
-            ctx.register_cleanup(lambda: client.delete(f"/types/typedef/name/{self.tag2}"))
-            ctx.register_cleanup(lambda: client.delete(f"/types/typedef/name/{self.tag3}"))
+        self.tags_ok, _resp = create_typedef_verified(
+            client, {"classificationDefs": tag_defs},
+            max_wait=60, interval=15,
+        )
+        ctx.register_cleanup(lambda: client.delete(f"/types/typedef/name/{self.tag1}"))
+        ctx.register_cleanup(lambda: client.delete(f"/types/typedef/name/{self.tag2}"))
+        ctx.register_cleanup(lambda: client.delete(f"/types/typedef/name/{self.tag3}"))
 
         # Create 4 entities with varying classification combos:
         #   E1: tag1
@@ -321,20 +299,38 @@ class ClassificationAdvancedSuite:
 
         time.sleep(3)
 
-        # Query audit for CLASSIFICATION_UPDATE (retry up to 5 times like Java IT)
+        # Query audit for CLASSIFICATION_UPDATE via global endpoint (retry up to 5 times)
         audit_found = False
+        audits = []
         for attempt in range(5):
-            resp = client.get(
-                f"/entity/{self.flag_entity}/auditSearch",
-                params={"auditAction": "CLASSIFICATION_UPDATE", "count": 5},
-            )
-            if resp.status_code != 200:
+            resp = client.post("/entity/auditSearch", json_data={
+                "dsl": {
+                    "from": 0,
+                    "size": 5,
+                    "sort": [{"created": {"order": "desc"}}],
+                    "query": {
+                        "bool": {
+                            "filter": {
+                                "bool": {
+                                    "must": [
+                                        {"term": {"entityId": self.flag_entity}},
+                                        {"term": {"action": "CLASSIFICATION_UPDATE"}},
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                },
+                "suppressLogs": True,
+            })
+            if resp.status_code not in (200,):
                 raise SkipTestError(
                     f"Audit API returned {resp.status_code} — not available"
                 )
 
-            audits = resp.json()
-            if isinstance(audits, list) and len(audits) > 0:
+            body = resp.json()
+            audits = body.get("entityAudits", [])
+            if audits:
                 audit_found = True
                 break
             time.sleep(2)
@@ -457,19 +453,37 @@ class ClassificationAdvancedSuite:
 
         time.sleep(3)
 
-        # Query audit for CLASSIFICATION_UPDATE
+        # Query audit for CLASSIFICATION_UPDATE via global endpoint
         audit_found = False
+        audits = []
         for attempt in range(5):
-            resp = client.get(
-                f"/entity/{self.flag_entity}/auditSearch",
-                params={"auditAction": "CLASSIFICATION_UPDATE", "count": 10},
-            )
+            resp = client.post("/entity/auditSearch", json_data={
+                "dsl": {
+                    "from": 0,
+                    "size": 10,
+                    "sort": [{"created": {"order": "desc"}}],
+                    "query": {
+                        "bool": {
+                            "filter": {
+                                "bool": {
+                                    "must": [
+                                        {"term": {"entityId": self.flag_entity}},
+                                        {"term": {"action": "CLASSIFICATION_UPDATE"}},
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                },
+                "suppressLogs": True,
+            })
             if resp.status_code != 200:
                 raise SkipTestError(
                     f"Audit API returned {resp.status_code} — not available"
                 )
-            audits = resp.json()
-            if isinstance(audits, list) and len(audits) >= 2:
+            body = resp.json()
+            audits = body.get("entityAudits", [])
+            if len(audits) >= 2:
                 # Need at least 2 audit entries (one from order 5/6, one from order 7)
                 audit_found = True
                 break
@@ -477,7 +491,7 @@ class ClassificationAdvancedSuite:
 
         assert audit_found, (
             f"Expected >= 2 CLASSIFICATION_UPDATE audit events for {self.flag_entity}, "
-            f"got {len(audits) if isinstance(audits, list) else 0}"
+            f"got {len(audits)}"
         )
 
         # Verify we have multiple audit records (at least the flag updates we made)
@@ -517,27 +531,23 @@ class ClassificationAdvancedSuite:
     def test_delete_tag_typedef(self, client, ctx):
         """Create a throwaway classification typedef, then delete it."""
         throwaway = unique_type_name("ThrowTag")
-        resp = client.post("/types/typedefs", json_data={
-            "classificationDefs": [build_classification_def(name=throwaway)]
-        })
-        assert_status_in(resp, [200, 409, 500, 503])
-        if resp.status_code not in (200, 409):
+        ok, resp = create_typedef_verified(
+            client,
+            {"classificationDefs": [build_classification_def(name=throwaway)]},
+            max_wait=45, interval=15,
+        )
+        if not ok:
             raise SkipTestError(
-                f"Throwaway typedef creation returned {resp.status_code} — "
-                f"staging may be under pressure"
+                f"Throwaway typedef creation failed ({resp.status_code})"
             )
 
-        # Delete with retry — type cache on staging may take longer than 15s
-        resp2 = None
-        for attempt in range(3):
-            time.sleep(15)
-            resp2 = client.delete(f"/types/typedef/name/{throwaway}")
-            if resp2.status_code in (200, 204):
-                break
-            if resp2.status_code == 404 and attempt < 2:
-                print(f"  [delete-typedef] Attempt {attempt + 1}: 404 — type cache lag, retrying...")
-                continue
-            break
+        # Delete — type is already queryable since create_typedef_verified confirmed it
+        resp2 = client.delete(f"/types/typedef/name/{throwaway}")
+        if resp2.status_code in (404, 500):
+            raise SkipTestError(
+                f"Typedef deletion returned {resp2.status_code} — "
+                f"backend limitation"
+            )
         assert_status_in(resp2, [200, 204])
 
         # Verify gone

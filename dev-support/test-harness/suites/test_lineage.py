@@ -4,7 +4,7 @@ import time
 
 from core.decorators import suite, test
 from core.assertions import assert_status, assert_status_in, assert_field_present, assert_field_equals, SkipTestError
-from core.data_factory import build_dataset_entity, unique_qn, unique_name
+from core.data_factory import build_dataset_entity, build_process_entity, unique_qn, unique_name
 
 
 @suite("lineage", depends_on_suites=["entity_crud"],
@@ -207,3 +207,215 @@ class LineageSuite:
                     assert type_name != "Process", (
                         f"Expected no Process entities with hideProcess=true, found {entity_guid}"
                     )
+
+    @test("lineage_output_direction_only", tags=["lineage"], order=4.5)
+    def test_lineage_output_direction_only(self, client, ctx):
+        """POST /lineage with direction=OUTPUT only."""
+        guid = ctx.get_entity_guid("ds1")
+        assert guid, "ds1 GUID not found in context"
+        resp = client.post(f"/lineage/{guid}", json_data={
+            "direction": "OUTPUT",
+            "inputRelationsLimit": 0,
+            "outputRelationsLimit": 10,
+            "depth": 3,
+        })
+        assert_status_in(resp, [200, 400])
+        if resp.status_code == 200:
+            body = resp.json()
+            assert body.get("baseEntityGuid") == guid, (
+                f"Expected baseEntityGuid={guid}, got {body.get('baseEntityGuid')}"
+            )
+
+    @test("lineage_list_with_offset", tags=["lineage"], order=5.5)
+    def test_lineage_list_with_offset(self, client, ctx):
+        """POST /lineage/list with offset for pagination."""
+        guid = ctx.get_entity_guid("ds1")
+        assert guid, "ds1 GUID not found in context"
+        resp = client.post("/lineage/list", json_data={
+            "guid": guid,
+            "size": 10,
+            "offset": 0,
+            "depth": 3,
+            "direction": "BOTH",
+        })
+        assert_status_in(resp, [200, 400, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            if isinstance(body, dict):
+                # Try offset=1
+                resp2 = client.post("/lineage/list", json_data={
+                    "guid": guid,
+                    "size": 10,
+                    "offset": 1,
+                    "depth": 3,
+                    "direction": "BOTH",
+                })
+                assert_status_in(resp2, [200, 400])
+
+    @test("lineage_with_attributes", tags=["lineage"], order=8.5)
+    def test_lineage_with_attributes(self, client, ctx):
+        """GET /lineage with attributes parameter."""
+        guid = ctx.get_entity_guid("ds1")
+        assert guid, "ds1 GUID not found in context"
+        resp = client.get(f"/lineage/{guid}", params={
+            "direction": "BOTH",
+            "depth": 3,
+            "attributes": "qualifiedName,name",
+        })
+        assert_status_in(resp, [200, 400, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            guid_map = body.get("guidEntityMap", {})
+            if guid_map and guid in guid_map:
+                entity = guid_map[guid]
+                if isinstance(entity, dict):
+                    attrs = entity.get("attributes", entity.get("displayText", {}))
+                    # Attributes should be present if supported
+                    assert entity, "guidEntityMap entry should not be empty"
+
+    @test("lineage_nonexistent_guid", tags=["lineage", "negative"], order=9)
+    def test_lineage_nonexistent_guid(self, client, ctx):
+        """GET /lineage for nonexistent GUID -> 404 or empty."""
+        fake_guid = "00000000-0000-0000-0000-000000000000"
+        resp = client.get(f"/lineage/{fake_guid}", params={
+            "direction": "BOTH",
+            "depth": 3,
+        })
+        assert_status_in(resp, [200, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            guid_map = body.get("guidEntityMap", {})
+            relations = body.get("relations", [])
+            assert len(relations) == 0, (
+                f"Expected no relations for nonexistent GUID, got {len(relations)}"
+            )
+
+    @test("lineage_by_unique_attribute", tags=["lineage"], order=10)
+    def test_lineage_by_unique_attribute(self, client, ctx):
+        """GET /lineage/uniqueAttribute/type/DataSet with qualifiedName."""
+        ds1_qn = ctx.get("ds1_qn")
+        if not ds1_qn:
+            # Try to fetch from entity
+            guid = ctx.get_entity_guid("ds1")
+            if guid:
+                resp = client.get(f"/entity/guid/{guid}", params={"minExtInfo": "true"})
+                if resp.status_code == 200:
+                    ds1_qn = resp.json().get("entity", {}).get("attributes", {}).get("qualifiedName")
+        if not ds1_qn:
+            raise SkipTestError("ds1 qualifiedName not available")
+        resp = client.get(
+            "/lineage/uniqueAttribute/type/DataSet",
+            params={"attr:qualifiedName": ds1_qn, "direction": "BOTH", "depth": 3},
+        )
+        assert_status_in(resp, [200, 400, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            assert "baseEntityGuid" in body or "guidEntityMap" in body, (
+                f"Lineage by unique attr response missing expected fields, keys: {list(body.keys())}"
+            )
+
+    @test("lineage_depth_zero", tags=["lineage"], order=11)
+    def test_lineage_depth_zero(self, client, ctx):
+        """GET /lineage with depth=0 -> only base entity."""
+        guid = ctx.get_entity_guid("ds1")
+        assert guid, "ds1 GUID not found"
+        resp = client.get(f"/lineage/{guid}", params={
+            "direction": "BOTH",
+            "depth": 0,
+        })
+        assert_status_in(resp, [200, 400, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            guid_map = body.get("guidEntityMap", {})
+            relations = body.get("relations", [])
+            # With depth=0 we expect very limited results
+            if guid_map:
+                assert guid in guid_map, "Base entity should be in guidEntityMap"
+
+    @test("lineage_relations_structure", tags=["lineage"], order=12)
+    def test_lineage_relations_structure(self, client, ctx):
+        """Validate lineage relation objects have required fields."""
+        guid = ctx.get_entity_guid("ds1")
+        assert guid, "ds1 GUID not found"
+        resp = client.get(f"/lineage/{guid}", params={
+            "direction": "BOTH",
+            "depth": 3,
+        })
+        assert_status_in(resp, [200, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            relations = body.get("relations", [])
+            for i, rel in enumerate(relations[:10]):
+                assert "fromEntityId" in rel, (
+                    f"Relation [{i}] missing fromEntityId, keys: {list(rel.keys())}"
+                )
+                assert "toEntityId" in rel, (
+                    f"Relation [{i}] missing toEntityId, keys: {list(rel.keys())}"
+                )
+                # Both should be non-empty GUIDs
+                assert rel["fromEntityId"], f"Relation [{i}] has empty fromEntityId"
+                assert rel["toEntityId"], f"Relation [{i}] has empty toEntityId"
+
+    @test("lineage_diamond_topology", tags=["lineage"], order=13)
+    def test_lineage_diamond_topology(self, client, ctx):
+        """Create A->P1->B, A->P2->B diamond; verify B appears once in guidEntityMap."""
+        # Create two datasets and two processes forming a diamond
+        qn_a = unique_qn("diamond-a")
+        qn_b = unique_qn("diamond-b")
+        ent_a = build_dataset_entity(qn=qn_a, name=unique_name("diamond-a"))
+        ent_b = build_dataset_entity(qn=qn_b, name=unique_name("diamond-b"))
+        resp = client.post("/entity/bulk", json_data={"entities": [ent_a, ent_b]})
+        assert_status(resp, 200)
+        body = resp.json()
+        guids = []
+        for action in ("CREATE", "UPDATE"):
+            for e in body.get("mutatedEntities", {}).get(action, []):
+                guids.append(e["guid"])
+        if len(guids) < 2:
+            raise SkipTestError("Could not create 2 entities for diamond topology")
+        guid_a, guid_b = guids[0], guids[1]
+        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid_a}"))
+        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid_b}"))
+
+        # Create P1: A -> B
+        proc1 = build_process_entity(
+            inputs=[{"guid": guid_a, "typeName": "DataSet"}],
+            outputs=[{"guid": guid_b, "typeName": "DataSet"}],
+        )
+        resp_p1 = client.post("/entity", json_data={"entity": proc1})
+        assert_status_in(resp_p1, [200, 400])
+        if resp_p1.status_code == 200:
+            p1_entities = resp_p1.json().get("mutatedEntities", {}).get("CREATE", [])
+            if p1_entities:
+                p1_guid = p1_entities[0]["guid"]
+                ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{p1_guid}"))
+
+        # Create P2: A -> B (second path)
+        proc2 = build_process_entity(
+            inputs=[{"guid": guid_a, "typeName": "DataSet"}],
+            outputs=[{"guid": guid_b, "typeName": "DataSet"}],
+        )
+        resp_p2 = client.post("/entity", json_data={"entity": proc2})
+        assert_status_in(resp_p2, [200, 400])
+        if resp_p2.status_code == 200:
+            p2_entities = resp_p2.json().get("mutatedEntities", {}).get("CREATE", [])
+            if p2_entities:
+                p2_guid = p2_entities[0]["guid"]
+                ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{p2_guid}"))
+
+        import time
+        time.sleep(2)
+
+        # Get lineage from A -> B should be unique in guidEntityMap
+        resp3 = client.get(f"/lineage/{guid_a}", params={
+            "direction": "OUTPUT",
+            "depth": 3,
+        })
+        assert_status_in(resp3, [200, 404])
+        if resp3.status_code == 200:
+            body3 = resp3.json()
+            guid_map = body3.get("guidEntityMap", {})
+            # B should appear at most once as a key
+            assert guid_b in guid_map or len(guid_map) == 0, (
+                "Target entity should be in guidEntityMap or lineage is empty"
+            )

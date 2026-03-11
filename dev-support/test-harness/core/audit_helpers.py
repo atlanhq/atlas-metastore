@@ -1,4 +1,12 @@
-"""Audit event helpers for verifying entity audit trail via POST /entity/{guid}/auditSearch."""
+"""Audit event helpers for verifying entity audit trail via POST /entity/auditSearch.
+
+Uses the GLOBAL audit endpoint (/entity/auditSearch) instead of the per-entity
+endpoint (/entity/{guid}/auditSearch) because the per-entity endpoint returns
+0 events on staging/preprod environments.
+
+Matches the production UI pattern: filter by entityQualifiedName (preferred)
+or entityId, sort by created desc, filter context (no scoring).
+"""
 
 import time
 
@@ -6,27 +14,51 @@ import time
 AUDIT_CONSISTENCY_WAIT_S = 30
 
 
-def search_audit_events(client, guid, action_filter=None, size=10):
-    """Search audit events for an entity via POST /entity/{guid}/auditSearch.
+def search_audit_events(client, guid, action_filter=None, size=10, qualifiedName=None):
+    """Search audit events for an entity via POST /entity/auditSearch (global).
+
+    Uses filter context (not must) for performance — matches production UI
+    pattern with entityQualifiedName pinning, sort by created desc.
+
+    Args:
+        client: HTTP client
+        guid: Entity GUID (used as entityId filter if qualifiedName not provided)
+        action_filter: Optional action type filter (e.g. "ENTITY_CREATE")
+        size: Number of events to return
+        qualifiedName: Entity qualifiedName (preferred filter — matches production)
 
     Returns (events_list, total_count) or (None, 0) if endpoint unavailable.
     """
-    must_clauses = []
-    if action_filter:
-        must_clauses.append({"term": {"action": action_filter}})
+    # Build filter: prefer entityQualifiedName (matches prod UI), fall back to entityId
+    if qualifiedName:
+        entity_filter = {"term": {"entityQualifiedName": qualifiedName}}
+    else:
+        entity_filter = {"term": {"entityId": guid}}
 
-    query = {"match_all": {}} if not must_clauses else {"bool": {"must": must_clauses}}
+    filter_clauses = [entity_filter]
+    if action_filter:
+        filter_clauses.append({"term": {"action": action_filter}})
 
     payload = {
         "dsl": {
             "from": 0,
             "size": size,
-            "query": query,
+            "sort": [{"created": {"order": "desc"}}],
+            "query": {
+                "bool": {
+                    "filter": {
+                        "bool": {
+                            "must": filter_clauses,
+                        }
+                    }
+                }
+            },
         },
         "suppressLogs": True,
     }
 
-    resp = client.post(f"/entity/{guid}/auditSearch", json_data=payload)
+    # Use global audit endpoint (per-entity endpoint is broken on staging/preprod)
+    resp = client.post("/entity/auditSearch", json_data=payload)
 
     if resp.status_code in (404, 400, 405):
         # Endpoint not available (local dev without audit index)
@@ -41,7 +73,8 @@ def search_audit_events(client, guid, action_filter=None, size=10):
     return events, total
 
 
-def poll_audit_events(client, guid, action_filter=None, max_wait=60, interval=10, size=10):
+def poll_audit_events(client, guid, action_filter=None, max_wait=60,
+                      interval=10, size=10, qualifiedName=None):
     """Poll audit events until results appear.
 
     Returns (events_list, total_count) or (None, 0) if endpoint unavailable.
@@ -51,7 +84,10 @@ def poll_audit_events(client, guid, action_filter=None, max_wait=60, interval=10
     for i in range(max_wait // interval):
         if i > 0:
             time.sleep(interval)
-        events, total = search_audit_events(client, guid, action_filter=action_filter, size=size)
+        events, total = search_audit_events(
+            client, guid, action_filter=action_filter, size=size,
+            qualifiedName=qualifiedName,
+        )
         if events is None:
             return None, 0  # Endpoint genuinely not available
         if events:
@@ -63,7 +99,8 @@ def poll_audit_events(client, guid, action_filter=None, max_wait=60, interval=10
     return last_events, last_total
 
 
-def assert_audit_event_exists(client, guid, expected_action, max_wait=60, interval=10):
+def assert_audit_event_exists(client, guid, expected_action, max_wait=60,
+                              interval=10, qualifiedName=None):
     """Poll until the audit event exists and return it.
 
     Returns the event dict if found. Asserts if the endpoint is available
@@ -73,6 +110,7 @@ def assert_audit_event_exists(client, guid, expected_action, max_wait=60, interv
     events, total = poll_audit_events(
         client, guid, action_filter=expected_action,
         max_wait=max_wait, interval=interval,
+        qualifiedName=qualifiedName,
     )
 
     if events is None:
