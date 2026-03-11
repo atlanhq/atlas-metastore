@@ -215,6 +215,7 @@ def _run_single_suite(suite_name, registry, client, ctx, config):
             ))
         except SkipTestError as e:
             latency = (time.perf_counter() - start) * 1000
+            blocked_tests.add(test_name)
             results.append(TestResult(
                 suite=suite_name,
                 test_name=test_name,
@@ -356,6 +357,7 @@ def _run_sequential(ordered_suites, registry, client, ctx, reporter, config):
                 ))
             except SkipTestError as e:
                 latency = (time.perf_counter() - start) * 1000
+                blocked_tests.add(test_name)
                 reporter.record(TestResult(
                     suite=suite_name,
                     test_name=test_name,

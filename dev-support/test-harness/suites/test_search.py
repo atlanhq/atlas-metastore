@@ -24,7 +24,7 @@ class SearchSuite:
         resp = client.get("/search/basic", params={
             "typeName": "DataSet",
             "limit": 10,
-        })
+        }, timeout=60)
         assert_status(resp, 200)
         body = resp.json()
         assert isinstance(body, dict), f"Expected dict response, got {type(body).__name__}"
@@ -36,7 +36,7 @@ class SearchSuite:
             "limit": 10,
             "offset": 0,
             "excludeDeletedEntities": True,
-        })
+        }, timeout=60)
         assert_status(resp, 200)
         body = resp.json()
         assert isinstance(body, dict), f"Expected dict response, got {type(body).__name__}"
@@ -136,7 +136,7 @@ class SearchSuite:
         resp = client.get("/search/basic", params={
             "classification": "*",
             "limit": 5,
-        })
+        }, timeout=60)
         # Wildcard classification search can be slow or unsupported
         assert_status_in(resp, [200, 400, 408, 500])
         if resp.status_code == 200:
@@ -227,7 +227,7 @@ class SearchSuite:
             "excludeDeletedEntities": True,
             "limit": 100,
             "offset": 0,
-        })
+        }, timeout=60)
         assert_status(resp2, 200)
         body2 = resp2.json()
         result_entities = body2.get("entities", [])

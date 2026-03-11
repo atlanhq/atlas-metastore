@@ -110,7 +110,7 @@ class SearchCorrectnessSuite:
             build_classification_def(name=self.tag2_name),
         ]}
         resp = client.post("/types/typedefs", json_data=payload)
-        time.sleep(10)  # Wait for type cache propagation
+        time.sleep(20)  # Wait for type cache propagation (preprod needs longer)
         ctx.register_cleanup(
             lambda: client.delete(f"/types/typedef/name/{self.tag_name}")
         )
@@ -121,7 +121,7 @@ class SearchCorrectnessSuite:
         # Entity A: has classification (retry on type cache lag)
         self.guid_a, self.qn_a = _create_entity_and_register(client, ctx, "search-a")
         self.tag_add_ok = False
-        for attempt in range(3):
+        for attempt in range(5):
             resp = client.post(
                 f"/entity/guid/{self.guid_a}/classifications",
                 json_data=[{"typeName": self.tag_name}],
@@ -129,11 +129,13 @@ class SearchCorrectnessSuite:
             if resp.status_code in (200, 204):
                 self.tag_add_ok = True
                 break
-            if attempt < 2:
-                time.sleep(10)
+            print(f"  [setup] Classification add attempt {attempt+1}/5 returned {resp.status_code}, "
+                  f"waiting for type cache...")
+            if attempt < 4:
+                time.sleep(15)
         assert self.tag_add_ok, (
             f"Failed to add classification {self.tag_name} to entity {self.guid_a} "
-            f"after 3 attempts (last status={resp.status_code})"
+            f"after 5 attempts (last status={resp.status_code})"
         )
 
         # Entity B: has labels
@@ -336,7 +338,7 @@ class SearchCorrectnessSuite:
     def test_search_multi_classification_entity(self, client, ctx):
         # Add second classification to entity A (retry on type cache lag)
         added = False
-        for attempt in range(3):
+        for attempt in range(5):
             resp = client.post(
                 f"/entity/guid/{self.guid_a}/classifications",
                 json_data=[{"typeName": self.tag2_name}],
@@ -344,10 +346,10 @@ class SearchCorrectnessSuite:
             if resp.status_code in (200, 204):
                 added = True
                 break
-            if attempt < 2:
-                time.sleep(10)
+            if attempt < 4:
+                time.sleep(15)
         assert added, (
-            f"Failed to add {self.tag2_name} to {self.guid_a} after 3 attempts "
+            f"Failed to add {self.tag2_name} to {self.guid_a} after 5 attempts "
             f"(last status={resp.status_code})"
         )
 

@@ -28,15 +28,21 @@ def _index_search(client, dsl):
     return True, resp.json()
 
 
-def _create_entity(client, ctx, suffix, classifications=None):
-    """Create DataSet, register cleanup, return guid.
-    Raises SkipTestError if creation fails."""
+def _create_entity(client, ctx, suffix, classifications=None, max_retries=3):
+    """Create DataSet with retry on timeout, register cleanup, return guid.
+    Raises SkipTestError if creation fails after retries."""
     qn = unique_qn(suffix)
     entity = build_dataset_entity(qn=qn, name=unique_name(suffix))
     if classifications:
         entity["classifications"] = classifications
-    resp = client.post("/entity", json_data={"entity": entity})
-    if resp.status_code != 200:
+    for attempt in range(max_retries):
+        resp = client.post("/entity", json_data={"entity": entity})
+        if resp.status_code == 200:
+            break
+        if resp.status_code in (408, 500, 503) and attempt < max_retries - 1:
+            import time
+            time.sleep(5 * (attempt + 1))
+            continue
         raise SkipTestError(f"Entity creation for {suffix} returned {resp.status_code}")
     body = resp.json()
     creates = body.get("mutatedEntities", {}).get("CREATE", [])

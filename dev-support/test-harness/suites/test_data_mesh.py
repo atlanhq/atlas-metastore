@@ -22,8 +22,14 @@ class DataMeshSuite:
 
     @test("create_domain", tags=["data_mesh", "crud"], order=1)
     def test_create_domain(self, client, ctx):
+        import time
         entity = build_domain_entity(name=self.domain_name)
-        resp = client.post("/entity", json_data={"entity": entity})
+        # Retry on 408 (timeout) — staging can be slow
+        for attempt in range(3):
+            resp = client.post("/entity", json_data={"entity": entity})
+            if resp.status_code != 408 or attempt == 2:
+                break
+            time.sleep(5 * (attempt + 1))
         assert_status_in(resp, [200, 400, 403])
         if resp.status_code != 200:
             # 400/403 = Keycloak unavailable or preprocessor rejects

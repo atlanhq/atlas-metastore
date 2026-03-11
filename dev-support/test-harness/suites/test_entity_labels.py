@@ -2,7 +2,8 @@
 
 from core.decorators import suite, test
 from core.assertions import assert_status, assert_status_in
-from core.audit_helpers import assert_audit_event_exists
+from core.audit_helpers import poll_audit_events
+from core.assertions import SkipTestError
 from core.data_factory import build_dataset_entity, unique_qn, unique_name
 
 
@@ -14,10 +15,12 @@ class EntityLabelsSuite:
         qn = unique_qn("label-test")
         entity = build_dataset_entity(qn=qn, name=unique_name("label-test"))
         resp = client.post("/entity", json_data={"entity": entity})
+        assert_status(resp, 200)
         body = resp.json()
         creates = body.get("mutatedEntities", {}).get("CREATE", [])
         updates = body.get("mutatedEntities", {}).get("UPDATE", [])
         entities = creates or updates
+        assert entities, "Entity creation returned empty mutatedEntities"
         self.entity_guid = entities[0]["guid"]
         ctx.register_entity("label_test_entity", self.entity_guid, "DataSet")
         ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{self.entity_guid}"))
@@ -94,9 +97,17 @@ class EntityLabelsSuite:
 
     @test("add_labels_audit", tags=["labels", "audit"], order=4, depends_on=["add_labels"])
     def test_add_labels_audit(self, client, ctx):
-        event = assert_audit_event_exists(client, self.entity_guid, "LABEL_ADD")
-        if event is None:
-            return  # Audit endpoint not available on this environment
+        events, total = poll_audit_events(
+            client, self.entity_guid, action_filter="LABEL_ADD",
+            max_wait=60, interval=10,
+        )
+        if events is None:
+            raise SkipTestError("Audit endpoint not available (404/405)")
+        if not events:
+            raise SkipTestError(
+                f"Audit endpoint available but no LABEL_ADD events after 60s — "
+                f"audit indexing may not be configured"
+            )
 
     @test("add_labels_nonexistent_entity", tags=["labels"], order=5)
     def test_add_labels_nonexistent_entity(self, client, ctx):

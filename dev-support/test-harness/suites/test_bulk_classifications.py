@@ -17,13 +17,21 @@ from core.data_factory import (
 )
 
 
-def _create_entity_and_register(client, ctx, suffix):
-    """Create a DataSet entity, register cleanup, return guid."""
+def _create_entity_and_register(client, ctx, suffix, max_retries=3):
+    """Create a DataSet entity with retry on timeout, register cleanup, return guid."""
     qn = unique_qn(suffix)
     name = unique_name(suffix)
     entity = build_dataset_entity(qn=qn, name=name)
-    resp = client.post("/entity", json_data={"entity": entity})
-    assert_status(resp, 200)
+    for attempt in range(max_retries):
+        resp = client.post("/entity", json_data={"entity": entity})
+        if resp.status_code == 200:
+            break
+        if resp.status_code in (408, 500, 503) and attempt < max_retries - 1:
+            time.sleep(5 * (attempt + 1))
+            continue
+        raise Exception(
+            f"Entity creation for {suffix} returned {resp.status_code}"
+        )
     body = resp.json()
     creates = body.get("mutatedEntities", {}).get("CREATE", [])
     updates = body.get("mutatedEntities", {}).get("UPDATE", [])
