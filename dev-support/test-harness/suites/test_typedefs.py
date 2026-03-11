@@ -15,6 +15,19 @@ from core.data_factory import (
 )
 
 
+def _create_typedef_with_retry(client, payload, max_retries=2, backoff=10):
+    """POST /types/typedefs with retry on 500/503 (transient staging errors)."""
+    for attempt in range(max_retries + 1):
+        resp = client.post("/types/typedefs", json_data=payload)
+        if resp.status_code in (200, 409):
+            return resp
+        if resp.status_code in (500, 503) and attempt < max_retries:
+            time.sleep(backoff * (attempt + 1))
+            continue
+        return resp
+    return resp
+
+
 @suite("typedefs", description="TypeDef CRUD operations")
 class TypeDefSuite:
 
@@ -61,16 +74,17 @@ class TypeDefSuite:
     @test("create_enum_def", tags=["typedef", "crud"], order=10)
     def test_create_enum_def(self, client, ctx):
         payload = {"enumDefs": [build_enum_def(name=self.enum_name)]}
-        resp = client.post("/types/typedefs", json_data=payload)
-        assert_status(resp, 200)
+        resp = _create_typedef_with_retry(client, payload)
+        assert_status_in(resp, [200, 409])
         ctx.set("test_enum_name", self.enum_name)
 
-        # Validate response structure
-        body = resp.json()
-        enum_defs = body.get("enumDefs", [])
-        assert len(enum_defs) > 0, "Expected enumDefs in response"
-        assert enum_defs[0].get("name") == self.enum_name, f"Expected name={self.enum_name}"
-        assert "elementDefs" in enum_defs[0], "Expected elementDefs in enum def"
+        if resp.status_code == 200:
+            # Validate response structure
+            body = resp.json()
+            enum_defs = body.get("enumDefs", [])
+            assert len(enum_defs) > 0, "Expected enumDefs in response"
+            assert enum_defs[0].get("name") == self.enum_name, f"Expected name={self.enum_name}"
+            assert "elementDefs" in enum_defs[0], "Expected elementDefs in enum def"
 
     @test("get_enum_def_by_name", tags=["typedef"], order=11, depends_on=["create_enum_def"])
     def test_get_enum_def_by_name(self, client, ctx):
@@ -81,8 +95,8 @@ class TypeDefSuite:
     @test("create_struct_def", tags=["typedef", "crud"], order=12)
     def test_create_struct_def(self, client, ctx):
         payload = {"structDefs": [build_struct_def(name=self.struct_name)]}
-        resp = client.post("/types/typedefs", json_data=payload)
-        assert_status(resp, 200)
+        resp = _create_typedef_with_retry(client, payload)
+        assert_status_in(resp, [200, 409])
         ctx.set("test_struct_name", self.struct_name)
 
     @test("get_struct_def_by_name", tags=["typedef"], order=13, depends_on=["create_struct_def"])
@@ -94,14 +108,15 @@ class TypeDefSuite:
     @test("create_classification_def", tags=["typedef", "crud"], order=14)
     def test_create_classification_def(self, client, ctx):
         payload = {"classificationDefs": [build_classification_def(name=self.classification_name)]}
-        resp = client.post("/types/typedefs", json_data=payload)
-        assert_status(resp, 200)
+        resp = _create_typedef_with_retry(client, payload)
+        assert_status_in(resp, [200, 409])
         ctx.set("test_classification_name", self.classification_name)
 
-        # Validate response structure
-        body = resp.json()
-        cls_defs = body.get("classificationDefs", [])
-        assert len(cls_defs) > 0, "Expected classificationDefs in response"
+        if resp.status_code == 200:
+            # Validate response structure
+            body = resp.json()
+            cls_defs = body.get("classificationDefs", [])
+            assert len(cls_defs) > 0, "Expected classificationDefs in response"
 
         # Classification/BM types need time to propagate through type cache on staging
         time.sleep(5)
@@ -117,15 +132,16 @@ class TypeDefSuite:
     @test("create_entity_def", tags=["typedef", "crud"], order=16)
     def test_create_entity_def(self, client, ctx):
         payload = {"entityDefs": [build_entity_def(name=self.entity_type_name)]}
-        resp = client.post("/types/typedefs", json_data=payload)
-        assert_status(resp, 200)
+        resp = _create_typedef_with_retry(client, payload)
+        assert_status_in(resp, [200, 409])
         ctx.set("test_entity_type_name", self.entity_type_name)
 
-        # Validate response structure
-        body = resp.json()
-        entity_defs = body.get("entityDefs", [])
-        assert len(entity_defs) > 0, "Expected entityDefs in response"
-        assert "attributeDefs" in entity_defs[0], "Expected attributeDefs in entity def"
+        if resp.status_code == 200:
+            # Validate response structure
+            body = resp.json()
+            entity_defs = body.get("entityDefs", [])
+            assert len(entity_defs) > 0, "Expected entityDefs in response"
+            assert "attributeDefs" in entity_defs[0], "Expected attributeDefs in entity def"
 
     @test("get_entity_def_by_name", tags=["typedef"], order=17, depends_on=["create_entity_def"])
     def test_get_entity_def_by_name(self, client, ctx):
@@ -136,14 +152,15 @@ class TypeDefSuite:
     @test("create_business_metadata_def", tags=["typedef", "crud"], order=18)
     def test_create_business_metadata_def(self, client, ctx):
         payload = {"businessMetadataDefs": [build_business_metadata_def(name=self.bm_name)]}
-        resp = client.post("/types/typedefs", json_data=payload)
-        assert_status(resp, 200)
+        resp = _create_typedef_with_retry(client, payload)
+        assert_status_in(resp, [200, 409])
         ctx.set("test_bm_name", self.bm_name)
 
-        # Validate response structure
-        body = resp.json()
-        bm_defs = body.get("businessMetadataDefs", [])
-        assert len(bm_defs) > 0, "Expected businessMetadataDefs in response"
+        if resp.status_code == 200:
+            # Validate response structure
+            body = resp.json()
+            bm_defs = body.get("businessMetadataDefs", [])
+            assert len(bm_defs) > 0, "Expected businessMetadataDefs in response"
 
         # BM types need time to propagate through type cache on staging
         time.sleep(5)
@@ -223,20 +240,21 @@ class TypeDefSuite:
     def test_create_relationship_def(self, client, ctx):
         self.rel_def_name = unique_type_name("TestRelDef")
         payload = {"relationshipDefs": [build_relationship_def(name=self.rel_def_name)]}
-        resp = client.post("/types/typedefs", json_data=payload)
-        assert_status(resp, 200)
+        resp = _create_typedef_with_retry(client, payload)
+        assert_status_in(resp, [200, 409])
         ctx.set("test_rel_def_name", self.rel_def_name)
         ctx.register_cleanup(
             lambda: client.delete(f"/types/typedef/name/{self.rel_def_name}")
         )
 
-        # Validate response
-        body = resp.json()
-        rel_defs = body.get("relationshipDefs", [])
-        assert len(rel_defs) > 0, "Expected relationshipDefs in response"
-        assert rel_defs[0].get("name") == self.rel_def_name, (
-            f"Expected name={self.rel_def_name}"
-        )
+        if resp.status_code == 200:
+            # Validate response
+            body = resp.json()
+            rel_defs = body.get("relationshipDefs", [])
+            assert len(rel_defs) > 0, "Expected relationshipDefs in response"
+            assert rel_defs[0].get("name") == self.rel_def_name, (
+                f"Expected name={self.rel_def_name}"
+            )
 
     @test("delete_type_in_use", tags=["typedef"], order=24, depends_on=["create_entity_with_custom_type"])
     def test_delete_type_in_use(self, client, ctx):

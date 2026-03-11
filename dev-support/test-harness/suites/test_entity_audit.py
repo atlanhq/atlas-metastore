@@ -88,10 +88,18 @@ class EntityAuditSuite:
         guid = ctx.get_entity_guid("ds1")
         if not guid:
             raise Exception("No ds1 entity registered")
-        events, total = search_audit_events(client, guid, size=1)
-        if events is None:
+        # Fetch page 1 (size=1)
+        events_p1, total = search_audit_events(client, guid, size=1)
+        if events_p1 is None:
             return
-        assert len(events) <= 1, f"Expected at most 1 event with size=1, got {len(events)}"
+        assert len(events_p1) <= 1, f"Expected at most 1 event with size=1, got {len(events_p1)}"
+        # Fetch larger page to verify pagination returns more
+        if total > 1:
+            events_p2, total2 = search_audit_events(client, guid, size=5)
+            if events_p2 is not None:
+                assert len(events_p2) > len(events_p1), (
+                    f"Expected more events with size=5 ({len(events_p2)}) than size=1 ({len(events_p1)})"
+                )
 
     @test("audit_search_event_fields", tags=["audit"], order=6)
     def test_audit_search_event_fields(self, client, ctx):

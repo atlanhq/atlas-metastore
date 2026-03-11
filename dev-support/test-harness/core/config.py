@@ -27,6 +27,7 @@ class HarnessConfig:
     trace_log: Optional[str] = None
     kafka_bootstrap_servers: Optional[str] = None
     no_kafka: bool = False
+    parallel: int = 1                               # max concurrent suites (1 = sequential)
 
 
 def parse_args() -> HarnessConfig:
@@ -90,6 +91,8 @@ Examples:
                         help="Kafka bootstrap servers for notification verification (e.g. 'localhost:9092')")
     parser.add_argument("--no-kafka", action="store_true",
                         help="Disable Kafka notification verification entirely")
+    parser.add_argument("-P", "--parallel", type=int, default=1,
+                        help="Max concurrent suites to run in parallel (default: 1 = sequential)")
 
     args = parser.parse_args()
 
@@ -108,6 +111,7 @@ Examples:
     cfg.trace_log = args.trace_log
     cfg.kafka_bootstrap_servers = args.kafka_bootstrap_servers
     cfg.no_kafka = args.no_kafka
+    cfg.parallel = max(1, args.parallel)
 
     if args.tenant:
         cfg.env = "staging"

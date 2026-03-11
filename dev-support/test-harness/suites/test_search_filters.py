@@ -415,9 +415,9 @@ class SearchFiltersSuite:
 
     @test("filter_attr_contains", tags=["filter", "search", "operator"], order=10)
     def test_filter_attr_contains(self, client, ctx):
-        """Basic search CONTAINS operator on name."""
-        # Use a substring of Entity A's name (the suffix portion)
-        substring = self.name_a.split("-")[-1] if "-" in self.name_a else self.name_a[:8]
+        """Basic search CONTAINS operator on qualifiedName."""
+        # Use a substring of Entity A's qualifiedName (keyword field, works with wildcard)
+        substring = self.qn_a.split("/")[-1] if "/" in self.qn_a else self.qn_a[-12:]
         resp = client.post("/search/basic", json_data={
             "typeName": "DataSet",
             "excludeDeletedEntities": True,
@@ -425,7 +425,7 @@ class SearchFiltersSuite:
             "entityFilters": {
                 "condition": "AND",
                 "criterion": [{
-                    "attributeName": "name",
+                    "attributeName": "qualifiedName",
                     "operator": "contains",
                     "attributeValue": substring,
                 }],

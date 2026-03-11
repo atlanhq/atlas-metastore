@@ -42,6 +42,8 @@ def main():
         print(f"  Tags:        {config.tags}")
     if config.exclude_tags:
         print(f"  Exclude:     {config.exclude_tags}")
+    if config.parallel > 1:
+        print(f"  Parallel:    {config.parallel} concurrent suites")
     print()
 
     # Build auth

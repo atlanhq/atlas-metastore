@@ -20,16 +20,25 @@ from core.data_factory import (
 class EntityClassificationsSuite:
 
     def setup(self, client, ctx):
-        # Create a dedicated classification for this suite
+        # Create a dedicated classification for this suite (with retry)
         self.tag_name = unique_type_name("HarnessTag")
         self.tag2_name = unique_type_name("HarnessTag2")
         payload = {"classificationDefs": [
             build_classification_def(name=self.tag_name),
             build_classification_def(name=self.tag2_name),
         ]}
-        resp = client.post("/types/typedefs", json_data=payload)
-        # Wait for type cache propagation on staging (can take 10-15s)
-        time.sleep(10)
+        self.tags_ok = False
+        for attempt in range(3):
+            resp = client.post("/types/typedefs", json_data=payload)
+            if resp.status_code in (200, 409):
+                self.tags_ok = True
+                break
+            if resp.status_code in (500, 503) and attempt < 2:
+                time.sleep(10 * (attempt + 1))
+                continue
+        # Wait for type cache propagation on staging (can take 15-20s)
+        if self.tags_ok:
+            time.sleep(15)
         ctx.set("harness_tag_name", self.tag_name)
         ctx.register_cleanup(
             lambda: client.delete(f"/types/typedef/name/{self.tag_name}")
@@ -77,16 +86,22 @@ class EntityClassificationsSuite:
 
     @test("add_classification", tags=["classification"], order=1)
     def test_add_classification(self, client, ctx):
+        if not self.tags_ok:
+            raise SkipTestError("Classification typedef creation failed (500/503)")
         payload = [{"typeName": self.tag_name}]
-        resp = client.post(
-            f"/entity/guid/{self.entity_guid}/classifications",
-            json_data=payload,
-        )
-        # 404 can happen if type cache hasn't propagated the classification yet
-        assert_status_in(resp, [200, 204, 404])
-        if resp.status_code == 404:
-            ctx.set("classification_add_failed", True)
-            return
+        # Retry on 404 (type cache lag) up to 2 times with 15s backoff
+        for attempt in range(3):
+            resp = client.post(
+                f"/entity/guid/{self.entity_guid}/classifications",
+                json_data=payload,
+            )
+            if resp.status_code in (200, 204):
+                break
+            if resp.status_code == 404 and attempt < 2:
+                time.sleep(15)
+                continue
+            break
+        assert_status_in(resp, [200, 204])
 
         # Read-after-write: GET entity and verify classification present
         resp2 = client.get(f"/entity/guid/{self.entity_guid}")
@@ -98,8 +113,7 @@ class EntityClassificationsSuite:
 
     @test("get_classifications", tags=["classification"], order=2, depends_on=["add_classification"])
     def test_get_classifications(self, client, ctx):
-        if ctx.get("classification_add_failed"):
-            raise SkipTestError("Classification add failed due to type cache lag")
+
         resp = client.get(f"/entity/guid/{self.entity_guid}/classifications")
         assert_status(resp, 200)
         body = resp.json()
@@ -110,8 +124,7 @@ class EntityClassificationsSuite:
 
     @test("get_single_classification", tags=["classification"], order=3, depends_on=["add_classification"])
     def test_get_single_classification(self, client, ctx):
-        if ctx.get("classification_add_failed"):
-            raise SkipTestError("Classification add failed due to type cache lag")
+
         resp = client.get(
             f"/entity/guid/{self.entity_guid}/classification/{self.tag_name}"
         )
@@ -120,8 +133,7 @@ class EntityClassificationsSuite:
 
     @test("update_classification", tags=["classification"], order=4, depends_on=["add_classification"])
     def test_update_classification(self, client, ctx):
-        if ctx.get("classification_add_failed"):
-            raise SkipTestError("Classification add failed due to type cache lag")
+
         payload = [{"typeName": self.tag_name}]
         resp = client.put(
             f"/entity/guid/{self.entity_guid}/classifications",
@@ -141,8 +153,7 @@ class EntityClassificationsSuite:
 
     @test("update_classification_propagation_flags", tags=["classification", "propagation"], order=4.5, depends_on=["add_classification"])
     def test_update_classification_propagation_flags(self, client, ctx):
-        if ctx.get("classification_add_failed"):
-            raise SkipTestError("Classification add failed due to type cache lag")
+
         payload = [{
             "typeName": self.tag_name,
             "propagate": True,
@@ -168,8 +179,7 @@ class EntityClassificationsSuite:
 
     @test("add_classification_audit", tags=["classification", "audit"], order=5, depends_on=["add_classification"])
     def test_add_classification_audit(self, client, ctx):
-        if ctx.get("classification_add_failed"):
-            raise SkipTestError("Classification add failed due to type cache lag")
+
         event = assert_audit_event_exists(client, self.entity_guid, "CLASSIFICATION_ADD")
         if event is None:
             return  # Audit endpoint not available on this environment
@@ -178,8 +188,7 @@ class EntityClassificationsSuite:
           depends_on=["add_classification"])
     def test_classification_add_kafka_cdc(self, client, ctx):
         """AUD-04: Verify Kafka CDC notification for CLASSIFICATION_ADD."""
-        if ctx.get("classification_add_failed"):
-            raise SkipTestError("Classification add failed due to type cache lag")
+
         result = assert_entity_in_kafka(ctx, self.entity_guid, "CLASSIFICATION_ADD")
         # Soft assertion — result is None if Kafka unavailable or not found
 
@@ -351,8 +360,7 @@ class EntityClassificationsSuite:
     @test("classification_in_search_results", tags=["classification", "search"], order=8,
           depends_on=["add_classification"])
     def test_classification_in_search_results(self, client, ctx):
-        if ctx.get("classification_add_failed"):
-            raise SkipTestError("Classification add failed due to type cache lag")
+
 
         time.sleep(ctx.get("es_sync_wait", 5))
 
@@ -397,8 +405,7 @@ class EntityClassificationsSuite:
     @test("classification_propagation_in_search", tags=["classification", "search", "propagation"],
           order=9, depends_on=["classification_propagation"])
     def test_classification_propagation_in_search(self, client, ctx):
-        if ctx.get("classification_add_failed"):
-            raise SkipTestError("Classification add failed due to type cache lag")
+
 
         # Find the downstream entity (guid_b from propagation test)
         # We need to search for propagated classifications on a downstream entity.
@@ -474,8 +481,7 @@ class EntityClassificationsSuite:
 
     @test("delete_classification", tags=["classification"], order=10, depends_on=["add_classification"])
     def test_delete_classification(self, client, ctx):
-        if ctx.get("classification_add_failed"):
-            raise SkipTestError("Classification add failed due to type cache lag")
+
         resp = client.delete(
             f"/entity/guid/{self.entity_guid}/classification/{self.tag_name}"
         )
@@ -493,8 +499,7 @@ class EntityClassificationsSuite:
           depends_on=["delete_classification"])
     def test_classification_delete_kafka_cdc(self, client, ctx):
         """AUD-05: Verify Kafka CDC notification for CLASSIFICATION_DELETE."""
-        if ctx.get("classification_add_failed"):
-            raise SkipTestError("Classification add failed due to type cache lag")
+
         result = assert_entity_in_kafka(ctx, self.entity_guid, "CLASSIFICATION_DELETE")
         # Soft assertion — result is None if Kafka unavailable or not found
 

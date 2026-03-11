@@ -3,6 +3,7 @@
 import json
 import statistics
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -38,6 +39,7 @@ class Reporter:
         self.results: List[TestResult] = []
         self.start_time = time.time()
         self._current_suite = None
+        self._lock = threading.Lock()
 
     def suite_start(self, suite_name, description=""):
         self._current_suite = suite_name
@@ -63,7 +65,19 @@ class Reporter:
         )
 
     def record(self, result: TestResult):
-        self.results.append(result)
+        with self._lock:
+            self.results.append(result)
+        self._print_result(result)
+
+    def replay_results(self, results):
+        """Print previously collected results (for parallel/deferred output)."""
+        for result in results:
+            with self._lock:
+                self.results.append(result)
+            self._print_result(result)
+
+    def _print_result(self, result):
+        """Print a single test result to console."""
         status = result.status
         if status == "PASS":
             icon = f"{_GREEN}PASS{_RESET}"

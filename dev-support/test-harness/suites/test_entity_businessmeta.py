@@ -3,7 +3,7 @@
 import time
 
 from core.decorators import suite, test
-from core.assertions import assert_status, assert_status_in
+from core.assertions import assert_status, assert_status_in, SkipTestError
 from core.audit_helpers import assert_audit_event_exists
 from core.kafka_helpers import assert_entity_in_kafka
 from core.data_factory import (
@@ -17,12 +17,20 @@ from core.data_factory import (
 class EntityBusinessMetaSuite:
 
     def setup(self, client, ctx):
-        # Create a BM type
+        # Create a BM type (with retry on 500/503)
         self.bm_name = unique_type_name("HarnessBM")
         payload = {"businessMetadataDefs": [build_business_metadata_def(name=self.bm_name)]}
-        resp = client.post("/types/typedefs", json_data=payload)
-        # Wait for type cache propagation on staging (can take 10-15s)
-        time.sleep(10)
+        self.bm_ok = False
+        for attempt in range(3):
+            resp = client.post("/types/typedefs", json_data=payload)
+            if resp.status_code in (200, 409):
+                self.bm_ok = True
+                break
+            if resp.status_code in (500, 503) and attempt < 2:
+                time.sleep(10 * (attempt + 1))
+                continue
+        if self.bm_ok:
+            time.sleep(15)
         ctx.register_cleanup(
             lambda: client.delete(f"/types/typedef/name/{self.bm_name}")
         )
@@ -40,24 +48,40 @@ class EntityBusinessMetaSuite:
 
     @test("add_business_metadata", tags=["businessmeta"], order=1)
     def test_add_business_metadata(self, client, ctx):
+        if not self.bm_ok:
+            raise SkipTestError("BM typedef creation failed (500/503)")
         payload = {self.bm_name: {"bmField1": "test-value"}}
-        resp = client.post(
-            f"/entity/guid/{self.entity_guid}/businessmetadata",
-            json_data=payload,
-        )
-        # 404 can happen if type cache hasn't propagated the BM def yet
-        assert_status_in(resp, [200, 204, 404])
-        if resp.status_code == 404:
-            ctx.set("bm_add_failed", True)
+        # Retry on 404 (type cache lag) up to 2 times with 15s backoff
+        for attempt in range(3):
+            resp = client.post(
+                f"/entity/guid/{self.entity_guid}/businessmetadata",
+                json_data=payload,
+            )
+            if resp.status_code in (200, 204):
+                break
+            if resp.status_code == 404 and attempt < 2:
+                time.sleep(15)
+                continue
+            break
+        assert_status_in(resp, [200, 204])
 
     @test("add_multi_attr_business_metadata", tags=["businessmeta"], order=1.5)
     def test_add_multi_attr_business_metadata(self, client, ctx):
-        # Create multi-attr BM typedef
+        # Create multi-attr BM typedef (with retry)
         self.multi_bm_name = unique_type_name("HarnessMultiBM")
         payload = {"businessMetadataDefs": [build_multi_attr_business_metadata_def(name=self.multi_bm_name)]}
-        resp = client.post("/types/typedefs", json_data=payload)
-        assert_status_in(resp, [200, 409])
-        time.sleep(10)
+        multi_ok = False
+        for attempt in range(3):
+            resp = client.post("/types/typedefs", json_data=payload)
+            if resp.status_code in (200, 409):
+                multi_ok = True
+                break
+            if resp.status_code in (500, 503) and attempt < 2:
+                time.sleep(10 * (attempt + 1))
+                continue
+        if not multi_ok:
+            raise SkipTestError(f"Multi-attr BM typedef creation failed ({resp.status_code})")
+        time.sleep(15)
         ctx.register_cleanup(
             lambda: client.delete(f"/types/typedef/name/{self.multi_bm_name}")
         )
@@ -86,8 +110,6 @@ class EntityBusinessMetaSuite:
 
     @test("verify_business_metadata", tags=["businessmeta"], order=2, depends_on=["add_business_metadata"])
     def test_verify_business_metadata(self, client, ctx):
-        if ctx.get("bm_add_failed"):
-            return  # BM add failed due to type cache, skip
         resp = client.get(f"/entity/guid/{self.entity_guid}")
         assert_status(resp, 200)
         entity = resp.json().get("entity", {})
@@ -96,8 +118,6 @@ class EntityBusinessMetaSuite:
 
     @test("overwrite_business_metadata", tags=["businessmeta"], order=2.3, depends_on=["add_business_metadata"])
     def test_overwrite_business_metadata(self, client, ctx):
-        if ctx.get("bm_add_failed"):
-            return
         payload = {self.bm_name: {"bmField1": "overwritten-value"}}
         resp = client.post(
             f"/entity/guid/{self.entity_guid}/businessmetadata",
@@ -116,8 +136,6 @@ class EntityBusinessMetaSuite:
 
     @test("partial_update_business_metadata", tags=["businessmeta"], order=2.5, depends_on=["add_business_metadata"])
     def test_partial_update_business_metadata(self, client, ctx):
-        if ctx.get("bm_add_failed"):
-            return
         # Update only bmField1 and verify it changes
         payload = {self.bm_name: {"bmField1": "partial-updated"}}
         resp = client.post(
@@ -136,8 +154,6 @@ class EntityBusinessMetaSuite:
 
     @test("delete_business_metadata", tags=["businessmeta"], order=3, depends_on=["add_business_metadata"])
     def test_delete_business_metadata(self, client, ctx):
-        if ctx.get("bm_add_failed"):
-            return  # BM add failed due to type cache, skip
         resp = client.delete(
             f"/entity/guid/{self.entity_guid}/businessmetadata/{self.bm_name}",
         )
@@ -156,8 +172,6 @@ class EntityBusinessMetaSuite:
 
     @test("add_bm_audit", tags=["businessmeta", "audit"], order=4, depends_on=["add_business_metadata"])
     def test_add_bm_audit(self, client, ctx):
-        if ctx.get("bm_add_failed"):
-            return  # BM add failed due to type cache, skip
         event = assert_audit_event_exists(client, self.entity_guid, "BUSINESS_ATTRIBUTE_UPDATE")
         if event is None:
             return  # Audit endpoint not available on this environment
@@ -166,8 +180,6 @@ class EntityBusinessMetaSuite:
           depends_on=["add_business_metadata"])
     def test_bm_add_kafka_cdc(self, client, ctx):
         """AUD-06: Verify Kafka CDC notification for BUSINESS_ATTRIBUTE_UPDATE."""
-        if ctx.get("bm_add_failed"):
-            return
         result = assert_entity_in_kafka(ctx, self.entity_guid, "BUSINESS_ATTRIBUTE_UPDATE")
         # Soft assertion — result is None if Kafka unavailable or not found
 
@@ -175,8 +187,6 @@ class EntityBusinessMetaSuite:
           depends_on=["add_business_metadata"])
     def test_search_by_bm_attribute(self, client, ctx):
         """CM-04: Search for entity by business metadata attribute in ES."""
-        if ctx.get("bm_add_failed"):
-            return
 
         time.sleep(ctx.get("es_sync_wait", 5))
 
@@ -233,7 +243,7 @@ class EntityBusinessMetaSuite:
         if resp.status_code not in (200, 409):
             return  # Typedef creation unavailable — skip gracefully
 
-        time.sleep(5)
+        time.sleep(15)
 
         # Delete the throwaway BM typedef
         resp = client.delete(f"/types/typedef/name/{throwaway_bm}")

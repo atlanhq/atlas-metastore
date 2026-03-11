@@ -27,13 +27,17 @@ class LineageSuite:
         })
         assert_status_in(resp, [200, 404])
         if resp.status_code == 200:
-            assert_field_present(resp, "baseEntityGuid")
-            assert_field_equals(resp, "baseEntityGuid", guid)
-            # Verify structural fields exist
             body = resp.json()
+            assert_field_equals(resp, "baseEntityGuid", guid)
             assert "guidEntityMap" in body or "relations" in body, (
                 "Expected 'guidEntityMap' or 'relations' in lineage response"
             )
+            # baseEntityGuid should be in the guidEntityMap
+            guid_map = body.get("guidEntityMap", {})
+            if guid_map:
+                assert guid in guid_map, (
+                    f"baseEntityGuid {guid} should be in guidEntityMap, got: {list(guid_map.keys())[:5]}"
+                )
 
     @test("get_lineage_input", tags=["lineage"], order=2)
     def test_get_lineage_input(self, client, ctx):
@@ -46,12 +50,20 @@ class LineageSuite:
         })
         assert_status_in(resp, [200, 404])
         if resp.status_code == 200:
-            assert_field_present(resp, "baseEntityGuid")
-            assert_field_equals(resp, "baseEntityGuid", guid)
             body = resp.json()
-            assert "guidEntityMap" in body or "relations" in body, (
-                "Expected 'guidEntityMap' or 'relations' in lineage response"
-            )
+            assert_field_equals(resp, "baseEntityGuid", guid)
+            guid_map = body.get("guidEntityMap", {})
+            if guid_map:
+                assert guid in guid_map, (
+                    f"baseEntityGuid {guid} should be in guidEntityMap"
+                )
+            # INPUT direction: relations should reference fromEntityId pointing to base
+            relations = body.get("relations", [])
+            if relations:
+                for rel in relations:
+                    assert "fromEntityId" in rel and "toEntityId" in rel, (
+                        f"Relation missing fromEntityId/toEntityId: {list(rel.keys())}"
+                    )
 
     @test("get_lineage_output", tags=["lineage"], order=3)
     def test_get_lineage_output(self, client, ctx):
@@ -64,12 +76,19 @@ class LineageSuite:
         })
         assert_status_in(resp, [200, 404])
         if resp.status_code == 200:
-            assert_field_present(resp, "baseEntityGuid")
-            assert_field_equals(resp, "baseEntityGuid", guid)
             body = resp.json()
-            assert "guidEntityMap" in body or "relations" in body, (
-                "Expected 'guidEntityMap' or 'relations' in lineage response"
-            )
+            assert_field_equals(resp, "baseEntityGuid", guid)
+            guid_map = body.get("guidEntityMap", {})
+            if guid_map:
+                assert guid in guid_map, (
+                    f"baseEntityGuid {guid} should be in guidEntityMap"
+                )
+            relations = body.get("relations", [])
+            if relations:
+                for rel in relations:
+                    assert "fromEntityId" in rel and "toEntityId" in rel, (
+                        f"Relation missing fromEntityId/toEntityId: {list(rel.keys())}"
+                    )
 
     @test("post_lineage_on_demand", tags=["lineage"], order=4)
     def test_post_lineage_on_demand(self, client, ctx):
@@ -86,8 +105,12 @@ class LineageSuite:
         if resp.status_code == 200:
             body = resp.json()
             assert "baseEntityGuid" in body, "Expected 'baseEntityGuid' in on-demand lineage response"
-            assert "guidEntityMap" in body or "relations" in body, (
-                "Expected 'guidEntityMap' or 'relations' in on-demand lineage response"
+            assert body["baseEntityGuid"] == guid, (
+                f"Expected baseEntityGuid={guid}, got {body['baseEntityGuid']}"
+            )
+            # On-demand should have guidEntityMap or searchParameters
+            assert "guidEntityMap" in body or "relations" in body or "searchParameters" in body, (
+                f"On-demand lineage missing expected fields, got keys: {list(body.keys())}"
             )
 
     @test("post_lineage_list", tags=["lineage"], order=5)
@@ -107,6 +130,15 @@ class LineageSuite:
             assert isinstance(body, (dict, list)), (
                 f"Expected dict or list response from lineage list, got {type(body).__name__}"
             )
+            # If dict, should have entities or searchResult
+            if isinstance(body, dict):
+                has_data = any(k in body for k in (
+                    "entities", "searchResult", "searchParameters",
+                    "hasMoreUpstreamVertices", "hasMoreDownstreamVertices",
+                ))
+                assert has_data, (
+                    f"Lineage list response missing expected fields, got keys: {list(body.keys())}"
+                )
 
     @test("lineage_isolated_entity", tags=["lineage"], order=6)
     def test_lineage_isolated_entity(self, client, ctx):
@@ -133,6 +165,12 @@ class LineageSuite:
             assert len(relations) == 0, (
                 f"Expected no lineage relations for isolated entity, got {len(relations)}"
             )
+            # guidEntityMap should only contain the base entity itself
+            guid_map = body2.get("guidEntityMap", {})
+            if guid_map:
+                assert len(guid_map) <= 1, (
+                    f"Isolated entity should have at most 1 entry in guidEntityMap, got {len(guid_map)}"
+                )
 
     @test("lineage_depth_limited", tags=["lineage"], order=7)
     def test_lineage_depth_limited(self, client, ctx):
@@ -145,12 +183,14 @@ class LineageSuite:
         })
         assert_status_in(resp, [200, 404])
         if resp.status_code == 200:
-            assert_field_present(resp, "baseEntityGuid")
-            assert_field_equals(resp, "baseEntityGuid", guid)
             body = resp.json()
-            assert body.get("lineageDepth", 1) <= 1 or "relations" in body or "guidEntityMap" in body, (
-                "Expected lineage response with depth=1"
-            )
+            assert_field_equals(resp, "baseEntityGuid", guid)
+            # With depth=1, lineageDepth should be <= 1
+            reported_depth = body.get("lineageDepth", -1)
+            if reported_depth >= 0:
+                assert reported_depth <= 1, (
+                    f"Expected lineageDepth <= 1, got {reported_depth}"
+                )
 
     @test("lineage_hide_process", tags=["lineage"], order=8)
     def test_lineage_hide_process(self, client, ctx):

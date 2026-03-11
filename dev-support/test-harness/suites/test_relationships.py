@@ -1,11 +1,26 @@
 """Relationship CRUD tests."""
 
+import time
+
 from core.decorators import suite, test
 from core.assertions import (
     assert_status, assert_status_in, assert_field_present,
     assert_field_equals,
 )
 from core.data_factory import build_dataset_entity, build_relationship_def, unique_qn, unique_name, unique_type_name
+
+
+def _create_typedef_with_retry(client, payload, max_retries=2, backoff=10):
+    """POST /types/typedefs with retry on 500/503 (transient staging errors)."""
+    for attempt in range(max_retries + 1):
+        resp = client.post("/types/typedefs", json_data=payload)
+        if resp.status_code in (200, 409):
+            return resp
+        if resp.status_code in (500, 503) and attempt < max_retries:
+            time.sleep(backoff * (attempt + 1))
+            continue
+        return resp
+    return resp
 
 
 @suite("relationships", depends_on_suites=["entity_crud"],
@@ -109,7 +124,7 @@ class RelationshipsSuite:
         # Create a custom relationship def first
         rel_def_name = unique_type_name("TestRelDef")
         payload = {"relationshipDefs": [build_relationship_def(name=rel_def_name)]}
-        resp = client.post("/types/typedefs", json_data=payload)
+        resp = _create_typedef_with_retry(client, payload)
         assert_status_in(resp, [200, 409])
         if resp.status_code == 200:
             ctx.register_cleanup(
@@ -117,8 +132,7 @@ class RelationshipsSuite:
             )
             ctx.set("direct_rel_def_name", rel_def_name)
 
-            import time
-            time.sleep(5)
+            time.sleep(15)
 
             # Create relationship instance
             rel_payload = {
