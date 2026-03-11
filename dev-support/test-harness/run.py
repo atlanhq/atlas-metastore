@@ -84,7 +84,8 @@ def main():
         ctx.set("kafka_verifier", kafka)
 
     # Reporter
-    reporter = Reporter(verbose=config.verbose, output_file=config.output_file)
+    reporter = Reporter(verbose=config.verbose, output_file=config.output_file,
+                        tenant=config.tenant)
 
     # Signal handler for graceful cleanup
     def handle_signal(signum, frame):

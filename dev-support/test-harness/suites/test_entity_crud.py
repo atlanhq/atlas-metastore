@@ -6,7 +6,7 @@ from core.decorators import suite, test
 from core.assertions import (
     assert_status, assert_status_in, assert_field_present,
     assert_field_equals, assert_field_not_empty, assert_field_in,
-    assert_mutation_response,
+    assert_mutation_response, SkipTestError,
 )
 from core.audit_helpers import assert_audit_event_exists
 from core.search_helpers import assert_entity_in_search
@@ -85,15 +85,16 @@ class EntityCrudSuite:
         if not guid:
             raise Exception("No ds1 entity registered")
         event = assert_audit_event_exists(client, guid, "ENTITY_CREATE")
-        if event is None:
-            return  # Audit endpoint not available on this environment
+        assert event is not None, (
+            f"Expected ENTITY_CREATE audit event for {guid} — audit endpoint may not be available"
+        )
 
     @test("create_entity_with_custom_type", tags=["crud"], order=7, depends_on=["create_entity"])
     def test_create_entity_with_custom_type(self, client, ctx):
         # Use custom entity type created in typedefs suite
         custom_type = ctx.get("test_entity_type_name")
         if not custom_type:
-            return  # Custom type not available (typedefs suite may not have run)
+            raise SkipTestError("Custom type not available — typedefs suite may not have run")
         qn = unique_qn("custom-type")
         entity = build_dataset_entity(qn=qn, name=unique_name("custom"), type_name=custom_type)
         resp = client.post("/entity", json_data={"entity": entity})
@@ -113,18 +114,11 @@ class EntityCrudSuite:
 
     @test("create_entity_in_search", tags=["crud", "search"], order=6, depends_on=["create_entity"])
     def test_create_entity_in_search(self, client, ctx):
-        try:
-            result = assert_entity_in_search(client, self.ds1_qn)
-            if result is None:
-                return  # Search endpoint not available
-        except AssertionError:
-            # ES indexing lag on staging can exceed 120s — warn but don't block
-            print(
-                f"         \033[93m[WARN] ES sync timeout for {self.ds1_qn} — "
-                f"staging Kafka→ES pipeline may be slow\033[0m",
-                flush=True,
-            )
-            return
+        result = assert_entity_in_search(client, self.ds1_qn)
+        assert result is not None, (
+            f"Entity {self.ds1_qn} not found in search — "
+            f"search endpoint may be unavailable or ES sync timed out"
+        )
 
     @test("create_entity_bulk", tags=["crud"], order=2)
     def test_create_entity_bulk(self, client, ctx):
@@ -358,8 +352,9 @@ class EntityCrudSuite:
         if not guid:
             raise Exception("No ds1 entity registered")
         event = assert_audit_event_exists(client, guid, "ENTITY_UPDATE")
-        if event is None:
-            return  # Audit endpoint not available on this environment
+        assert event is not None, (
+            f"Expected ENTITY_UPDATE audit event for {guid} — audit endpoint may not be available"
+        )
 
     # ---- DELETE ----
 
@@ -529,7 +524,7 @@ class EntityCrudSuite:
         resp = client.post("/entity/restore/bulk", params={"guid": guid})
         assert_status_in(resp, [200, 204, 404])
         if resp.status_code == 404:
-            return  # Restore endpoint not available
+            raise SkipTestError("Restore endpoint returned 404 — not available on this environment")
 
         # Verify restored
         resp = client.get(f"/entity/guid/{guid}")

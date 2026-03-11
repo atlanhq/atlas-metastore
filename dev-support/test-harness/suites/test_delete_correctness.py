@@ -11,7 +11,7 @@ import time
 
 from core.decorators import suite, test
 from core.assertions import (
-    assert_status, assert_status_in, assert_field_equals,
+    assert_status, assert_status_in, assert_field_equals, SkipTestError,
 )
 from core.data_factory import (
     build_dataset_entity, build_classification_def, build_process_entity,
@@ -19,14 +19,19 @@ from core.data_factory import (
 )
 
 
-def _index_search(client, dsl):
-    """Issue an indexsearch query and return (available, body)."""
-    resp = client.post("/search/indexsearch", json_data={"dsl": dsl})
-    if resp.status_code in (404, 400, 405):
+def _index_search(client, dsl, retries=2, interval=3):
+    """Issue an indexsearch query and return (available, body). Retries on 500/503."""
+    for attempt in range(retries + 1):
+        resp = client.post("/search/indexsearch", json_data={"dsl": dsl})
+        if resp.status_code in (404, 400, 405):
+            return False, {}
+        if resp.status_code == 200:
+            return True, resp.json()
+        if resp.status_code in (500, 503) and attempt < retries:
+            time.sleep(interval)
+            continue
         return False, {}
-    if resp.status_code != 200:
-        return False, {}
-    return True, resp.json()
+    return False, {}
 
 
 def _create_entity(client, ctx, suffix):
@@ -125,7 +130,7 @@ class DeleteCorrectnessSuite:
           depends_on=["pre_delete_entities_exist"])
     def test_pre_delete_classifications_attached(self, client, ctx):
         if not self.tag_add_ok:
-            return
+            raise SkipTestError("Classification add failed in setup — type cache may not have propagated")
 
         resp = client.get(f"/entity/guid/{self.src_guid}/classifications")
         assert_status(resp, 200)
@@ -140,7 +145,7 @@ class DeleteCorrectnessSuite:
           depends_on=["pre_delete_entities_exist"])
     def test_pre_delete_lineage_exists(self, client, ctx):
         if not self.lineage_ok:
-            return  # Process creation didn't work (staging may reject)
+            raise SkipTestError("Process creation didn't work — staging may reject Process without connectionQN")
 
         resp = client.get(f"/lineage/{self.src_guid}", params={"depth": 1})
         assert_status_in(resp, [200, 404])
@@ -157,11 +162,11 @@ class DeleteCorrectnessSuite:
     def test_pre_delete_in_search(self, client, ctx):
         # Poll for entities to appear in search (ES sync can be slow on staging)
         # Try multiple QN field names to handle ES mapping differences
-        import time as _time
         qn_fields = ("qualifiedName.keyword", "qualifiedName", "__qualifiedName")
-        deadline = _time.time() + 120
+        deadline = time.time() + 120
         count = 0
-        while _time.time() < deadline:
+        available = False
+        while time.time() < deadline:
             for qn_field in qn_fields:
                 available, body = _index_search(client, {
                     "from": 0, "size": 10,
@@ -175,10 +180,10 @@ class DeleteCorrectnessSuite:
                     continue
                 count = body.get("approximateCount", 0)
                 if count >= 2:
-                    return  # Found
+                    return  # Found both entities
             if not available:
-                return
-            _time.sleep(5)
+                raise SkipTestError("Search endpoint not available (404/400/405)")
+            time.sleep(5)
 
         assert count >= 2, (
             f"Expected at least 2 del- entities in search, got count={count}"
@@ -221,12 +226,12 @@ class DeleteCorrectnessSuite:
           depends_on=["delete_entities"])
     def test_post_delete_classifications_gone(self, client, ctx):
         if not self.tag_add_ok:
-            return
+            raise SkipTestError("Classification add failed in setup — type cache may not have propagated")
 
         resp = client.get(f"/entity/guid/{self.src_guid}/classifications")
         # After delete: either 404 (entity gone) or 200 with entity status DELETED
         if resp.status_code == 404:
-            return  # Entity is hard-deleted or classifications endpoint returns 404
+            return  # Entity is hard-deleted — classifications no longer accessible (valid)
         if resp.status_code == 200:
             # Entity still accessible but DELETED — check entity status
             entity_resp = client.get(f"/entity/guid/{self.src_guid}")
@@ -242,20 +247,26 @@ class DeleteCorrectnessSuite:
         es_wait = ctx.get("es_sync_wait", 5)
         time.sleep(max(es_wait, 5))
 
-        # Verify src is excluded from ACTIVE search
-        available, body = _index_search(client, {
-            "from": 0, "size": 5,
-            "query": {"bool": {"must": [
-                {"term": {"__guid": self.src_guid}},
-                {"term": {"__state": "ACTIVE"}},
-            ]}}
-        })
-        if not available:
-            return
+        # Poll until src is excluded from ACTIVE search (up to 30s)
+        for i in range(6):
+            available, body = _index_search(client, {
+                "from": 0, "size": 5,
+                "query": {"bool": {"must": [
+                    {"term": {"__guid": self.src_guid}},
+                    {"term": {"__state": "ACTIVE"}},
+                ]}}
+            })
+            if not available:
+                raise SkipTestError("Search endpoint not available")
+            count = body.get("approximateCount", 0)
+            if count == 0:
+                break
+            if i < 5:
+                time.sleep(5)
+                print(f"  [del-search] Waiting for src to clear from ACTIVE search ({(i+1)*5}s/30s)")
 
-        count = body.get("approximateCount", 0)
         assert count == 0, (
-            f"Deleted src entity {self.src_guid} still in ACTIVE search, count={count}"
+            f"Deleted src entity {self.src_guid} still in ACTIVE search after 30s, count={count}"
         )
 
         # Verify tgt is excluded from ACTIVE search

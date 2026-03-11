@@ -33,9 +33,10 @@ class TestResult:
 class Reporter:
     """Collects test results and produces console + JSON output."""
 
-    def __init__(self, verbose=False, output_file=None):
+    def __init__(self, verbose=False, output_file=None, tenant=None):
         self.verbose = verbose
         self.output_file = output_file
+        self.tenant = tenant
         self.results: List[TestResult] = []
         self.start_time = time.time()
         self._current_suite = None
@@ -107,6 +108,8 @@ class Reporter:
         print(f"\n{'=' * 60}")
         color = _GREEN if failed == 0 and errors == 0 else _RED
         print(f"{_BOLD}TEST SUMMARY{_RESET}")
+        if self.tenant:
+            print(f"  Tenant:  {self.tenant}")
         print(f"  Total:   {total}")
         print(f"  {_GREEN}Passed:  {passed}{_RESET}")
         if failed:
@@ -120,7 +123,8 @@ class Reporter:
         # List failures
         failures = [r for r in self.results if r.status in ("FAIL", "ERROR")]
         if failures:
-            print(f"\n{_RED}{_BOLD}Failures:{_RESET}")
+            tenant_label = f" [{self.tenant}]" if self.tenant else ""
+            print(f"\n{_RED}{_BOLD}Failures{tenant_label}:{_RESET}")
             for r in failures:
                 print(f"  - {r.suite}::{r.test_name}: {r.error_message[:120]}")
 

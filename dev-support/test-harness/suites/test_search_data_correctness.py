@@ -11,7 +11,7 @@ verifies that the returned **values** match what was written.
 import time
 
 from core.decorators import suite, test
-from core.assertions import assert_status, assert_status_in
+from core.assertions import assert_status, assert_status_in, SkipTestError
 from core.data_factory import (
     build_dataset_entity, build_classification_def, build_business_metadata_def,
     unique_name, unique_qn, unique_type_name, PREFIX,
@@ -22,14 +22,19 @@ from core.data_factory import (
 QN_FIELDS = ("qualifiedName.keyword", "qualifiedName", "__qualifiedName")
 
 
-def _index_search(client, dsl):
-    """Issue an indexsearch query and return (available, body)."""
-    resp = client.post("/search/indexsearch", json_data={"dsl": dsl})
-    if resp.status_code in (404, 400, 405):
+def _index_search(client, dsl, retries=2, interval=3):
+    """Issue an indexsearch query and return (available, body). Retries on 500/503."""
+    for attempt in range(retries + 1):
+        resp = client.post("/search/indexsearch", json_data={"dsl": dsl})
+        if resp.status_code in (404, 400, 405):
+            return False, {}
+        if resp.status_code == 200:
+            return True, resp.json()
+        if resp.status_code in (500, 503) and attempt < retries:
+            time.sleep(interval)
+            continue
         return False, {}
-    if resp.status_code != 200:
-        return False, {}
-    return True, resp.json()
+    return False, {}
 
 
 def _search_by_guid(client, guid):
@@ -41,6 +46,21 @@ def _search_by_guid(client, guid):
             {"term": {"__state": "ACTIVE"}},
         ]}}
     })
+
+
+def _poll_get_entity(client, guid, max_wait=30, interval=5, label="search"):
+    """Poll ES until entity appears by GUID. Returns (available, entity_or_None)."""
+    for i in range(max_wait // interval):
+        if i > 0:
+            time.sleep(interval)
+        available, body = _search_by_guid(client, guid)
+        if not available:
+            return False, None
+        entities = body.get("entities", [])
+        if entities:
+            return True, entities[0]
+        print(f"  [{label}] Polling ES for {guid} ({(i+1)*interval}s/{max_wait}s)")
+    return True, None
 
 
 def _search_by_qn(client, qn):
@@ -57,17 +77,6 @@ def _search_by_qn(client, qn):
         if available and body.get("approximateCount", 0) > 0:
             return True, body
     return available, body
-
-
-def _get_entity(client, guid):
-    """Search by GUID and return (available, entity_dict_or_None)."""
-    available, body = _search_by_guid(client, guid)
-    if not available:
-        return False, None
-    entities = body.get("entities", [])
-    if not entities:
-        return True, None
-    return True, entities[0]
 
 
 def _attr(entity, name):
@@ -134,24 +143,34 @@ class SearchDataCorrectnessSuite:
         self.guid_a = entities[0]["guid"]
         ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{self.guid_a}"))
 
-        # Add classification to Entity A
+        # Add classification to Entity A (with retry)
         self.tag_added = False
         if self.tag_ok:
-            tag_resp = client.post(
-                f"/entity/guid/{self.guid_a}/classifications",
-                json_data=[{"typeName": self.tag_name}],
-            )
-            self.tag_added = tag_resp.status_code in (200, 204)
+            for attempt in range(3):
+                tag_resp = client.post(
+                    f"/entity/guid/{self.guid_a}/classifications",
+                    json_data=[{"typeName": self.tag_name}],
+                )
+                if tag_resp.status_code in (200, 204):
+                    self.tag_added = True
+                    break
+                if attempt < 2:
+                    time.sleep(10)
 
-        # Set BM on Entity A
+        # Set BM on Entity A (with retry)
         self.bm_value = "dcor-bm-val"
         self.bm_set = False
         if self.bm_ok:
-            bm_resp = client.post(
-                f"/entity/guid/{self.guid_a}/businessmetadata",
-                json_data={self.bm_name: {"bmField1": self.bm_value}},
-            )
-            self.bm_set = bm_resp.status_code in (200, 204)
+            for attempt in range(3):
+                bm_resp = client.post(
+                    f"/entity/guid/{self.guid_a}/businessmetadata",
+                    json_data={self.bm_name: {"bmField1": self.bm_value}},
+                )
+                if bm_resp.status_code in (200, 204):
+                    self.bm_set = True
+                    break
+                if attempt < 2:
+                    time.sleep(10)
 
         # --- Glossary + Term assigned to Entity A ---
         self.glossary_ok = False
@@ -199,11 +218,10 @@ class SearchDataCorrectnessSuite:
           tags=["search", "data_correctness"], order=1)
     def test_guid_lookup(self, client, ctx):
         """Search by GUID — verify name, QN, typeName, status match created values."""
-        available, entity = _get_entity(client, self.guid_a)
-        if not available:
-            return
+        available, entity = _poll_get_entity(client, self.guid_a, max_wait=30, label="guid-lookup")
+        assert available, "Search endpoint not available (404/400/405)"
         assert entity is not None, (
-            f"Entity {self.guid_a} not found in search"
+            f"Entity {self.guid_a} not found in search after 30s polling"
         )
 
         assert entity.get("guid") == self.guid_a, (
@@ -231,12 +249,19 @@ class SearchDataCorrectnessSuite:
           tags=["search", "data_correctness"], order=2)
     def test_qn_lookup(self, client, ctx):
         """Search by qualifiedName — verify GUID and name match."""
-        available, body = _search_by_qn(client, self.created_qn)
-        if not available:
-            return
+        # Poll until QN lookup returns results
+        available, body = False, {}
+        for i in range(6):
+            if i > 0:
+                time.sleep(5)
+            available, body = _search_by_qn(client, self.created_qn)
+            if available and body.get("approximateCount", 0) > 0:
+                break
+            print(f"  [qn-lookup] Polling ES ({(i+1)*5}s/30s)")
+        assert available, "Search endpoint not available"
         count = body.get("approximateCount", 0)
         assert count > 0, (
-            f"Entity not found when searching by QN {self.created_qn}"
+            f"Entity not found when searching by QN {self.created_qn} after 30s polling"
         )
         entity = body["entities"][0]
         assert entity.get("guid") == self.guid_a, (
@@ -252,9 +277,9 @@ class SearchDataCorrectnessSuite:
           tags=["search", "data_correctness"], order=3)
     def test_description(self, client, ctx):
         """Verify description value in search matches what was written."""
-        available, entity = _get_entity(client, self.guid_a)
-        if not available or entity is None:
-            return
+        available, entity = _poll_get_entity(client, self.guid_a, max_wait=30, label="desc")
+        assert available, "Search endpoint not available"
+        assert entity is not None, f"Entity {self.guid_a} not found in search after 30s"
         actual = _attr(entity, "description")
         if actual is not None:  # field may not be in ES mapping on all envs
             assert actual == self.created_desc, (
@@ -265,9 +290,9 @@ class SearchDataCorrectnessSuite:
           tags=["search", "data_correctness"], order=4)
     def test_certificate(self, client, ctx):
         """Verify certificateStatus value in search matches what was written."""
-        available, entity = _get_entity(client, self.guid_a)
-        if not available or entity is None:
-            return
+        available, entity = _poll_get_entity(client, self.guid_a, max_wait=30, label="cert")
+        assert available, "Search endpoint not available"
+        assert entity is not None, f"Entity {self.guid_a} not found in search after 30s"
         actual = _attr(entity, "certificateStatus")
         if actual is not None:
             assert actual == self.created_cert, (
@@ -279,12 +304,12 @@ class SearchDataCorrectnessSuite:
           tags=["search", "data_correctness"], order=5)
     def test_labels(self, client, ctx):
         """Verify every created label appears in the search result."""
-        available, entity = _get_entity(client, self.guid_a)
-        if not available or entity is None:
-            return
+        available, entity = _poll_get_entity(client, self.guid_a, max_wait=30, label="labels")
+        assert available, "Search endpoint not available"
+        assert entity is not None, f"Entity {self.guid_a} not found in search after 30s"
         actual = entity.get("labels", [])
         if not actual:
-            return  # labels not returned on this environment
+            raise SkipTestError("Labels not returned in search results on this environment")
         for lbl in self.created_labels:
             assert lbl in actual, (
                 f"Label {lbl!r} not in search labels: {actual}"
@@ -295,10 +320,10 @@ class SearchDataCorrectnessSuite:
     def test_classifications(self, client, ctx):
         """Verify classificationNames and classification objects are correct."""
         if not self.tag_added:
-            return
-        available, entity = _get_entity(client, self.guid_a)
-        if not available or entity is None:
-            return
+            raise SkipTestError("Classification not added to Entity A in setup")
+        available, entity = _poll_get_entity(client, self.guid_a, max_wait=30, label="cls")
+        assert available, "Search endpoint not available"
+        assert entity is not None, f"Entity {self.guid_a} not found in search after 30s"
 
         # classificationNames list
         cn = entity.get("classificationNames", [])
@@ -322,10 +347,10 @@ class SearchDataCorrectnessSuite:
     def test_bm(self, client, ctx):
         """Verify business metadata value in search matches what was set."""
         if not self.bm_set:
-            return
-        available, entity = _get_entity(client, self.guid_a)
-        if not available or entity is None:
-            return
+            raise SkipTestError("BM not set on Entity A in setup")
+        available, entity = _poll_get_entity(client, self.guid_a, max_wait=30, label="bm")
+        assert available, "Search endpoint not available"
+        assert entity is not None, f"Entity {self.guid_a} not found in search after 30s"
         bm = entity.get("businessAttributes", {}).get(self.bm_name, {})
         if bm:  # BM may not appear in all ES mappings
             assert bm.get("bmField1") == self.bm_value, (
@@ -337,10 +362,23 @@ class SearchDataCorrectnessSuite:
     def test_meanings(self, client, ctx):
         """Verify meanings contains the assigned term with correct termGuid."""
         if not self.glossary_ok:
-            return
-        available, entity = _get_entity(client, self.guid_a)
-        if not available or entity is None:
-            return
+            raise SkipTestError("Glossary/term not set up in setup")
+
+        # Poll until entity appears with meanings
+        entity = None
+        for i in range(6):
+            if i > 0:
+                time.sleep(5)
+            available, entity = _poll_get_entity(client, self.guid_a, max_wait=5, interval=5, label="meanings")
+            if not available:
+                raise SkipTestError("Search endpoint not available")
+            if entity:
+                meanings = entity.get("meanings", [])
+                if meanings:
+                    break
+            print(f"  [meanings] Polling for meanings on {self.guid_a} ({(i+1)*5}s/30s)")
+
+        assert entity is not None, f"Entity {self.guid_a} not found in search after 30s"
 
         # Primary: meanings objects with termGuid
         meanings = entity.get("meanings", [])
@@ -363,16 +401,21 @@ class SearchDataCorrectnessSuite:
           tags=["search", "data_correctness"], order=9)
     def test_fulltext_name(self, client, ctx):
         """Basic search with query=name finds the entity."""
-        resp = client.post("/search/basic", json_data={
-            "typeName": "DataSet",
-            "excludeDeletedEntities": True,
-            "limit": 10,
-            "query": self.created_name,
-        })
-        if resp.status_code in (400, 404, 405):
-            return
-        if resp.status_code != 200:
-            return
+        # Retry basic search
+        for attempt in range(3):
+            resp = client.post("/search/basic", json_data={
+                "typeName": "DataSet",
+                "excludeDeletedEntities": True,
+                "limit": 10,
+                "query": self.created_name,
+            })
+            if resp.status_code in (400, 404, 405):
+                raise SkipTestError(f"Basic search endpoint returned {resp.status_code}")
+            if resp.status_code == 200:
+                break
+            if attempt < 2:
+                time.sleep(5)
+        assert_status(resp, 200)
         body = resp.json()
         entities = body.get("entities", [])
         guids = [e.get("guid") for e in entities]
@@ -386,8 +429,9 @@ class SearchDataCorrectnessSuite:
     def test_combined_search(self, client, ctx):
         """Combined typeName + classification + QN-wildcard returns correct entity."""
         if not self.tag_added:
-            return
+            raise SkipTestError("Classification not added to Entity A in setup")
         found = False
+        body = {}
         for qn_field in QN_FIELDS:
             available, body = _index_search(client, {
                 "from": 0, "size": 10,
@@ -401,8 +445,10 @@ class SearchDataCorrectnessSuite:
             if available and body.get("approximateCount", 0) > 0:
                 found = True
                 break
-        if not found:
-            return
+        assert found, (
+            f"Combined search (type + classification + QN wildcard) returned 0 results "
+            f"for entity {self.guid_a}"
+        )
 
         guids = [e.get("guid") for e in body.get("entities", [])]
         assert self.guid_a in guids, (
@@ -449,9 +495,9 @@ class SearchDataCorrectnessSuite:
           depends_on=["batch_update_entity_attributes"])
     def test_updated_name(self, client, ctx):
         """Verify search returns the new name after update."""
-        available, entity = _get_entity(client, self.guid_a)
-        if not available or entity is None:
-            return
+        available, entity = _poll_get_entity(client, self.guid_a, max_wait=30, label="upd-name")
+        assert available, "Search endpoint not available"
+        assert entity is not None, f"Entity {self.guid_a} not found in search after 30s"
         actual = _attr(entity, "name")
         assert actual == self.updated_name, (
             f"Updated name not reflected in search: "
@@ -463,9 +509,9 @@ class SearchDataCorrectnessSuite:
           depends_on=["batch_update_entity_attributes"])
     def test_updated_desc(self, client, ctx):
         """Verify search returns the new description after update."""
-        available, entity = _get_entity(client, self.guid_a)
-        if not available or entity is None:
-            return
+        available, entity = _poll_get_entity(client, self.guid_a, max_wait=30, label="upd-desc")
+        assert available, "Search endpoint not available"
+        assert entity is not None, f"Entity {self.guid_a} not found in search after 30s"
         actual = _attr(entity, "description")
         if actual is not None:
             assert actual == self.updated_desc, (
@@ -478,9 +524,9 @@ class SearchDataCorrectnessSuite:
           depends_on=["batch_update_entity_attributes"])
     def test_updated_cert(self, client, ctx):
         """Verify search returns the new certificateStatus after update."""
-        available, entity = _get_entity(client, self.guid_a)
-        if not available or entity is None:
-            return
+        available, entity = _poll_get_entity(client, self.guid_a, max_wait=30, label="upd-cert")
+        assert available, "Search endpoint not available"
+        assert entity is not None, f"Entity {self.guid_a} not found in search after 30s"
         actual = _attr(entity, "certificateStatus")
         if actual is not None:
             assert actual == self.updated_cert, (
@@ -510,12 +556,12 @@ class SearchDataCorrectnessSuite:
         assert_status(resp, 200)
         time.sleep(max(ctx.get("es_sync_wait", 5), 5))
 
-        available, entity = _get_entity(client, self.guid_a)
-        if not available or entity is None:
-            return
+        available, entity = _poll_get_entity(client, self.guid_a, max_wait=30, label="lbl-add")
+        assert available, "Search endpoint not available"
+        assert entity is not None, f"Entity {self.guid_a} not found in search after 30s"
         actual_labels = entity.get("labels", [])
         if not actual_labels:
-            return  # labels not in search on this env
+            raise SkipTestError("Labels not in search results on this environment")
         assert new_label in actual_labels, (
             f"New label {new_label!r} not in search labels: {actual_labels}"
         )
@@ -530,18 +576,28 @@ class SearchDataCorrectnessSuite:
     def test_classification_removal(self, client, ctx):
         """Remove classification and verify classificationNames no longer has it."""
         if not self.tag_added:
-            return
+            raise SkipTestError("Classification not added to Entity A in setup")
 
         resp = client.delete(
             f"/entity/guid/{self.guid_a}/classification/{self.tag_name}"
         )
-        if resp.status_code not in (200, 204):
-            return  # cannot remove, skip
+        assert_status_in(resp, [200, 204])
         time.sleep(max(ctx.get("es_sync_wait", 5), 5))
 
-        available, entity = _get_entity(client, self.guid_a)
-        if not available or entity is None:
-            return
+        # Poll until classification is removed from search
+        for i in range(6):
+            available, entity = _poll_get_entity(client, self.guid_a, max_wait=5, interval=5, label="cls-rm")
+            if not available:
+                raise SkipTestError("Search endpoint not available")
+            if entity:
+                cn = entity.get("classificationNames", [])
+                if self.tag_name not in cn:
+                    break
+            if i < 5:
+                time.sleep(5)
+                print(f"  [cls-rm] Waiting for classification removal in search ({(i+1)*5}s/30s)")
+
+        assert entity is not None, f"Entity {self.guid_a} not found in search"
         cn = entity.get("classificationNames", [])
         assert self.tag_name not in cn, (
             f"Removed classification {self.tag_name} still in "

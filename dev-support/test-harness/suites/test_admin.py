@@ -3,7 +3,7 @@
 from core.decorators import suite, test
 from core.assertions import (
     assert_status, assert_status_in, assert_field_present,
-    assert_field_equals, assert_field_not_empty,
+    assert_field_equals, assert_field_not_empty, SkipTestError,
 )
 
 
@@ -68,20 +68,27 @@ class AdminSuite:
 
     @test("get_metrics", tags=["admin"], order=10)
     def test_get_metrics(self, client, ctx):
-        resp = client.get("/metrics", admin=True, timeout=60)
-        assert_status_in(resp, [200, 408])
-        if resp.status_code != 200:
-            return  # Metrics endpoint can be slow on staging
+        # Retry on timeout (408) — metrics endpoint can be slow on staging
+        for attempt in range(3):
+            resp = client.get("/metrics", admin=True, timeout=90)
+            if resp.status_code == 200:
+                break
+            if resp.status_code == 408 and attempt < 2:
+                print(f"  [metrics] Timeout on attempt {attempt+1}, retrying...")
+                continue
+        assert_status(resp, 200)
         body = resp.json()
         assert body, "Expected non-empty metrics response"
         assert isinstance(body, dict), f"Expected dict metrics, got {type(body).__name__}"
+        # AtlasMetrics wraps metrics in a "data" envelope on staging
+        metrics = body.get("data", body) if isinstance(body, dict) else body
         # Metrics should contain gauges, counters, timers, or similar sections
         has_metric_data = any(
-            k in body for k in ("gauges", "counters", "timers", "meters", "histograms",
-                                "general", "tag", "entity", "system")
+            k in metrics for k in ("gauges", "counters", "timers", "meters", "histograms",
+                                   "general", "tag", "entity", "system")
         )
         assert has_metric_data, (
-            f"Metrics response should contain metric sections, got keys: {list(body.keys())[:15]}"
+            f"Metrics response should contain metric sections, got keys: {list(metrics.keys())[:15]}"
         )
 
     @test("get_metrics_prometheus", tags=["admin"], order=11)
@@ -197,10 +204,12 @@ class AdminSuite:
         if resp.status_code == 200:
             body = resp.json()
             assert isinstance(body, dict) and body, "Expected non-empty dict checkstate response"
-            # checkstate should report issues found
+            # checkstate should report issues found or state info
             has_state_info = any(k in body for k in ("state", "status", "issues", "totalIssues"))
-            if has_state_info:
-                pass  # Validated structure
+            assert has_state_info, (
+                f"checkstate response missing expected fields (state/status/issues/totalIssues), "
+                f"got keys: {list(body.keys())}"
+            )
 
     @test("set_and_delete_feature_flag", tags=["admin"], order=21)
     def test_set_and_delete_feature_flag(self, client, ctx):
@@ -212,15 +221,17 @@ class AdminSuite:
                 params={"flag": flag_name, "value": "true"},
                 admin=True,
             )
-        except Exception:
-            return  # Endpoint not reachable (connection reset)
+        except Exception as e:
+            raise SkipTestError(f"Feature flag endpoint not reachable: {e}")
         assert_status_in(resp, [200, 204, 404, 500])
         if resp.status_code in (404, 500):
-            return  # Endpoint not supported
+            raise SkipTestError(
+                f"Feature flag endpoint returned {resp.status_code} — not supported"
+            )
 
         # Delete
         try:
             resp = client.delete(f"/featureFlag/{flag_name}", admin=True)
-        except Exception:
-            return
+        except Exception as e:
+            raise SkipTestError(f"Feature flag delete not reachable: {e}")
         assert_status_in(resp, [200, 204, 404])

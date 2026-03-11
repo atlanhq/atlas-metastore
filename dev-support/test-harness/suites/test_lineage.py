@@ -3,7 +3,7 @@
 import time
 
 from core.decorators import suite, test
-from core.assertions import assert_status, assert_status_in, assert_field_present, assert_field_equals
+from core.assertions import assert_status, assert_status_in, assert_field_present, assert_field_equals, SkipTestError
 from core.data_factory import build_dataset_entity, unique_qn, unique_name
 
 
@@ -42,8 +42,7 @@ class LineageSuite:
     @test("get_lineage_input", tags=["lineage"], order=2)
     def test_get_lineage_input(self, client, ctx):
         guid = ctx.get_entity_guid("ds2")
-        if not guid:
-            return
+        assert guid, "ds2 GUID not found in context — entity_crud suite must have failed"
         resp = client.get(f"/lineage/{guid}", params={
             "direction": "INPUT",
             "depth": 3,
@@ -68,8 +67,7 @@ class LineageSuite:
     @test("get_lineage_output", tags=["lineage"], order=3)
     def test_get_lineage_output(self, client, ctx):
         guid = ctx.get_entity_guid("ds1")
-        if not guid:
-            return
+        assert guid, "ds1 GUID not found in context — entity_crud suite must have failed"
         resp = client.get(f"/lineage/{guid}", params={
             "direction": "OUTPUT",
             "depth": 3,
@@ -93,8 +91,7 @@ class LineageSuite:
     @test("post_lineage_on_demand", tags=["lineage"], order=4)
     def test_post_lineage_on_demand(self, client, ctx):
         guid = ctx.get_entity_guid("ds1")
-        if not guid:
-            return
+        assert guid, "ds1 GUID not found in context — entity_crud suite must have failed"
         resp = client.post(f"/lineage/{guid}", json_data={
             "direction": "BOTH",
             "inputRelationsLimit": 10,
@@ -108,7 +105,7 @@ class LineageSuite:
             assert body["baseEntityGuid"] == guid, (
                 f"Expected baseEntityGuid={guid}, got {body['baseEntityGuid']}"
             )
-            # On-demand should have guidEntityMap or searchParameters
+            # On-demand should have guidEntityMap or relations or searchParameters
             assert "guidEntityMap" in body or "relations" in body or "searchParameters" in body, (
                 f"On-demand lineage missing expected fields, got keys: {list(body.keys())}"
             )
@@ -116,8 +113,7 @@ class LineageSuite:
     @test("post_lineage_list", tags=["lineage"], order=5)
     def test_post_lineage_list(self, client, ctx):
         guid = ctx.get_entity_guid("ds1")
-        if not guid:
-            return
+        assert guid, "ds1 GUID not found in context — entity_crud suite must have failed"
         resp = client.post("/lineage/list", json_data={
             "guid": guid,
             "size": 10,
@@ -175,8 +171,7 @@ class LineageSuite:
     @test("lineage_depth_limited", tags=["lineage"], order=7)
     def test_lineage_depth_limited(self, client, ctx):
         guid = ctx.get_entity_guid("ds1")
-        if not guid:
-            return
+        assert guid, "ds1 GUID not found in context — entity_crud suite must have failed"
         resp = client.get(f"/lineage/{guid}", params={
             "direction": "BOTH",
             "depth": 1,
@@ -195,8 +190,7 @@ class LineageSuite:
     @test("lineage_hide_process", tags=["lineage"], order=8)
     def test_lineage_hide_process(self, client, ctx):
         guid = ctx.get_entity_guid("ds1")
-        if not guid:
-            return
+        assert guid, "ds1 GUID not found in context — entity_crud suite must have failed"
         resp = client.get(f"/lineage/{guid}", params={
             "direction": "BOTH",
             "depth": 3,

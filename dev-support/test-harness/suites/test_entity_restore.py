@@ -1,7 +1,7 @@
 """Entity soft-delete and restore tests."""
 
 from core.decorators import suite, test
-from core.assertions import assert_status, assert_status_in, assert_field_equals
+from core.assertions import assert_status, assert_status_in, assert_field_equals, SkipTestError
 from core.data_factory import build_dataset_entity, unique_qn, unique_name
 
 
@@ -47,11 +47,14 @@ class EntityRestoreSuite:
                 assert body, "Expected non-empty restore response"
         elif resp.status_code == 404:
             ctx.set("restore_unavailable", True)
+            raise SkipTestError(
+                "Restore endpoint returned 404 — not available on this environment"
+            )
 
     @test("verify_restored_entity", tags=["restore", "crud"], order=3, depends_on=["restore_entity"])
     def test_verify_restored_entity(self, client, ctx):
         if ctx.get("restore_unavailable"):
-            return  # Restore endpoint not available
+            raise SkipTestError("Restore endpoint not available on this environment")
         resp = client.get(f"/entity/guid/{self.entity_guid}")
         assert_status(resp, 200)
         assert_field_equals(resp, "entity.status", "ACTIVE")

@@ -41,24 +41,48 @@ def search_audit_events(client, guid, action_filter=None, size=10):
     return events, total
 
 
-def assert_audit_event_exists(client, guid, expected_action, wait_s=AUDIT_CONSISTENCY_WAIT_S):
-    """Wait for eventual consistency, then check if the audit event exists.
+def poll_audit_events(client, guid, action_filter=None, max_wait=60, interval=10, size=10):
+    """Poll audit events until results appear.
 
-    Sleeps wait_s upfront, queries once. Returns the event dict if found,
-    None if endpoint unavailable or audit indexing is not active on this
-    environment (empty results). Callers should treat None as a graceful skip.
+    Returns (events_list, total_count) or (None, 0) if endpoint unavailable.
     """
-    time.sleep(wait_s)
+    last_events = []
+    last_total = 0
+    for i in range(max_wait // interval):
+        if i > 0:
+            time.sleep(interval)
+        events, total = search_audit_events(client, guid, action_filter=action_filter, size=size)
+        if events is None:
+            return None, 0  # Endpoint genuinely not available
+        if events:
+            return events, total
+        last_events = events
+        last_total = total
+        print(f"  [audit-poll] Waiting for {action_filter or 'any'} audit on {guid} "
+              f"({(i+1)*interval}s/{max_wait}s)")
+    return last_events, last_total
 
-    events, total = search_audit_events(client, guid, action_filter=expected_action)
+
+def assert_audit_event_exists(client, guid, expected_action, max_wait=60, interval=10):
+    """Poll until the audit event exists and return it.
+
+    Returns the event dict if found. Asserts if the endpoint is available
+    but the event is not found after polling. Returns None ONLY if the
+    audit endpoint doesn't exist (404/405).
+    """
+    events, total = poll_audit_events(
+        client, guid, action_filter=expected_action,
+        max_wait=max_wait, interval=interval,
+    )
 
     if events is None:
-        # Endpoint not available — graceful skip
+        # Endpoint genuinely not available (404/405) — skip
         return None
 
-    if len(events) == 0:
-        # Audit indexing may not be active on this environment — graceful skip
-        return None
+    assert len(events) > 0, (
+        f"Expected audit event {expected_action} for entity {guid} "
+        f"but none found after {max_wait}s polling"
+    )
 
     event = events[0]
     entity_id = event.get("entityId") or event.get("entityGuid")

@@ -13,7 +13,7 @@ Covers operations that attach rich metadata to entities beyond basic CRUD:
 import time
 
 from core.decorators import suite, test
-from core.assertions import assert_status, assert_status_in, assert_field_equals
+from core.assertions import assert_status, assert_status_in, assert_field_equals, SkipTestError
 from core.data_factory import build_dataset_entity, unique_qn, unique_name
 
 
@@ -158,8 +158,7 @@ class EntityMetadataSuite:
           tags=["metadata", "certificate", "search", "v2"], order=4)
     def test_certificate_in_search(self, client, ctx):
         """Set certificate on secondary entity, verify search returns it."""
-        if not self.cert_guid:
-            return
+        assert self.cert_guid, "cert entity GUID not found — setup failed to create secondary entity"
 
         # cert_entity was created with DRAFT, update to VERIFIED
         resp = _update_entity_attrs(client, self.cert_guid, self.cert_qn, self.cert_name, {
@@ -170,20 +169,32 @@ class EntityMetadataSuite:
         # Wait longer for the update to propagate to ES
         time.sleep(max(ctx.get("es_sync_wait", 5), 10))
 
-        result = _search_by_guid(client, self.cert_guid)
-        if not result:
-            return  # search not available
+        # Poll search until entity appears with updated certificate
+        result = None
+        for i in range(6):
+            if i > 0:
+                time.sleep(5)
+            result = _search_by_guid(client, self.cert_guid)
+            if result:
+                cert = (
+                    result.get("certificateStatus")
+                    or result.get("attributes", {}).get("certificateStatus")
+                )
+                if cert == "VERIFIED":
+                    break
+            print(f"  [cert-search] Polling ES ({(i+1)*5}s/30s)")
 
-        # certificateStatus can be at top level or under attributes depending on env
+        assert result is not None, (
+            f"Entity {self.cert_guid} not found in search after 30s polling"
+        )
         cert = (
             result.get("certificateStatus")
             or result.get("attributes", {}).get("certificateStatus")
         )
-        if cert is None:
-            return  # certificateStatus not indexed in this environment
-        assert cert == "VERIFIED", (
-            f"Expected VERIFIED in search, got {cert}"
-        )
+        if cert is not None:
+            assert cert == "VERIFIED", (
+                f"Expected VERIFIED in search, got {cert}"
+            )
 
     # ================================================================
     #  README / userDescription
@@ -433,9 +444,18 @@ class EntityMetadataSuite:
         """Verify metadata changes are reflected in search results."""
         time.sleep(ctx.get("es_sync_wait", 5))
 
-        result = _search_by_guid(client, self.guid)
-        if not result:
-            return  # search not available
+        # Poll search until entity appears
+        result = None
+        for i in range(6):
+            if i > 0:
+                time.sleep(5)
+            result = _search_by_guid(client, self.guid)
+            if result:
+                break
+            print(f"  [meta-search] Polling ES ({(i+1)*5}s/30s)")
+        assert result is not None, (
+            f"Entity {self.guid} not found in search after 30s polling"
+        )
 
         # Check description in search
         search_attrs = result.get("attributes", {})

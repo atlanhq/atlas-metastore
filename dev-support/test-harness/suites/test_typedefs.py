@@ -6,7 +6,7 @@ from core.decorators import suite, test
 from core.assertions import (
     assert_status, assert_status_in, assert_field_present,
     assert_field_equals, assert_field_not_empty, assert_field_type,
-    assert_list_min_length,
+    assert_list_min_length, SkipTestError,
 )
 from core.data_factory import (
     build_enum_def, build_classification_def, build_struct_def,
@@ -259,7 +259,7 @@ class TypeDefSuite:
     @test("delete_type_in_use", tags=["typedef"], order=24, depends_on=["create_entity_with_custom_type"])
     def test_delete_type_in_use(self, client, ctx):
         if not ctx.get("custom_type_entity_exists"):
-            return  # No entity of custom type exists
+            raise SkipTestError("No entity of custom type exists — create_entity_with_custom_type must have failed")
         resp = client.delete(f"/types/typedef/name/{self.entity_type_name}")
         # Should fail because an instance exists
         assert_status_in(resp, [400, 409])
@@ -271,8 +271,7 @@ class TypeDefSuite:
         assert_status(resp, 200)
         body = resp.json()
         type_guid = body.get("guid")
-        if not type_guid:
-            return
+        assert type_guid, f"Expected 'guid' field in enum typedef response for {self.enum_name}"
         # GET by GUID
         resp2 = client.get(f"/types/typedef/guid/{type_guid}")
         assert_status(resp2, 200)
@@ -284,7 +283,7 @@ class TypeDefSuite:
     def test_delete_custom_type_entity(self, client, ctx):
         guid = ctx.get_entity_guid("custom_type_td_entity")
         if not guid:
-            return
+            raise SkipTestError("custom_type_td_entity GUID not found — create_entity_with_custom_type must have failed")
         resp = client.delete(f"/entity/guid/{guid}")
         assert_status_in(resp, [200, 204])
 

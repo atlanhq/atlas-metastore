@@ -1,7 +1,7 @@
 """Business lineage create tests."""
 
 from core.decorators import suite, test
-from core.assertions import assert_status, assert_status_in
+from core.assertions import assert_status, assert_status_in, SkipTestError
 
 
 @suite("business_lineage", depends_on_suites=["entity_crud"],
@@ -20,8 +20,7 @@ class BusinessLineageSuite:
     @test("create_lineage_with_entity", tags=["business_lineage"], order=2)
     def test_create_lineage_with_entity(self, client, ctx):
         entity_guid = ctx.get_entity_guid("ds1")
-        if not entity_guid:
-            return
+        assert entity_guid, "ds1 GUID not found in context — entity_crud suite must have failed"
         resp = client.post("/business-lineage/create-lineage", json_data={
             "productGuid": entity_guid,
             "assetGuids": [entity_guid],

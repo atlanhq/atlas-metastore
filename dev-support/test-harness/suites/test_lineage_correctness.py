@@ -14,7 +14,7 @@ assertions throughout.
 import time
 
 from core.decorators import suite, test
-from core.assertions import assert_status, assert_status_in
+from core.assertions import assert_status, assert_status_in, SkipTestError
 from core.data_factory import (
     build_dataset_entity, build_process_entity, build_classification_def,
     unique_name, unique_qn, unique_type_name,
@@ -174,10 +174,10 @@ class LineageCorrectnessSuite:
     def test_lineage_both(self, client, ctx):
         """GET /lineage BOTH — guidEntityMap contains src, process, and tgt."""
         if not self.lineage_ok:
-            return
+            raise SkipTestError("Lineage setup failed — process creation returned non-200")
         available, body = _get_lineage(client, self.ds_a, "BOTH", depth=3)
         if not available:
-            return
+            raise SkipTestError("Lineage API not available in this env")
 
         gem = body.get("guidEntityMap", {})
         assert self.ds_a in gem, (
@@ -195,10 +195,10 @@ class LineageCorrectnessSuite:
     def test_lineage_output(self, client, ctx):
         """GET /lineage OUTPUT — downstream entity reachable from source."""
         if not self.lineage_ok:
-            return
+            raise SkipTestError("Lineage setup failed — process creation returned non-200")
         available, body = _get_lineage(client, self.ds_a, "OUTPUT", depth=3)
         if not available:
-            return
+            raise SkipTestError("Lineage API not available in this env")
 
         gem = body.get("guidEntityMap", {})
         assert self.ds_b in gem, (
@@ -210,10 +210,10 @@ class LineageCorrectnessSuite:
     def test_lineage_input(self, client, ctx):
         """GET /lineage INPUT — upstream entity reachable from mid-entity."""
         if not self.lineage_ok:
-            return
+            raise SkipTestError("Lineage setup failed — process creation returned non-200")
         available, body = _get_lineage(client, self.ds_b, "INPUT", depth=3)
         if not available:
-            return
+            raise SkipTestError("Lineage API not available in this env")
 
         gem = body.get("guidEntityMap", {})
         assert self.ds_a in gem, (
@@ -225,14 +225,14 @@ class LineageCorrectnessSuite:
     def test_lineage_relations(self, client, ctx):
         """Relations array has edges with fromEntityId / toEntityId."""
         if not self.lineage_ok:
-            return
+            raise SkipTestError("Lineage setup failed — process creation returned non-200")
         available, body = _get_lineage(client, self.ds_a, "OUTPUT", depth=1)
         if not available:
-            return
+            raise SkipTestError("Lineage API not available in this env")
 
         relations = body.get("relations", [])
         if not relations:
-            return  # some environments omit relations
+            raise SkipTestError("Lineage API does not return relations array in this env")
 
         all_ids = set()
         for rel in relations:
@@ -253,10 +253,10 @@ class LineageCorrectnessSuite:
     def test_multi_hop(self, client, ctx):
         """depth=3 from ds_a OUTPUT reaches ds_c (2 hops through 2 processes)."""
         if not self.lineage_ok:
-            return
+            raise SkipTestError("Lineage setup failed — process creation returned non-200")
         available, body = _get_lineage(client, self.ds_a, "OUTPUT", depth=3)
         if not available:
-            return
+            raise SkipTestError("Lineage API not available in this env")
 
         gem = body.get("guidEntityMap", {})
         assert self.ds_c in gem, (
@@ -269,10 +269,10 @@ class LineageCorrectnessSuite:
     def test_depth_limit(self, client, ctx):
         """depth=1 from ds_a OUTPUT — ds_c (2 hops) should NOT be reachable."""
         if not self.lineage_ok:
-            return
+            raise SkipTestError("Lineage setup failed — process creation returned non-200")
         available, body = _get_lineage(client, self.ds_a, "OUTPUT", depth=1)
         if not available:
-            return
+            raise SkipTestError("Lineage API not available in this env")
 
         gem = body.get("guidEntityMap", {})
         assert self.ds_c not in gem, (
@@ -285,12 +285,12 @@ class LineageCorrectnessSuite:
     def test_hide_process(self, client, ctx):
         """hideProcess=true — no Process entities in guidEntityMap."""
         if not self.lineage_ok:
-            return
+            raise SkipTestError("Lineage setup failed — process creation returned non-200")
         available, body = _get_lineage(
             client, self.ds_a, "BOTH", depth=3, hide_process=True,
         )
         if not available:
-            return
+            raise SkipTestError("Lineage API not available in this env")
 
         gem = body.get("guidEntityMap", {})
         for guid, info in gem.items():
@@ -316,10 +316,9 @@ class LineageCorrectnessSuite:
     def test_process_inputs(self, client, ctx):
         """GET process entity — inputs reference the source DataSet."""
         if not self.lineage_ok:
-            return
+            raise SkipTestError("Lineage setup failed — process creation returned non-200")
         resp = client.get(f"/entity/guid/{self.proc_ab}")
-        if resp.status_code != 200:
-            return
+        assert_status(resp, 200)
 
         entity = resp.json().get("entity", {})
         # inputs live in relationshipAttributes or attributes
@@ -328,8 +327,7 @@ class LineageCorrectnessSuite:
             or entity.get("attributes", {}).get("inputs")
             or []
         )
-        if not inputs:
-            return  # field not returned
+        assert inputs, f"Process {self.proc_ab} has no inputs field in entity response"
 
         input_guids = [i.get("guid") for i in inputs if isinstance(i, dict)]
         assert self.ds_a in input_guids, (
@@ -341,10 +339,9 @@ class LineageCorrectnessSuite:
     def test_process_outputs(self, client, ctx):
         """GET process entity — outputs reference the target DataSet."""
         if not self.lineage_ok:
-            return
+            raise SkipTestError("Lineage setup failed — process creation returned non-200")
         resp = client.get(f"/entity/guid/{self.proc_ab}")
-        if resp.status_code != 200:
-            return
+        assert_status(resp, 200)
 
         entity = resp.json().get("entity", {})
         outputs = (
@@ -352,8 +349,7 @@ class LineageCorrectnessSuite:
             or entity.get("attributes", {}).get("outputs")
             or []
         )
-        if not outputs:
-            return
+        assert outputs, f"Process {self.proc_ab} has no outputs field in entity response"
 
         output_guids = [o.get("guid") for o in outputs if isinstance(o, dict)]
         assert self.ds_b in output_guids, (
@@ -369,7 +365,7 @@ class LineageCorrectnessSuite:
     def test_on_demand(self, client, ctx):
         """POST /lineage on-demand — base entity appears in guidEntityMap."""
         if not self.lineage_ok:
-            return
+            raise SkipTestError("Lineage setup failed — process creation returned non-200")
         resp = client.post(f"/lineage/{self.ds_b}", json_data={
             "direction": "BOTH",
             "inputRelationsLimit": 10,
@@ -377,9 +373,8 @@ class LineageCorrectnessSuite:
             "depth": 3,
         })
         if resp.status_code in (400, 404, 405):
-            return  # on-demand may be disabled
-        if resp.status_code != 200:
-            return
+            raise SkipTestError(f"On-demand lineage returned {resp.status_code} — not available")
+        assert_status(resp, 200)
 
         body = resp.json()
         gem = body.get("guidEntityMap", {})
@@ -393,7 +388,7 @@ class LineageCorrectnessSuite:
     def test_lineage_list(self, client, ctx):
         """POST /lineage/list — response contains lineage data."""
         if not self.lineage_ok:
-            return
+            raise SkipTestError("Lineage setup failed — process creation returned non-200")
         resp = client.post("/lineage/list", json_data={
             "guid": self.ds_a,
             "size": 10,
@@ -401,9 +396,8 @@ class LineageCorrectnessSuite:
             "direction": "OUTPUT",
         })
         if resp.status_code in (400, 404, 405):
-            return
-        if resp.status_code != 200:
-            return
+            raise SkipTestError(f"Lineage list returned {resp.status_code} — not available")
+        assert_status(resp, 200)
 
         body = resp.json()
         if isinstance(body, dict):
@@ -427,9 +421,12 @@ class LineageCorrectnessSuite:
           tags=["lineage", "propagation", "data_correctness"], order=12)
     def test_tag_propagates(self, client, ctx):
         """Add tag to source with propagate=True — target gets it via GET entity."""
-        if not self.prop_lineage_ok or not self.tag_ok:
-            return
+        if not self.prop_lineage_ok:
+            raise SkipTestError("Propagation lineage setup failed — process creation returned non-200")
+        if not self.tag_ok:
+            raise SkipTestError("Classification typedef creation failed")
 
+        print(f"  [lin-propagation] Adding {self.tag_name} to source {self.prop_src} with propagate=True")
         resp = client.post(
             f"/entity/guid/{self.prop_src}/classifications",
             json_data=[{
@@ -438,15 +435,23 @@ class LineageCorrectnessSuite:
                 "restrictPropagationThroughLineage": False,
             }],
         )
-        if resp.status_code not in (200, 204):
-            return
+        assert_status_in(resp, [200, 204])
 
-        # Wait for propagation through graph
-        time.sleep(max(ctx.get("es_sync_wait", 5), 8))
-
-        classifications = _get_entity_classifications(client, self.prop_tgt)
-        if classifications is None:
-            return
+        # Wait for propagation through graph (30s with polling)
+        print(f"  [lin-propagation] Waiting up to 30s for propagation to {self.prop_tgt}...")
+        found = False
+        for i in range(6):
+            time.sleep(5)
+            classifications = _get_entity_classifications(client, self.prop_tgt)
+            if classifications is None:
+                continue
+            tag_names = [c.get("typeName") for c in classifications if isinstance(c, dict)]
+            if self.tag_name in tag_names:
+                found = True
+                print(f"  [lin-propagation] Tag found on target after {(i+1)*5}s: {tag_names}")
+                break
+            print(f"  [lin-propagation] Polling ({(i+1)*5}s/30s): target tags = {tag_names}")
+        classifications = _get_entity_classifications(client, self.prop_tgt) or []
 
         tag_found = any(
             isinstance(c, dict) and c.get("typeName") == self.tag_name
@@ -463,15 +468,16 @@ class LineageCorrectnessSuite:
           order=13, depends_on=["tag_propagates_to_downstream_entity"])
     def test_propagated_in_search(self, client, ctx):
         """Search downstream entity — propagatedClassificationNames has the tag."""
-        if not self.prop_lineage_ok or not self.tag_ok:
-            return
+        if not self.prop_lineage_ok:
+            raise SkipTestError("Propagation lineage setup failed")
+        if not self.tag_ok:
+            raise SkipTestError("Classification typedef creation failed")
 
         available, body = _search_by_guid(client, self.prop_tgt)
         if not available:
-            return
+            raise SkipTestError("Search API not available in this env")
         entities = body.get("entities", [])
-        if not entities:
-            return
+        assert entities, f"Target entity {self.prop_tgt} not found in search"
 
         entity = entities[0]
         prop_names = entity.get("propagatedClassificationNames", [])
@@ -489,20 +495,28 @@ class LineageCorrectnessSuite:
           order=14, depends_on=["tag_propagates_to_downstream_entity"])
     def test_remove_clears(self, client, ctx):
         """Remove tag from source — downstream entity loses the propagated tag."""
-        if not self.prop_lineage_ok or not self.tag_ok:
-            return
+        if not self.prop_lineage_ok:
+            raise SkipTestError("Propagation lineage setup failed")
+        if not self.tag_ok:
+            raise SkipTestError("Classification typedef creation failed")
 
+        print(f"  [lin-remove] Removing {self.tag_name} from source {self.prop_src}")
         resp = client.delete(
             f"/entity/guid/{self.prop_src}/classification/{self.tag_name}"
         )
-        if resp.status_code not in (200, 204):
-            return
+        assert_status_in(resp, [200, 204])
 
-        time.sleep(max(ctx.get("es_sync_wait", 5), 8))
-
-        classifications = _get_entity_classifications(client, self.prop_tgt)
-        if classifications is None:
-            return
+        # Poll for cleanup (30s)
+        print(f"  [lin-remove] Waiting up to 30s for propagated tag removal from {self.prop_tgt}...")
+        for i in range(6):
+            time.sleep(5)
+            classifications = _get_entity_classifications(client, self.prop_tgt) or []
+            tag_names = [c.get("typeName") for c in classifications if isinstance(c, dict)]
+            if self.tag_name not in tag_names:
+                print(f"  [lin-remove] Tag removed from target after {(i+1)*5}s")
+                break
+            print(f"  [lin-remove] Polling ({(i+1)*5}s/30s): target tags = {tag_names}")
+        classifications = _get_entity_classifications(client, self.prop_tgt) or []
 
         tag_names = [
             c.get("typeName") for c in classifications if isinstance(c, dict)
@@ -517,9 +531,12 @@ class LineageCorrectnessSuite:
           order=15, depends_on=["remove_source_tag_clears_propagation"])
     def test_restrict_propagation(self, client, ctx):
         """restrictPropagationThroughLineage=True — target does NOT get the tag."""
-        if not self.prop_lineage_ok or not self.tag_ok:
-            return
+        if not self.prop_lineage_ok:
+            raise SkipTestError("Propagation lineage setup failed")
+        if not self.tag_ok:
+            raise SkipTestError("Classification typedef creation failed")
 
+        print(f"  [lin-restrict] Adding {self.tag2_name} with restrictPropagationThroughLineage=True")
         resp = client.post(
             f"/entity/guid/{self.prop_src}/classifications",
             json_data=[{
@@ -528,14 +545,14 @@ class LineageCorrectnessSuite:
                 "restrictPropagationThroughLineage": True,
             }],
         )
-        if resp.status_code not in (200, 204):
-            return
+        assert_status_in(resp, [200, 204])
 
-        time.sleep(max(ctx.get("es_sync_wait", 5), 8))
+        # Wait and verify tag did NOT propagate
+        print(f"  [lin-restrict] Waiting 15s then checking target should NOT have tag...")
+        time.sleep(15)
 
         classifications = _get_entity_classifications(client, self.prop_tgt)
-        if classifications is None:
-            return
+        assert classifications is not None, f"Could not read entity {self.prop_tgt}"
 
         tag_names = [
             c.get("typeName") for c in classifications if isinstance(c, dict)
@@ -560,16 +577,16 @@ class LineageCorrectnessSuite:
             client, ctx, "lin-del-p", [del_src], [del_tgt],
         )
         if not ok:
-            return
+            raise SkipTestError("Process creation failed — lineage not supported")
         time.sleep(3)
 
         # Verify lineage exists before
         available, body = _get_lineage(client, del_src, "OUTPUT", depth=1)
         if not available:
-            return
+            raise SkipTestError("Lineage API not available")
         gem_before = body.get("guidEntityMap", {})
         if del_tgt not in gem_before:
-            return  # lineage didn't register in time
+            raise SkipTestError("Lineage didn't register in time — target not in guidEntityMap")
 
         # Delete the process
         client.delete(f"/entity/guid/{del_proc}")
@@ -595,15 +612,15 @@ class LineageCorrectnessSuite:
             client, ctx, "lin-del2-p", [del2_src], [del2_tgt],
         )
         if not ok:
-            return
+            raise SkipTestError("Process creation failed — lineage not supported")
         time.sleep(3)
 
         # Verify lineage exists
         available, body = _get_lineage(client, del2_src, "OUTPUT", depth=1)
         if not available:
-            return
+            raise SkipTestError("Lineage API not available")
         if del2_tgt not in body.get("guidEntityMap", {}):
-            return
+            raise SkipTestError("Lineage didn't register in time — target not in guidEntityMap")
 
         # Soft-delete the target
         client.delete(f"/entity/guid/{del2_tgt}")
@@ -626,15 +643,13 @@ class LineageCorrectnessSuite:
     def test_lineage_by_unique_attr(self, client, ctx):
         """GET /lineage/uniqueAttribute/type/DataSet — lineage by qualifiedName."""
         if not self.lineage_ok:
-            return
+            raise SkipTestError("Lineage setup failed — process creation returned non-200")
 
         # Get ds_a's qualifiedName
         resp = client.get(f"/entity/guid/{self.ds_a}")
-        if resp.status_code != 200:
-            return
+        assert_status(resp, 200)
         qn = resp.json().get("entity", {}).get("attributes", {}).get("qualifiedName")
-        if not qn:
-            return
+        assert qn, f"Could not read qualifiedName for entity {self.ds_a}"
 
         resp2 = client.get(
             "/lineage/uniqueAttribute/type/DataSet",
@@ -645,9 +660,8 @@ class LineageCorrectnessSuite:
             },
         )
         if resp2.status_code in (400, 404, 405):
-            return  # endpoint may not be available
-        if resp2.status_code != 200:
-            return
+            raise SkipTestError(f"Lineage by unique attr returned {resp2.status_code} — not available")
+        assert_status(resp2, 200)
 
         body = resp2.json()
         gem = body.get("guidEntityMap", {})

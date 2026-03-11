@@ -9,7 +9,7 @@ import time
 
 from core.decorators import suite, test
 from core.assertions import (
-    assert_status, assert_status_in, assert_field_present,
+    assert_status, assert_status_in, assert_field_present, SkipTestError,
 )
 from core.data_factory import (
     build_dataset_entity, build_classification_def, build_process_entity,
@@ -17,14 +17,19 @@ from core.data_factory import (
 )
 
 
-def _index_search(client, dsl):
-    """Issue an indexsearch query and return (available, body)."""
-    resp = client.post("/search/indexsearch", json_data={"dsl": dsl})
-    if resp.status_code in (404, 400, 405):
+def _index_search(client, dsl, retries=2, interval=3):
+    """Issue an indexsearch query and return (available, body). Retries on 500/503."""
+    for attempt in range(retries + 1):
+        resp = client.post("/search/indexsearch", json_data={"dsl": dsl})
+        if resp.status_code in (404, 400, 405):
+            return False, {}
+        if resp.status_code == 200:
+            return True, resp.json()
+        if resp.status_code in (500, 503) and attempt < retries:
+            time.sleep(interval)
+            continue
         return False, {}
-    if resp.status_code != 200:
-        return False, {}
-    return True, resp.json()
+    return False, {}
 
 
 def _search_by_guid(client, guid):
@@ -58,6 +63,38 @@ def _create_entity_and_register(client, ctx, suffix, cleanup=True):
     return guid, qn
 
 
+def _poll_search_by_guid(client, guid, max_wait=30, interval=5):
+    """Poll ES until entity appears in search results."""
+    last_body = {}
+    for i in range(max_wait // interval):
+        if i > 0:
+            time.sleep(interval)
+        available, body = _search_by_guid(client, guid)
+        if not available:
+            return False, {}
+        if body.get("entities"):
+            return True, body
+        last_body = body
+        print(f"  [poll-es] Waiting for {guid} in ES ({(i+1)*interval}s/{max_wait}s)")
+    return True, last_body
+
+
+def _poll_index_search(client, dsl, max_wait=30, interval=5, label="search"):
+    """Poll ES until query returns at least 1 result."""
+    last_body = {}
+    for i in range(max_wait // interval):
+        if i > 0:
+            time.sleep(interval)
+        available, body = _index_search(client, dsl)
+        if not available:
+            return False, {}
+        if body.get("approximateCount", 0) > 0:
+            return True, body
+        last_body = body
+        print(f"  [{label}] Polling ES ({(i+1)*interval}s/{max_wait}s)")
+    return True, last_body
+
+
 @suite("search_correctness", depends_on_suites=["entity_crud"],
        description="Search field-level correctness validation")
 class SearchCorrectnessSuite:
@@ -81,13 +118,23 @@ class SearchCorrectnessSuite:
             lambda: client.delete(f"/types/typedef/name/{self.tag2_name}")
         )
 
-        # Entity A: has classification
+        # Entity A: has classification (retry on type cache lag)
         self.guid_a, self.qn_a = _create_entity_and_register(client, ctx, "search-a")
-        resp = client.post(
-            f"/entity/guid/{self.guid_a}/classifications",
-            json_data=[{"typeName": self.tag_name}],
+        self.tag_add_ok = False
+        for attempt in range(3):
+            resp = client.post(
+                f"/entity/guid/{self.guid_a}/classifications",
+                json_data=[{"typeName": self.tag_name}],
+            )
+            if resp.status_code in (200, 204):
+                self.tag_add_ok = True
+                break
+            if attempt < 2:
+                time.sleep(10)
+        assert self.tag_add_ok, (
+            f"Failed to add classification {self.tag_name} to entity {self.guid_a} "
+            f"after 3 attempts (last status={resp.status_code})"
         )
-        self.tag_add_ok = resp.status_code in (200, 204)
 
         # Entity B: has labels
         self.guid_b, self.qn_b = _create_entity_and_register(client, ctx, "search-b")
@@ -131,19 +178,17 @@ class SearchCorrectnessSuite:
 
     @test("search_by_classification_filter", tags=["search", "correctness"], order=1)
     def test_search_by_classification_filter(self, client, ctx):
-        if not self.tag_add_ok:
-            return  # Classification add failed, skip
-
-        available, body = _index_search(client, {
+        dsl = {
             "from": 0, "size": 10,
             "query": {"bool": {"must": [
                 {"term": {"__typeName.keyword": "DataSet"}},
                 {"match_phrase": {"__classificationNames": self.tag_name}},
                 {"term": {"__state": "ACTIVE"}},
             ]}}
-        })
-        if not available:
-            return
+        }
+        available, body = _poll_index_search(client, dsl, max_wait=30, interval=5,
+                                             label="classification-filter")
+        assert available, "Index search API not available"
 
         count = body.get("approximateCount", 0)
         assert count > 0, (
@@ -159,15 +204,11 @@ class SearchCorrectnessSuite:
     @test("search_classification_objects", tags=["search", "correctness"], order=2,
           depends_on=["search_by_classification_filter"])
     def test_search_classification_objects(self, client, ctx):
-        if not self.tag_add_ok:
-            return
-
-        available, body = _search_by_guid(client, self.guid_a)
-        if not available:
-            return
+        available, body = _poll_search_by_guid(client, self.guid_a, max_wait=30)
+        assert available, "Index search API not available"
 
         entities = body.get("entities", [])
-        assert len(entities) > 0, f"Entity {self.guid_a} not found in search"
+        assert len(entities) > 0, f"Entity {self.guid_a} not found in search after polling"
         entity = entities[0]
         classifications = entity.get("classifications", [])
         assert isinstance(classifications, list), (
@@ -185,14 +226,11 @@ class SearchCorrectnessSuite:
     @test("search_combined_type_classification_qn", tags=["search", "correctness"], order=3,
           depends_on=["search_by_classification_filter"])
     def test_search_combined_type_classification_qn(self, client, ctx):
-        if not self.tag_add_ok:
-            return
-
-        # Try multiple QN field names
+        # Try multiple QN field names with polling
         available = False
         body = {}
         for qn_field in QN_FIELDS:
-            available, body = _index_search(client, {
+            dsl = {
                 "from": 0, "size": 10,
                 "query": {"bool": {"must": [
                     {"term": {"__typeName.keyword": "DataSet"}},
@@ -200,11 +238,12 @@ class SearchCorrectnessSuite:
                     {"wildcard": {qn_field: f"{PREFIX}*"}},
                     {"term": {"__state": "ACTIVE"}},
                 ]}}
-            })
+            }
+            available, body = _poll_index_search(client, dsl, max_wait=20, interval=5,
+                                                 label=f"combined-{qn_field}")
             if available and body.get("approximateCount", 0) > 0:
                 break
-        if not available:
-            return
+        assert available, "Index search API not available"
 
         entities = body.get("entities", [])
         for e in entities:
@@ -226,23 +265,24 @@ class SearchCorrectnessSuite:
         # Try multiple QN field names to handle ES mapping differences
         count = 0
         entities = []
+        available = False
         for qn_field in ("qualifiedName.keyword", "qualifiedName", "__qualifiedName"):
-            available, body = _index_search(client, {
+            dsl = {
                 "from": 0, "size": 50,
                 "query": {"bool": {"must": [
                     {"wildcard": {qn_field: f"{PREFIX}*"}},
                     {"term": {"__state": "ACTIVE"}},
                 ]}}
-            })
+            }
+            available, body = _poll_index_search(client, dsl, max_wait=20, interval=5,
+                                                 label=f"wildcard-{qn_field}")
             if not available:
                 continue
             count = body.get("approximateCount", 0)
             entities = body.get("entities", [])
             if count > 0:
                 break
-        if not available:
-            return
-
+        assert available, "Index search API not available"
         assert count > 0, f"Expected entities with QN prefix {PREFIX}*, got count={count}"
 
         for e in entities:
@@ -254,31 +294,34 @@ class SearchCorrectnessSuite:
 
     @test("search_result_has_labels", tags=["search", "correctness"], order=5)
     def test_search_result_has_labels(self, client, ctx):
-        available, body = _search_by_guid(client, self.guid_b)
-        if not available:
-            return
+        available, body = _poll_search_by_guid(client, self.guid_b, max_wait=30)
+        assert available, "Index search API not available"
 
         entities = body.get("entities", [])
-        assert len(entities) > 0, f"Entity {self.guid_b} not found in search"
+        assert len(entities) > 0, f"Entity {self.guid_b} not found in search after polling"
         entity = entities[0]
         labels = entity.get("labels", [])
-        if labels:  # Labels may not be indexed on all environments
-            for expected in self.labels_b:
-                assert expected in labels, (
-                    f"Expected label '{expected}' in search result labels: {labels}"
-                )
+        assert labels, (
+            f"Expected labels {self.labels_b} on entity {self.guid_b}, "
+            f"but labels field is empty/missing in search result"
+        )
+        for expected in self.labels_b:
+            assert expected in labels, (
+                f"Expected label '{expected}' in search result labels: {labels}"
+            )
 
     @test("search_approximate_count_present", tags=["search", "correctness"], order=6)
     def test_search_approximate_count_present(self, client, ctx):
-        available, body = _index_search(client, {
+        dsl = {
             "from": 0, "size": 1,
             "query": {"bool": {"must": [
                 {"term": {"__typeName.keyword": "DataSet"}},
                 {"term": {"__state": "ACTIVE"}},
             ]}}
-        })
-        if not available:
-            return
+        }
+        available, body = _poll_index_search(client, dsl, max_wait=20, interval=5,
+                                             label="approx-count")
+        assert available, "Index search API not available"
 
         assert "approximateCount" in body, (
             f"Expected 'approximateCount' field in search response, got keys: {list(body.keys())}"
@@ -291,43 +334,50 @@ class SearchCorrectnessSuite:
 
     @test("search_multi_classification_entity", tags=["search", "correctness"], order=7)
     def test_search_multi_classification_entity(self, client, ctx):
-        if not self.tag_add_ok:
-            return
-
-        # Add second classification to entity A
-        resp = client.post(
-            f"/entity/guid/{self.guid_a}/classifications",
-            json_data=[{"typeName": self.tag2_name}],
+        # Add second classification to entity A (retry on type cache lag)
+        added = False
+        for attempt in range(3):
+            resp = client.post(
+                f"/entity/guid/{self.guid_a}/classifications",
+                json_data=[{"typeName": self.tag2_name}],
+            )
+            if resp.status_code in (200, 204):
+                added = True
+                break
+            if attempt < 2:
+                time.sleep(10)
+        assert added, (
+            f"Failed to add {self.tag2_name} to {self.guid_a} after 3 attempts "
+            f"(last status={resp.status_code})"
         )
-        if resp.status_code not in (200, 204):
-            return  # Type cache lag
 
-        time.sleep(ctx.get("es_sync_wait", 5))
-
-        # Search by first tag
-        available, body1 = _index_search(client, {
+        # Search by first tag with polling
+        dsl1 = {
             "from": 0, "size": 5,
             "query": {"bool": {"must": [
                 {"term": {"__guid": self.guid_a}},
                 {"match_phrase": {"__classificationNames": self.tag_name}},
                 {"term": {"__state": "ACTIVE"}},
             ]}}
-        })
-        if not available:
-            return
+        }
+        available, body1 = _poll_index_search(client, dsl1, max_wait=30, interval=5,
+                                              label="multi-tag1")
+        assert available, "Index search API not available"
         assert body1.get("approximateCount", 0) > 0, (
             f"Entity {self.guid_a} not found when searching by {self.tag_name}"
         )
 
-        # Search by second tag
-        _, body2 = _index_search(client, {
+        # Search by second tag with polling
+        dsl2 = {
             "from": 0, "size": 5,
             "query": {"bool": {"must": [
                 {"term": {"__guid": self.guid_a}},
                 {"match_phrase": {"__classificationNames": self.tag2_name}},
                 {"term": {"__state": "ACTIVE"}},
             ]}}
-        })
+        }
+        _, body2 = _poll_index_search(client, dsl2, max_wait=30, interval=5,
+                                      label="multi-tag2")
         assert body2.get("approximateCount", 0) > 0, (
             f"Entity {self.guid_a} not found when searching by {self.tag2_name}"
         )
@@ -337,24 +387,29 @@ class SearchCorrectnessSuite:
         # Create a throwaway entity, delete it, verify __state=ACTIVE excludes it
         guid, qn = _create_entity_and_register(client, ctx, "search-del", cleanup=False)
 
-        time.sleep(ctx.get("es_sync_wait", 5))
-
-        # Verify it's in ACTIVE search first
-        available, body = _search_by_guid(client, guid)
-        if not available:
-            return
+        # Poll until entity appears in ES
+        available, body = _poll_search_by_guid(client, guid, max_wait=30)
+        assert available, "Index search API not available"
         assert body.get("approximateCount", 0) > 0, (
             f"Entity {guid} not found in ACTIVE search before delete"
         )
 
         # Soft delete
         client.delete(f"/entity/guid/{guid}")
-        time.sleep(ctx.get("es_sync_wait", 5))
 
-        # Verify excluded from ACTIVE search
-        _, body2 = _search_by_guid(client, guid)
-        assert body2.get("approximateCount", 0) == 0, (
-            f"Deleted entity {guid} still in ACTIVE search, count={body2.get('approximateCount')}"
+        # Poll until entity is excluded from ACTIVE search
+        print(f"  [delete-filter] Waiting up to 30s for entity {guid} to be excluded from ACTIVE search...")
+        excluded = False
+        for i in range(6):
+            time.sleep(5)
+            _, body2 = _search_by_guid(client, guid)
+            if body2.get("approximateCount", 0) == 0:
+                excluded = True
+                print(f"  [delete-filter] Entity excluded after {(i+1)*5}s")
+                break
+            print(f"  [delete-filter] Still visible ({(i+1)*5}s/30s)")
+        assert excluded, (
+            f"Deleted entity {guid} still in ACTIVE search after 30s"
         )
 
     @test("search_by_glossary_term_meaning", tags=["search", "correctness", "glossary"], order=9)
@@ -365,8 +420,7 @@ class SearchCorrectnessSuite:
             "name": glossary_name,
             "shortDescription": "Search test glossary",
         })
-        if resp.status_code != 200:
-            return  # Glossary endpoint not available
+        assert_status(resp, 200)
         glossary_guid = resp.json().get("guid")
         ctx.register_cleanup(lambda: client.delete(f"/glossary/{glossary_guid}"))
 
@@ -376,8 +430,7 @@ class SearchCorrectnessSuite:
             "shortDescription": "Search test term",
             "anchor": {"glossaryGuid": glossary_guid},
         })
-        if resp.status_code != 200:
-            return
+        assert_status(resp, 200)
         term_guid = resp.json().get("guid")
         ctx.register_cleanup(lambda: client.delete(f"/glossary/term/{term_guid}"))
 
@@ -386,43 +439,42 @@ class SearchCorrectnessSuite:
         resp = client.post(f"/glossary/terms/{term_guid}/assignedEntities", json_data=[
             {"guid": entity_guid, "typeName": "DataSet"},
         ])
-        if resp.status_code not in (200, 204):
-            return  # Term assignment not available
+        assert_status_in(resp, [200, 204])
 
-        time.sleep(ctx.get("es_sync_wait", 5))
+        # Poll ES until entity appears with meanings populated
+        print(f"  [meanings] Waiting up to 30s for meanings to appear on {entity_guid}...")
+        meanings_found = False
+        found_meanings = []
+        for i in range(6):
+            time.sleep(5)
+            available, body = _search_by_guid(client, entity_guid)
+            if not available:
+                continue
+            entities = body.get("entities", [])
+            if not entities:
+                continue
+            entity = entities[0]
+            meanings = entity.get("meanings", [])
+            if meanings and isinstance(meanings, list) and len(meanings) > 0:
+                found_meanings = meanings
+                meanings_found = True
+                print(f"  [meanings] Found after {(i+1)*5}s: {meanings}")
+                break
+            print(f"  [meanings] Polling ({(i+1)*5}s/30s)")
 
-        # Search by __meaningNames
-        available, body = _index_search(client, {
-            "from": 0, "size": 5,
-            "query": {"bool": {"must": [
-                {"term": {"__guid": entity_guid}},
-                {"term": {"__state": "ACTIVE"}},
-            ]}}
-        })
-        if not available:
-            return
-
-        entities = body.get("entities", [])
-        if not entities:
-            return
-        entity = entities[0]
-        meanings = entity.get("meanings", []) or entity.get("meaningNames", [])
-        # Best-effort: check meanings field is present if the platform populates it
-        if meanings:
-            # Verify term info in meanings
-            if isinstance(meanings, list) and meanings:
-                if isinstance(meanings[0], dict):
-                    guids = [m.get("termGuid") for m in meanings]
-                    assert term_guid in guids, (
-                        f"Expected termGuid {term_guid} in meanings, got {guids}"
-                    )
+        assert meanings_found, (
+            f"Expected meanings on entity {entity_guid} after term assignment, "
+            f"but meanings field is empty after 30s polling"
+        )
+        if isinstance(found_meanings[0], dict):
+            guids = [m.get("termGuid") for m in found_meanings]
+            assert term_guid in guids, (
+                f"Expected termGuid {term_guid} in meanings, got {guids}"
+            )
 
     @test("search_propagated_classification", tags=["search", "correctness", "propagation"],
           order=10)
     def test_search_propagated_classification(self, client, ctx):
-        if not self.tag_add_ok:
-            return
-
         # Create lineage: src -> process -> tgt, tag src, check tgt
         src_guid, src_qn = _create_entity_and_register(client, ctx, "prop-search-src")
         tgt_guid, tgt_qn = _create_entity_and_register(client, ctx, "prop-search-tgt")
@@ -432,12 +484,10 @@ class SearchCorrectnessSuite:
             outputs=[{"guid": tgt_guid, "typeName": "DataSet"}],
         )
         resp = client.post("/entity", json_data={"entity": proc})
-        if resp.status_code != 200:
-            return  # Process creation not supported (staging may reject)
+        assert_status(resp, 200)
         proc_entities = (resp.json().get("mutatedEntities", {}).get("CREATE", []) or
                          resp.json().get("mutatedEntities", {}).get("UPDATE", []))
-        if not proc_entities:
-            return
+        assert proc_entities, "Process creation returned no entities in mutatedEntities"
         proc_guid = proc_entities[0]["guid"]
         ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{proc_guid}"))
 
@@ -447,28 +497,34 @@ class SearchCorrectnessSuite:
             "propagate": True,
             "restrictPropagationThroughLineage": False,
         }])
-        if resp.status_code not in (200, 204):
-            return
+        assert_status_in(resp, [200, 204])
 
-        # Wait for propagation
-        time.sleep(max(ctx.get("es_sync_wait", 5), 8))
+        # Poll ES for propagated classification on target (up to 45s)
+        print(f"  [prop-search] Waiting up to 45s for {self.tag_name} to propagate "
+              f"to {tgt_guid} in ES...")
+        prop_found = False
+        last_prop_names = []
+        for i in range(9):
+            time.sleep(5)
+            available, body = _search_by_guid(client, tgt_guid)
+            if not available:
+                print(f"  [prop-search] Search API not available, retrying...")
+                continue
+            entities = body.get("entities", [])
+            if not entities:
+                print(f"  [prop-search] Entity not in ES yet ({(i+1)*5}s/45s)")
+                continue
+            entity = entities[0]
+            last_prop_names = entity.get("propagatedClassificationNames", [])
+            cn = entity.get("classificationNames", [])
+            if self.tag_name in last_prop_names or self.tag_name in cn:
+                prop_found = True
+                print(f"  [prop-search] Propagation confirmed in ES after {(i+1)*5}s")
+                break
+            print(f"  [prop-search] Polling ({(i+1)*5}s/45s): "
+                  f"propagated={last_prop_names}, classifications={cn}")
 
-        # Best-effort: search tgt by propagated classification
-        available, body = _index_search(client, {
-            "from": 0, "size": 5,
-            "query": {"bool": {"must": [
-                {"term": {"__guid": tgt_guid}},
-                {"term": {"__state": "ACTIVE"}},
-            ]}}
-        })
-        if not available:
-            return
-
-        entities = body.get("entities", [])
-        if not entities:
-            return
-        entity = entities[0]
-        prop_names = entity.get("propagatedClassificationNames", [])
-        # Best-effort check: propagation may take longer or be disabled
-        if prop_names and self.tag_name in prop_names:
-            pass  # Propagation confirmed in search
+        assert prop_found, (
+            f"Tag {self.tag_name} did NOT propagate to target {tgt_guid} in ES "
+            f"after 45s. propagatedClassificationNames={last_prop_names}"
+        )

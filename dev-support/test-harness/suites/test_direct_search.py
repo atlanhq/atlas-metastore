@@ -1,7 +1,7 @@
 """Direct ES search tests."""
 
 from core.decorators import suite, test
-from core.assertions import assert_status, assert_status_in
+from core.assertions import assert_status, assert_status_in, SkipTestError
 
 
 @suite("direct_search", depends_on_suites=["entity_crud"],
@@ -40,8 +40,7 @@ class DirectSearchSuite:
           depends_on=["direct_search_pit_create"])
     def test_direct_search_pit_delete(self, client, ctx):
         pit_id = ctx.get("pit_id")
-        if not pit_id:
-            return
+        assert pit_id, "pit_id not found in context — direct_search_pit_create must have failed"
         resp = client.post("/direct/search", json_data={
             "searchType": "PIT_DELETE",
             "pitId": pit_id,

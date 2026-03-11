@@ -161,8 +161,7 @@ class SearchSuite:
     @test("search_finds_created_entity", tags=["search"], order=10)
     def test_search_finds_created_entity(self, client, ctx):
         guid = ctx.get_entity_guid("ds1")
-        if not guid:
-            return
+        assert guid, "ds1 GUID not found in context — entity_crud suite must have failed"
         # Search by GUID
         resp = client.post("/search/indexsearch", json_data={
             "dsl": {
@@ -185,8 +184,7 @@ class SearchSuite:
     @test("search_result_structure", tags=["search"], order=11)
     def test_search_result_structure(self, client, ctx):
         guid = ctx.get_entity_guid("ds1")
-        if not guid:
-            return
+        assert guid, "ds1 GUID not found in context — entity_crud suite must have failed"
         resp = client.post("/search/indexsearch", json_data={
             "dsl": {
                 "from": 0,

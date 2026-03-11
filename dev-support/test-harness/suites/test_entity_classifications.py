@@ -1,4 +1,10 @@
-"""Classification add/update/delete on entities."""
+"""Classification add/update/delete on entities.
+
+Covers Java IT equivalents:
+- ClassificationIntegrationTest (CRUD lifecycle, create-with-tag, nonexistent entity)
+- ClassificationDeletionESIntegrationTest (ES denormalized field cleanup)
+- Propagation through lineage (add, verify, delete-cleanup, search verification)
+"""
 
 import time
 
@@ -13,6 +19,103 @@ from core.data_factory import (
     build_classification_def, build_dataset_entity, build_process_entity,
     unique_name, unique_qn, unique_type_name,
 )
+
+
+def _poll_entity_classifications(client, guid, expected_tag, max_wait=30,
+                                 interval=5, label=""):
+    """Poll GET entity until expected_tag appears in classifications list.
+
+    Returns (found: bool, classification_names: list).
+    Prints progress for debugging.
+    """
+    elapsed = 0
+    names = []
+    prefix = f"  [{label}] " if label else "  "
+    while elapsed < max_wait:
+        resp = client.get(f"/entity/guid/{guid}")
+        if resp.status_code == 200:
+            entity = resp.json().get("entity", {})
+            classifications = entity.get("classifications", [])
+            names = [c.get("typeName") for c in classifications if isinstance(c, dict)]
+            if expected_tag in names:
+                print(f"{prefix}Tag {expected_tag} found on {guid} after {elapsed}s. "
+                      f"All tags: {names}")
+                return True, names
+            print(f"{prefix}Polling {guid} for {expected_tag} ({elapsed}s/{max_wait}s). "
+                  f"Current tags: {names}")
+        time.sleep(interval)
+        elapsed += interval
+    print(f"{prefix}Tag {expected_tag} NOT found on {guid} after {max_wait}s. "
+          f"Final tags: {names}")
+    return False, names
+
+
+def _poll_tag_removed(client, guid, tag_name, max_wait=30, interval=5, label=""):
+    """Poll GET entity until tag_name disappears from classifications list.
+
+    Returns (removed: bool, remaining_names: list).
+    """
+    elapsed = 0
+    names = []
+    prefix = f"  [{label}] " if label else "  "
+    while elapsed < max_wait:
+        time.sleep(interval)
+        elapsed += interval
+        resp = client.get(f"/entity/guid/{guid}")
+        if resp.status_code == 200:
+            entity = resp.json().get("entity", {})
+            classifications = entity.get("classifications", [])
+            names = [c.get("typeName") for c in classifications if isinstance(c, dict)]
+            if tag_name not in names:
+                print(f"{prefix}Tag {tag_name} removed from {guid} after {elapsed}s. "
+                      f"Remaining: {names}")
+                return True, names
+            print(f"{prefix}Polling {guid} for {tag_name} removal ({elapsed}s/{max_wait}s). "
+                  f"Current tags: {names}")
+    print(f"{prefix}Tag {tag_name} still present on {guid} after {max_wait}s. "
+          f"Tags: {names}")
+    return False, names
+
+
+def _create_entity_and_get_guid(client, ctx, suffix):
+    """Create a DataSet entity, register cleanup, return GUID. Raises on failure."""
+    qn = unique_qn(suffix)
+    entity = build_dataset_entity(qn=qn, name=unique_name(suffix))
+    resp = client.post("/entity", json_data={"entity": entity})
+    assert_status(resp, 200)
+    body = resp.json()
+    creates = body.get("mutatedEntities", {}).get("CREATE", [])
+    updates = body.get("mutatedEntities", {}).get("UPDATE", [])
+    entities = creates or updates
+    assert entities, f"Expected entity in mutatedEntities for {suffix}"
+    guid = entities[0]["guid"]
+    ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+    return guid
+
+
+def _search_entity_in_es(client, guid, es_sync_wait=5, max_retries=5,
+                         retry_interval=3):
+    """Search for entity by GUID in ES with retry. Returns (found, entity_dict)."""
+    for attempt in range(max_retries):
+        resp = client.post("/search/indexsearch", json_data={
+            "dsl": {
+                "from": 0, "size": 1,
+                "query": {"bool": {"must": [
+                    {"term": {"__guid": guid}},
+                    {"term": {"__state": "ACTIVE"}},
+                ]}}
+            }
+        })
+        if resp.status_code != 200:
+            raise SkipTestError(
+                f"Search API returned {resp.status_code} — not available in this env"
+            )
+        entities = resp.json().get("entities", [])
+        if entities:
+            return True, entities[0]
+        if attempt < max_retries - 1:
+            time.sleep(retry_interval)
+    return False, {}
 
 
 @suite("entity_classifications", depends_on_suites=["entity_crud"],
@@ -36,9 +139,21 @@ class EntityClassificationsSuite:
             if resp.status_code in (500, 503) and attempt < 2:
                 time.sleep(10 * (attempt + 1))
                 continue
-        # Wait for type cache propagation on staging (can take 15-20s)
+
+        # Verify typedef is queryable before proceeding
         if self.tags_ok:
-            time.sleep(15)
+            queryable = False
+            for _ in range(4):
+                time.sleep(15)
+                check = client.get(
+                    f"/types/classificationdef/name/{self.tag_name}"
+                )
+                if check.status_code == 200:
+                    queryable = True
+                    break
+            if not queryable:
+                self.tags_ok = False
+
         ctx.set("harness_tag_name", self.tag_name)
         ctx.register_cleanup(
             lambda: client.delete(f"/types/typedef/name/{self.tag_name}")
@@ -59,48 +174,51 @@ class EntityClassificationsSuite:
         ctx.register_entity("tag_test_entity", self.entity_guid, "DataSet")
         ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{self.entity_guid}"))
 
+    # ================================================================
+    #  CRUD lifecycle
+    # ================================================================
+
     @test("create_entity_with_classification", tags=["classification"], order=0.5)
     def test_create_entity_with_classification(self, client, ctx):
-        # Create entity with classification attached at creation time
+        """Create entity with classification attached at creation time."""
+        if not self.tags_ok:
+            raise SkipTestError("Classification typedef not queryable after setup")
+
         qn = unique_qn("tag-create-test")
         entity = build_dataset_entity(qn=qn, name=unique_name("tag-create"))
         entity["classifications"] = [{"typeName": self.tag_name}]
         resp = client.post("/entity", json_data={"entity": entity})
-        # 404 if classification type cache hasn't propagated
-        assert_status_in(resp, [200, 404])
-        if resp.status_code == 200:
-            body = resp.json()
-            creates = body.get("mutatedEntities", {}).get("CREATE", [])
-            updates = body.get("mutatedEntities", {}).get("UPDATE", [])
-            entities = creates or updates
-            if entities:
-                guid = entities[0]["guid"]
-                ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
-                # Verify classification is attached
-                resp2 = client.get(f"/entity/guid/{guid}")
-                if resp2.status_code == 200:
-                    entity_body = resp2.json().get("entity", {})
-                    classifications = entity_body.get("classifications", [])
-                    found = any(c.get("typeName") == self.tag_name for c in classifications)
-                    assert found, f"Classification {self.tag_name} not attached at creation"
+        assert_status(resp, 200)
+
+        body = resp.json()
+        creates = body.get("mutatedEntities", {}).get("CREATE", [])
+        updates = body.get("mutatedEntities", {}).get("UPDATE", [])
+        entities = creates or updates
+        assert entities, "Expected at least one entity in mutatedEntities"
+        guid = entities[0]["guid"]
+        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+
+        # Verify classification is attached
+        resp2 = client.get(f"/entity/guid/{guid}")
+        assert_status(resp2, 200)
+        entity_body = resp2.json().get("entity", {})
+        classifications = entity_body.get("classifications", [])
+        found = any(c.get("typeName") == self.tag_name for c in classifications)
+        assert found, (
+            f"Classification {self.tag_name} not attached at creation time, "
+            f"got: {[c.get('typeName') for c in classifications]}"
+        )
 
     @test("add_classification", tags=["classification"], order=1)
     def test_add_classification(self, client, ctx):
         if not self.tags_ok:
-            raise SkipTestError("Classification typedef creation failed (500/503)")
+            raise SkipTestError("Classification typedef not queryable after setup")
+
         payload = [{"typeName": self.tag_name}]
-        # Retry on 404 (type cache lag) up to 2 times with 15s backoff
-        for attempt in range(3):
-            resp = client.post(
-                f"/entity/guid/{self.entity_guid}/classifications",
-                json_data=payload,
-            )
-            if resp.status_code in (200, 204):
-                break
-            if resp.status_code == 404 and attempt < 2:
-                time.sleep(15)
-                continue
-            break
+        resp = client.post(
+            f"/entity/guid/{self.entity_guid}/classifications",
+            json_data=payload,
+        )
         assert_status_in(resp, [200, 204])
 
         # Read-after-write: GET entity and verify classification present
@@ -113,18 +231,16 @@ class EntityClassificationsSuite:
 
     @test("get_classifications", tags=["classification"], order=2, depends_on=["add_classification"])
     def test_get_classifications(self, client, ctx):
-
         resp = client.get(f"/entity/guid/{self.entity_guid}/classifications")
         assert_status(resp, 200)
         body = resp.json()
         # Body is either a list or has "list" field
         classifications = body if isinstance(body, list) else body.get("list", [])
         found = any(c.get("typeName") == self.tag_name for c in classifications)
-        assert found, f"Classification {self.tag_name} not found on entity"
+        assert found, f"Classification {self.tag_name} not found on entity via GET classifications"
 
     @test("get_single_classification", tags=["classification"], order=3, depends_on=["add_classification"])
     def test_get_single_classification(self, client, ctx):
-
         resp = client.get(
             f"/entity/guid/{self.entity_guid}/classification/{self.tag_name}"
         )
@@ -133,7 +249,6 @@ class EntityClassificationsSuite:
 
     @test("update_classification", tags=["classification"], order=4, depends_on=["add_classification"])
     def test_update_classification(self, client, ctx):
-
         payload = [{"typeName": self.tag_name}]
         resp = client.put(
             f"/entity/guid/{self.entity_guid}/classifications",
@@ -145,15 +260,15 @@ class EntityClassificationsSuite:
         resp2 = client.get(
             f"/entity/guid/{self.entity_guid}/classification/{self.tag_name}"
         )
-        if resp2.status_code == 200:
-            body = resp2.json()
-            assert body.get("typeName") == self.tag_name, (
-                f"Expected typeName={self.tag_name}, got {body.get('typeName')}"
-            )
+        assert_status(resp2, 200)
+        body = resp2.json()
+        assert body.get("typeName") == self.tag_name, (
+            f"Expected typeName={self.tag_name}, got {body.get('typeName')}"
+        )
 
-    @test("update_classification_propagation_flags", tags=["classification", "propagation"], order=4.5, depends_on=["add_classification"])
+    @test("update_classification_propagation_flags", tags=["classification", "propagation"],
+          order=4.5, depends_on=["add_classification"])
     def test_update_classification_propagation_flags(self, client, ctx):
-
         payload = [{
             "typeName": self.tag_name,
             "propagate": True,
@@ -169,44 +284,47 @@ class EntityClassificationsSuite:
         resp2 = client.get(
             f"/entity/guid/{self.entity_guid}/classification/{self.tag_name}"
         )
-        if resp2.status_code == 200:
-            body = resp2.json()
-            # Check propagation flags if present in response
-            if "propagate" in body:
-                assert body.get("propagate") is True, (
-                    f"Expected propagate=True, got {body.get('propagate')}"
-                )
+        assert_status(resp2, 200)
+        body = resp2.json()
+        assert body.get("propagate") is True, (
+            f"Expected propagate=True after update, got {body.get('propagate')}"
+        )
+        if "restrictPropagationThroughLineage" in body:
+            assert body["restrictPropagationThroughLineage"] is True, (
+                f"Expected restrictPropagationThroughLineage=True, "
+                f"got {body.get('restrictPropagationThroughLineage')}"
+            )
 
-    @test("add_classification_audit", tags=["classification", "audit"], order=5, depends_on=["add_classification"])
+    @test("add_classification_audit", tags=["classification", "audit"], order=5,
+          depends_on=["add_classification"])
     def test_add_classification_audit(self, client, ctx):
-
         event = assert_audit_event_exists(client, self.entity_guid, "CLASSIFICATION_ADD")
         if event is None:
-            return  # Audit endpoint not available on this environment
+            raise SkipTestError("Audit endpoint not available on this environment")
 
     @test("classification_add_kafka_cdc", tags=["classification", "kafka"], order=5.5,
           depends_on=["add_classification"])
     def test_classification_add_kafka_cdc(self, client, ctx):
         """AUD-04: Verify Kafka CDC notification for CLASSIFICATION_ADD."""
-
+        kafka_verifier = ctx.get("kafka_verifier")
+        if not kafka_verifier:
+            raise SkipTestError("Kafka verifier not configured (--no-kafka or no bootstrap servers)")
         result = assert_entity_in_kafka(ctx, self.entity_guid, "CLASSIFICATION_ADD")
-        # Soft assertion — result is None if Kafka unavailable or not found
+        if result is None:
+            raise SkipTestError("Kafka CDC event not found within timeout")
 
     @test("multi_tag_application", tags=["classification"], order=6, depends_on=["add_classification"])
     def test_multi_tag_application(self, client, ctx):
-        # Add second classification — may 404 if type cache hasn't propagated tag2 yet
+        """Add second classification and verify both are present."""
+        if not self.tags_ok:
+            raise SkipTestError("Classification typedef not queryable")
+
         payload = [{"typeName": self.tag2_name}]
         resp = client.post(
             f"/entity/guid/{self.entity_guid}/classifications",
             json_data=payload,
         )
-        # 404 can happen if type cache hasn't propagated the second tag yet
-        assert_status_in(resp, [200, 204, 404])
-        if resp.status_code == 404:
-            return  # Type cache lag — skip verification
-
-        # Wait for propagation
-        time.sleep(3)
+        assert_status_in(resp, [200, 204])
 
         # GET entity and verify both classifications present
         resp2 = client.get(f"/entity/guid/{self.entity_guid}")
@@ -214,28 +332,29 @@ class EntityClassificationsSuite:
         entity = resp2.json().get("entity", {})
         classifications = entity.get("classifications", [])
         tag_names = [c.get("typeName") for c in classifications]
-        assert self.tag_name in tag_names, f"Expected {self.tag_name} in classifications, got {tag_names}"
-        assert self.tag2_name in tag_names, f"Expected {self.tag2_name} in classifications, got {tag_names}"
+        assert self.tag_name in tag_names, (
+            f"Expected {self.tag_name} in classifications, got {tag_names}"
+        )
+        assert self.tag2_name in tag_names, (
+            f"Expected {self.tag2_name} in classifications, got {tag_names}"
+        )
+
+    # ================================================================
+    #  Propagation through lineage
+    # ================================================================
 
     @test("classification_propagation", tags=["classification", "propagation"], order=7)
     def test_classification_propagation(self, client, ctx):
+        """Tag source with propagation=True, verify it propagates through lineage to target."""
+        if not self.tags_ok:
+            raise SkipTestError("Classification typedef not queryable")
+
+        print("  [propagation] Creating lineage: DataSet A -> Process -> DataSet B")
+
         # Create DataSet A, DataSet B, Process(inputs=[A], outputs=[B])
-        qn_a = unique_qn("prop-src")
-        qn_b = unique_qn("prop-tgt")
-        ds_a = build_dataset_entity(qn=qn_a, name=unique_name("prop-src"))
-        ds_b = build_dataset_entity(qn=qn_b, name=unique_name("prop-tgt"))
-
-        resp_a = client.post("/entity", json_data={"entity": ds_a})
-        assert_status(resp_a, 200)
-        guid_a = (resp_a.json().get("mutatedEntities", {}).get("CREATE", []) or
-                  resp_a.json().get("mutatedEntities", {}).get("UPDATE", []))[0]["guid"]
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid_a}"))
-
-        resp_b = client.post("/entity", json_data={"entity": ds_b})
-        assert_status(resp_b, 200)
-        guid_b = (resp_b.json().get("mutatedEntities", {}).get("CREATE", []) or
-                  resp_b.json().get("mutatedEntities", {}).get("UPDATE", []))[0]["guid"]
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid_b}"))
+        guid_a = _create_entity_and_get_guid(client, ctx, "prop-src")
+        guid_b = _create_entity_and_get_guid(client, ctx, "prop-tgt")
+        print(f"  [propagation] Source={guid_a}, Target={guid_b}")
 
         # Create Process linking A -> B
         proc = build_process_entity(
@@ -244,17 +363,20 @@ class EntityClassificationsSuite:
         )
         resp_proc = client.post("/entity", json_data={"entity": proc})
         if resp_proc.status_code != 200:
-            # Staging may reject Process - skip gracefully
-            return
-
+            raise SkipTestError(
+                f"Process entity creation returned {resp_proc.status_code} — "
+                f"lineage not supported in this env"
+            )
         proc_entities = (resp_proc.json().get("mutatedEntities", {}).get("CREATE", []) or
                          resp_proc.json().get("mutatedEntities", {}).get("UPDATE", []))
-        if not proc_entities:
-            return
+        assert proc_entities, "Process entity creation returned empty mutatedEntities"
         proc_guid = proc_entities[0]["guid"]
         ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{proc_guid}"))
+        print(f"  [propagation] Process={proc_guid}")
 
         # Add classification to A with propagation enabled
+        print(f"  [propagation] Adding {self.tag_name} to source {guid_a} "
+              f"with propagate=True, restrictPropagationThroughLineage=False")
         payload = [{
             "typeName": self.tag_name,
             "propagate": True,
@@ -263,49 +385,49 @@ class EntityClassificationsSuite:
         resp_tag = client.post(f"/entity/guid/{guid_a}/classifications", json_data=payload)
         assert_status_in(resp_tag, [200, 204])
 
-        # Wait for propagation through lineage
-        time.sleep(5)
+        # Store guids for downstream tests
+        ctx.set("prop_src_guid", guid_a)
+        ctx.set("prop_tgt_guid", guid_b)
+        ctx.set("prop_proc_guid", proc_guid)
 
-        # Check if classification propagated to Process
-        resp_check = client.get(f"/entity/guid/{proc_guid}")
-        if resp_check.status_code == 200:
-            entity = resp_check.json().get("entity", {})
-            classifications = entity.get("classifications", [])
-            propagated = any(c.get("typeName") == self.tag_name for c in classifications)
-            # Propagation is best-effort - log but don't fail if not propagated
-            # as it depends on graph traversal and timing
-            if not propagated:
-                pass  # Propagation may take longer or be disabled
+        # Poll for propagation to target B (through process) — 30s
+        print(f"  [propagation] Waiting up to 30s for propagation to target {guid_b}...")
+        found_b, names_b = _poll_entity_classifications(
+            client, guid_b, self.tag_name, max_wait=30, interval=5,
+            label="propagation",
+        )
+        assert found_b, (
+            f"Classification {self.tag_name} did NOT propagate from source "
+            f"{guid_a} to target {guid_b} through lineage after 30s. "
+            f"Target classifications: {names_b}"
+        )
 
-        # Check if classification propagated to B
-        resp_b_check = client.get(f"/entity/guid/{guid_b}")
-        if resp_b_check.status_code == 200:
-            entity_b = resp_b_check.json().get("entity", {})
-            classifications_b = entity_b.get("classifications", [])
-            propagated_b = any(c.get("typeName") == self.tag_name for c in classifications_b)
-            # Same - best-effort check
+        # Also verify on the Process entity (intermediate node)
+        print(f"  [propagation] Verifying tag on process {proc_guid}...")
+        resp_proc_check = client.get(f"/entity/guid/{proc_guid}")
+        assert_status(resp_proc_check, 200)
+        proc_entity = resp_proc_check.json().get("entity", {})
+        proc_cls = proc_entity.get("classifications", [])
+        proc_tags = [c.get("typeName") for c in proc_cls if isinstance(c, dict)]
+        assert self.tag_name in proc_tags, (
+            f"Classification {self.tag_name} did NOT propagate to process "
+            f"{proc_guid}. Process classifications: {proc_tags}"
+        )
+        print(f"  [propagation] VERIFIED: tag propagated to both process and target")
 
     @test("classification_propagation_delete_cleanup", tags=["classification", "propagation"],
           order=7.5, depends_on=["classification_propagation"])
     def test_classification_propagation_delete_cleanup(self, client, ctx):
-        """T-04/T-05: Tag with propagation, verify downstream gets it, remove tag, verify cleanup."""
-        # Create DataSet A, DataSet B, Process(A -> B)
-        qn_a = unique_qn("prop-del-src")
-        qn_b = unique_qn("prop-del-tgt")
-        ds_a = build_dataset_entity(qn=qn_a, name=unique_name("prop-del-src"))
-        ds_b = build_dataset_entity(qn=qn_b, name=unique_name("prop-del-tgt"))
+        """Remove tag from source, verify propagated tag is cleaned up on target."""
+        if not self.tags_ok:
+            raise SkipTestError("Classification typedef not queryable")
 
-        resp_a = client.post("/entity", json_data={"entity": ds_a})
-        assert_status(resp_a, 200)
-        guid_a = (resp_a.json().get("mutatedEntities", {}).get("CREATE", []) or
-                  resp_a.json().get("mutatedEntities", {}).get("UPDATE", []))[0]["guid"]
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid_a}"))
+        print("  [prop-delete] Creating fresh lineage for delete-cleanup test")
 
-        resp_b = client.post("/entity", json_data={"entity": ds_b})
-        assert_status(resp_b, 200)
-        guid_b = (resp_b.json().get("mutatedEntities", {}).get("CREATE", []) or
-                  resp_b.json().get("mutatedEntities", {}).get("UPDATE", []))[0]["guid"]
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid_b}"))
+        # Create fresh lineage: A -> proc -> B
+        guid_a = _create_entity_and_get_guid(client, ctx, "prop-del-src")
+        guid_b = _create_entity_and_get_guid(client, ctx, "prop-del-tgt")
+        print(f"  [prop-delete] Source={guid_a}, Target={guid_b}")
 
         proc = build_process_entity(
             inputs=[{"guid": guid_a, "typeName": "DataSet"}],
@@ -313,15 +435,18 @@ class EntityClassificationsSuite:
         )
         resp_proc = client.post("/entity", json_data={"entity": proc})
         if resp_proc.status_code != 200:
-            return  # Process not supported on this environment
+            raise SkipTestError(
+                f"Process entity creation returned {resp_proc.status_code} — "
+                f"lineage not supported in this env"
+            )
         proc_entities = (resp_proc.json().get("mutatedEntities", {}).get("CREATE", []) or
                          resp_proc.json().get("mutatedEntities", {}).get("UPDATE", []))
-        if not proc_entities:
-            return
+        assert proc_entities, "Process entity creation returned empty mutatedEntities"
         proc_guid = proc_entities[0]["guid"]
         ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{proc_guid}"))
 
         # Tag A with propagation enabled
+        print(f"  [prop-delete] Adding {self.tag_name} to source with propagate=True")
         payload = [{
             "typeName": self.tag_name,
             "propagate": True,
@@ -330,59 +455,49 @@ class EntityClassificationsSuite:
         resp_tag = client.post(f"/entity/guid/{guid_a}/classifications", json_data=payload)
         assert_status_in(resp_tag, [200, 204])
 
-        # Wait for propagation
-        time.sleep(5)
+        # Wait for propagation to B
+        print(f"  [prop-delete] Waiting for propagation to target {guid_b}...")
+        found_b, _ = _poll_entity_classifications(
+            client, guid_b, self.tag_name, max_wait=30, interval=5,
+            label="prop-delete",
+        )
+        assert found_b, (
+            f"Classification {self.tag_name} did not propagate to target "
+            f"{guid_b} — cannot verify delete cleanup"
+        )
 
-        # Best-effort check: verify B gets the propagated classification
-        resp_b_check = client.get(f"/entity/guid/{guid_b}")
-        if resp_b_check.status_code == 200:
-            entity_b = resp_b_check.json().get("entity", {})
-            classifications_b = entity_b.get("classifications", [])
-            # Note: propagation is best-effort, may not have propagated yet
-
-        # Now remove the tag from A
+        # Now remove the tag from source A
+        print(f"  [prop-delete] Removing {self.tag_name} from source {guid_a}")
         resp_del = client.delete(f"/entity/guid/{guid_a}/classification/{self.tag_name}")
         assert_status_in(resp_del, [200, 204])
 
-        # Wait for propagation cleanup
-        time.sleep(5)
+        # Poll for propagation cleanup — tag should disappear from B
+        print(f"  [prop-delete] Waiting up to 30s for propagated tag to be removed from {guid_b}...")
+        tag_gone, remaining = _poll_tag_removed(
+            client, guid_b, self.tag_name, max_wait=30, interval=5,
+            label="prop-delete",
+        )
+        assert tag_gone, (
+            f"Propagated classification {self.tag_name} was NOT cleaned up on "
+            f"target {guid_b} after removing from source {guid_a} (waited 30s). "
+            f"Remaining tags: {remaining}"
+        )
 
-        # Verify B no longer has the propagated classification
-        resp_b_after = client.get(f"/entity/guid/{guid_b}")
-        if resp_b_after.status_code == 200:
-            entity_b = resp_b_after.json().get("entity", {})
-            classifications_b = entity_b.get("classifications", [])
-            has_tag = any(c.get("typeName") == self.tag_name for c in classifications_b)
-            # Best-effort: propagation cleanup may take longer
-            if has_tag:
-                pass  # Propagation cleanup may be delayed
+    # ================================================================
+    #  Search / ES verification
+    # ================================================================
 
     @test("classification_in_search_results", tags=["classification", "search"], order=8,
           depends_on=["add_classification"])
     def test_classification_in_search_results(self, client, ctx):
+        """Verify classificationNames and classifications objects in ES search result."""
+        es_wait = ctx.get("es_sync_wait", 5)
+        time.sleep(es_wait)
 
-
-        time.sleep(ctx.get("es_sync_wait", 5))
-
-        # Search entity by GUID and verify classificationNames + classifications objects
-        resp = client.post("/search/indexsearch", json_data={
-            "dsl": {
-                "from": 0, "size": 1,
-                "query": {"bool": {"must": [
-                    {"term": {"__guid": self.entity_guid}},
-                    {"term": {"__state": "ACTIVE"}},
-                ]}}
-            }
-        })
-        if resp.status_code != 200:
-            return  # Search not available
-
-        body = resp.json()
-        entities = body.get("entities", [])
-        if not entities:
-            return  # Entity not yet in search
-
-        entity = entities[0]
+        found, entity = _search_entity_in_es(
+            client, self.entity_guid, es_sync_wait=es_wait,
+        )
+        assert found, f"Entity {self.entity_guid} not found in search after {es_wait}s + retries"
 
         # Verify classificationNames array
         cn = entity.get("classificationNames", [])
@@ -393,11 +508,11 @@ class EntityClassificationsSuite:
         # Verify classifications objects
         classifications = entity.get("classifications", [])
         if classifications:
-            found = any(
+            found_cls = any(
                 isinstance(c, dict) and c.get("typeName") == self.tag_name
                 for c in classifications
             )
-            assert found, (
+            assert found_cls, (
                 f"Classification object with typeName={self.tag_name} not in search "
                 f"result classifications: {classifications}"
             )
@@ -405,32 +520,15 @@ class EntityClassificationsSuite:
     @test("classification_propagation_in_search", tags=["classification", "search", "propagation"],
           order=9, depends_on=["classification_propagation"])
     def test_classification_propagation_in_search(self, client, ctx):
+        """Verify propagated classification appears in ES search on downstream entity."""
+        if not self.tags_ok:
+            raise SkipTestError("Classification typedef not queryable")
 
+        print("  [prop-search] Creating fresh lineage for ES propagation search test")
 
-        # Find the downstream entity (guid_b from propagation test)
-        # We need to search for propagated classifications on a downstream entity.
-        # Since the propagation test creates its own entities, we create a fresh set here.
-        from core.data_factory import build_dataset_entity, build_process_entity, unique_qn, unique_name
-        qn_src = unique_qn("prop-search-src")
-        qn_tgt = unique_qn("prop-search-tgt")
-
-        resp_src = client.post("/entity", json_data={
-            "entity": build_dataset_entity(qn=qn_src, name=unique_name("prop-s-src"))
-        })
-        if resp_src.status_code != 200:
-            return
-        guid_src = (resp_src.json().get("mutatedEntities", {}).get("CREATE", []) or
-                    resp_src.json().get("mutatedEntities", {}).get("UPDATE", []))[0]["guid"]
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid_src}"))
-
-        resp_tgt = client.post("/entity", json_data={
-            "entity": build_dataset_entity(qn=qn_tgt, name=unique_name("prop-s-tgt"))
-        })
-        if resp_tgt.status_code != 200:
-            return
-        guid_tgt = (resp_tgt.json().get("mutatedEntities", {}).get("CREATE", []) or
-                    resp_tgt.json().get("mutatedEntities", {}).get("UPDATE", []))[0]["guid"]
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid_tgt}"))
+        # Create fresh lineage for search validation
+        guid_src = _create_entity_and_get_guid(client, ctx, "prop-search-src")
+        guid_tgt = _create_entity_and_get_guid(client, ctx, "prop-search-tgt")
 
         proc = build_process_entity(
             inputs=[{"guid": guid_src, "typeName": "DataSet"}],
@@ -438,50 +536,118 @@ class EntityClassificationsSuite:
         )
         resp_proc = client.post("/entity", json_data={"entity": proc})
         if resp_proc.status_code != 200:
-            return  # Process not supported
+            raise SkipTestError(
+                f"Process creation returned {resp_proc.status_code} — "
+                f"lineage not supported in this env"
+            )
         proc_entities = (resp_proc.json().get("mutatedEntities", {}).get("CREATE", []) or
                          resp_proc.json().get("mutatedEntities", {}).get("UPDATE", []))
-        if not proc_entities:
-            return
+        assert proc_entities, "Process entity creation returned empty mutatedEntities"
         proc_guid = proc_entities[0]["guid"]
         ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{proc_guid}"))
 
         # Tag src with propagation enabled
+        print(f"  [prop-search] Adding {self.tag_name} to source {guid_src} with propagate=True")
         resp_tag = client.post(f"/entity/guid/{guid_src}/classifications", json_data=[{
             "typeName": self.tag_name,
             "propagate": True,
             "restrictPropagationThroughLineage": False,
         }])
-        if resp_tag.status_code not in (200, 204):
-            return
+        assert_status_in(resp_tag, [200, 204])
 
-        time.sleep(max(ctx.get("es_sync_wait", 5), 8))
+        # Wait for propagation + ES indexing (longer wait for ES)
+        es_wait = max(ctx.get("es_sync_wait", 5), 15)
+        print(f"  [prop-search] Waiting {es_wait}s for propagation + ES sync...")
+        time.sleep(es_wait)
 
-        # Search tgt entity, check __propagatedClassificationNames
-        resp = client.post("/search/indexsearch", json_data={
-            "dsl": {
-                "from": 0, "size": 1,
-                "query": {"bool": {"must": [
-                    {"term": {"__guid": guid_tgt}},
-                    {"term": {"__state": "ACTIVE"}},
-                ]}}
-            }
-        })
-        if resp.status_code != 200:
-            return
+        # Search tgt entity, check propagatedClassificationNames in ES (with retries)
+        found, entity = _search_entity_in_es(
+            client, guid_tgt, es_sync_wait=es_wait,
+            max_retries=5, retry_interval=5,
+        )
+        assert found, f"Target entity {guid_tgt} not found in search"
 
-        entities = resp.json().get("entities", [])
-        if not entities:
-            return
-        entity = entities[0]
         prop_names = entity.get("propagatedClassificationNames", [])
-        # Best-effort: propagation may take longer or be disabled
-        if prop_names and self.tag_name in prop_names:
-            pass  # Propagation confirmed in search
+        assert self.tag_name in prop_names, (
+            f"Propagated classification {self.tag_name} NOT found in "
+            f"ES propagatedClassificationNames for target {guid_tgt}. "
+            f"Got: {prop_names}. "
+            f"classificationNames: {entity.get('classificationNames', [])}"
+        )
+        print(f"  [prop-search] VERIFIED: {self.tag_name} in propagatedClassificationNames "
+              f"for target {guid_tgt}")
+
+    @test("classification_es_cleanup_after_removal",
+          tags=["classification", "search"], order=9.5,
+          depends_on=["add_classification"])
+    def test_classification_es_cleanup_after_removal(self, client, ctx):
+        """ES denormalized fields (__classificationNames, classificationNames)
+        must be cleaned up after classification removal.
+        Matches ClassificationDeletionESIntegrationTest.java.
+        """
+        if not self.tags_ok:
+            raise SkipTestError("Classification typedef not queryable")
+
+        # Create fresh entity with classification for this test
+        guid = _create_entity_and_get_guid(client, ctx, "es-cleanup-test")
+        resp = client.post(
+            f"/entity/guid/{guid}/classifications",
+            json_data=[{"typeName": self.tag_name}],
+        )
+        assert_status_in(resp, [200, 204])
+
+        # Wait for ES sync, verify tag appears in ES
+        es_wait = ctx.get("es_sync_wait", 5)
+        time.sleep(es_wait)
+        found, entity = _search_entity_in_es(client, guid, max_retries=5, retry_interval=3)
+        assert found, f"Entity {guid} not found in ES after adding classification"
+
+        cn_before = entity.get("classificationNames", [])
+        print(f"  [es-cleanup] Before removal: classificationNames={cn_before}")
+        assert self.tag_name in cn_before, (
+            f"Expected {self.tag_name} in classificationNames before removal, "
+            f"got {cn_before}"
+        )
+
+        # Remove classification via REST API
+        resp_del = client.delete(f"/entity/guid/{guid}/classification/{self.tag_name}")
+        assert_status_in(resp_del, [200, 204])
+
+        # Verify classification removed from REST API
+        resp_check = client.get(f"/entity/guid/{guid}")
+        assert_status(resp_check, 200)
+        rest_cls = resp_check.json().get("entity", {}).get("classifications", [])
+        rest_tags = [c.get("typeName") for c in rest_cls if isinstance(c, dict)]
+        assert self.tag_name not in rest_tags, (
+            f"Classification {self.tag_name} still present via REST after delete: {rest_tags}"
+        )
+
+        # Poll ES until classificationNames no longer contains the tag (retry up to 30s)
+        print(f"  [es-cleanup] Waiting for ES to reflect classification removal...")
+        es_cleaned = False
+        for attempt in range(6):
+            time.sleep(5)
+            found, entity = _search_entity_in_es(client, guid, max_retries=1, retry_interval=1)
+            if not found:
+                continue
+            cn_after = entity.get("classificationNames", [])
+            print(f"  [es-cleanup] Attempt {attempt + 1}: classificationNames={cn_after}")
+            if self.tag_name not in cn_after:
+                es_cleaned = True
+                break
+
+        assert es_cleaned, (
+            f"ES classificationNames still contains {self.tag_name} after removal "
+            f"and 30s wait. Last seen: {cn_after}"
+        )
+        print(f"  [es-cleanup] VERIFIED: {self.tag_name} removed from ES classificationNames")
+
+    # ================================================================
+    #  Delete classification
+    # ================================================================
 
     @test("delete_classification", tags=["classification"], order=10, depends_on=["add_classification"])
     def test_delete_classification(self, client, ctx):
-
         resp = client.delete(
             f"/entity/guid/{self.entity_guid}/classification/{self.tag_name}"
         )
@@ -499,51 +665,63 @@ class EntityClassificationsSuite:
           depends_on=["delete_classification"])
     def test_classification_delete_kafka_cdc(self, client, ctx):
         """AUD-05: Verify Kafka CDC notification for CLASSIFICATION_DELETE."""
-
+        kafka_verifier = ctx.get("kafka_verifier")
+        if not kafka_verifier:
+            raise SkipTestError("Kafka verifier not configured (--no-kafka or no bootstrap servers)")
         result = assert_entity_in_kafka(ctx, self.entity_guid, "CLASSIFICATION_DELETE")
-        # Soft assertion — result is None if Kafka unavailable or not found
+        if result is None:
+            raise SkipTestError("Kafka CDC event not found within timeout")
+
+    # ================================================================
+    #  Edge cases
+    # ================================================================
 
     @test("add_classification_by_unique_attr", tags=["classification"], order=11)
     def test_add_classification_by_unique_attr(self, client, ctx):
+        if not self.tags_ok:
+            raise SkipTestError("Classification typedef not queryable")
+
         # Create another entity for this test
         qn = unique_qn("tag-ua-test")
-        entity = build_dataset_entity(qn=qn, name=unique_name("tag-ua"))
-        resp = client.post("/entity", json_data={"entity": entity})
-        body = resp.json()
-        creates = body.get("mutatedEntities", {}).get("CREATE", [])
-        updates = body.get("mutatedEntities", {}).get("UPDATE", [])
-        entities = creates or updates
-        guid = entities[0]["guid"]
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+        guid = _create_entity_and_get_guid(client, ctx, "tag-ua-test")
+
+        # We need to get the actual QN used
+        resp_entity = client.get(f"/entity/guid/{guid}")
+        assert_status(resp_entity, 200)
+        actual_qn = resp_entity.json().get("entity", {}).get("attributes", {}).get("qualifiedName")
+        assert actual_qn, f"Could not read qualifiedName for entity {guid}"
 
         # Add classification by unique attribute
         payload = [{"typeName": self.tag_name}]
         resp = client.post(
             "/entity/uniqueAttribute/type/DataSet/classifications",
             json_data=payload,
-            params={"attr:qualifiedName": qn},
+            params={"attr:qualifiedName": actual_qn},
         )
-        # 404 can happen if type cache hasn't propagated the classification yet
-        assert_status_in(resp, [200, 204, 404])
+        assert_status_in(resp, [200, 204])
 
-        if resp.status_code != 404:
-            # Read-after-write: verify classification attached
-            resp2 = client.get(f"/entity/guid/{guid}")
-            if resp2.status_code == 200:
-                entity_body = resp2.json().get("entity", {})
-                classifications = entity_body.get("classifications", [])
-                found = any(c.get("typeName") == self.tag_name for c in classifications)
-                assert found, f"Classification {self.tag_name} not found after add by unique attr"
+        # Read-after-write: verify classification attached
+        resp2 = client.get(f"/entity/guid/{guid}")
+        assert_status(resp2, 200)
+        entity_body = resp2.json().get("entity", {})
+        classifications = entity_body.get("classifications", [])
+        found = any(c.get("typeName") == self.tag_name for c in classifications)
+        assert found, (
+            f"Classification {self.tag_name} not found after add by unique attr"
+        )
 
-            # Clean up: delete classification
-            resp = client.delete(
-                f"/entity/uniqueAttribute/type/DataSet/classification/{self.tag_name}",
-                params={"attr:qualifiedName": qn},
-            )
-            assert_status_in(resp, [200, 204])
+        # Clean up: delete classification
+        resp = client.delete(
+            f"/entity/uniqueAttribute/type/DataSet/classification/{self.tag_name}",
+            params={"attr:qualifiedName": actual_qn},
+        )
+        assert_status_in(resp, [200, 204])
 
     @test("add_classification_nonexistent_entity", tags=["classification"], order=12)
     def test_add_classification_nonexistent_entity(self, client, ctx):
+        if not self.tags_ok:
+            raise SkipTestError("Classification typedef not queryable")
+
         payload = [{"typeName": self.tag_name}]
         resp = client.post(
             "/entity/guid/00000000-0000-0000-0000-000000000000/classifications",
@@ -551,7 +729,7 @@ class EntityClassificationsSuite:
         )
         assert_status_in(resp, [404, 400])
         body = resp.json()
+        assert isinstance(body, dict), f"Expected dict error response, got {type(body).__name__}"
         assert "errorMessage" in body or "errorCode" in body or "message" in body or "error" in body, (
-            f"Expected error details in response, got keys: {list(body.keys()) if isinstance(body, dict) else type(body).__name__}"
+            f"Expected error details in response, got keys: {list(body.keys())}"
         )
-

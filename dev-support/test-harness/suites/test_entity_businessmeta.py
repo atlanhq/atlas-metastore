@@ -30,7 +30,12 @@ class EntityBusinessMetaSuite:
                 time.sleep(10 * (attempt + 1))
                 continue
         if self.bm_ok:
-            time.sleep(15)
+            # Wait for type cache — verify typedef is queryable
+            for _ in range(3):
+                time.sleep(15)
+                check = client.get(f"/types/businessmetadatadef/name/{self.bm_name}")
+                if check.status_code == 200:
+                    break
         ctx.register_cleanup(
             lambda: client.delete(f"/types/typedef/name/{self.bm_name}")
         )
@@ -172,9 +177,13 @@ class EntityBusinessMetaSuite:
 
     @test("add_bm_audit", tags=["businessmeta", "audit"], order=4, depends_on=["add_business_metadata"])
     def test_add_bm_audit(self, client, ctx):
-        event = assert_audit_event_exists(client, self.entity_guid, "BUSINESS_ATTRIBUTE_UPDATE")
-        if event is None:
-            return  # Audit endpoint not available on this environment
+        event = assert_audit_event_exists(client, self.entity_guid, "BUSINESS_ATTRIBUTE_UPDATE",
+                                          max_wait=60, interval=10)
+        # assert_audit_event_exists now asserts internally if endpoint available
+        # Returns None only if endpoint genuinely doesn't exist
+        assert event is not None, (
+            f"Expected BUSINESS_ATTRIBUTE_UPDATE audit event for {self.entity_guid}"
+        )
 
     @test("bm_add_kafka_cdc", tags=["businessmeta", "kafka"], order=4.5,
           depends_on=["add_business_metadata"])
@@ -187,33 +196,44 @@ class EntityBusinessMetaSuite:
           depends_on=["add_business_metadata"])
     def test_search_by_bm_attribute(self, client, ctx):
         """CM-04: Search for entity by business metadata attribute in ES."""
+        # Poll ES until entity appears with BM attributes
+        print(f"  [bm-search] Polling ES for entity {self.entity_guid} with BM...")
+        found_entity = None
+        for i in range(6):
+            time.sleep(5)
+            resp = client.post("/search/indexsearch", json_data={
+                "dsl": {
+                    "from": 0, "size": 1,
+                    "query": {"bool": {"must": [
+                        {"term": {"__guid": self.entity_guid}},
+                        {"term": {"__state": "ACTIVE"}},
+                    ]}}
+                }
+            })
+            if resp.status_code != 200:
+                print(f"  [bm-search] Search returned {resp.status_code} ({(i+1)*5}s/30s)")
+                continue
+            entities = resp.json().get("entities", [])
+            if entities:
+                found_entity = entities[0]
+                bm = found_entity.get("businessAttributes", {}).get(self.bm_name, {})
+                if bm:
+                    print(f"  [bm-search] BM found in search after {(i+1)*5}s: {bm}")
+                    break
+                print(f"  [bm-search] Entity found but no BM yet ({(i+1)*5}s/30s)")
+            else:
+                print(f"  [bm-search] Entity not in ES yet ({(i+1)*5}s/30s)")
 
-        time.sleep(ctx.get("es_sync_wait", 5))
-
-        # Search by entity GUID and verify BM attributes are in the search result
-        resp = client.post("/search/indexsearch", json_data={
-            "dsl": {
-                "from": 0, "size": 1,
-                "query": {"bool": {"must": [
-                    {"term": {"__guid": self.entity_guid}},
-                    {"term": {"__state": "ACTIVE"}},
-                ]}}
-            }
-        })
-        if resp.status_code != 200:
-            return  # Search not available
-
-        body = resp.json()
-        entities = body.get("entities", [])
-        if not entities:
-            return  # Entity not yet in search index
-
-        entity = entities[0]
-        bm = entity.get("businessAttributes", {}).get(self.bm_name, {})
-        # BM field may be present in search results depending on ES mapping
-        # Best-effort: verify entity was found; BM field presence depends on mapping
-        assert entity.get("guid") == self.entity_guid, (
-            f"Expected guid={self.entity_guid}, got {entity.get('guid')}"
+        assert found_entity is not None, (
+            f"Entity {self.entity_guid} not found in ES after 30s polling"
+        )
+        assert found_entity.get("guid") == self.entity_guid, (
+            f"Expected guid={self.entity_guid}, got {found_entity.get('guid')}"
+        )
+        bm = found_entity.get("businessAttributes", {}).get(self.bm_name, {})
+        assert bm, (
+            f"Expected BM {self.bm_name} in search result for {self.entity_guid}, "
+            f"got businessAttributes={found_entity.get('businessAttributes', {})}"
         )
 
     @test("add_bm_nonexistent_entity", tags=["businessmeta"], order=5)
@@ -238,10 +258,16 @@ class EntityBusinessMetaSuite:
         throwaway_bm = unique_type_name("ThrowawayBM")
         payload = {"businessMetadataDefs": [build_business_metadata_def(name=throwaway_bm)]}
         resp = client.post("/types/typedefs", json_data=payload)
-        # 500/503 can happen on staging when type cache is under pressure
-        assert_status_in(resp, [200, 409, 500, 503])
-        if resp.status_code not in (200, 409):
-            return  # Typedef creation unavailable — skip gracefully
+        # Retry on 500/503
+        for attempt in range(3):
+            if resp.status_code in (200, 409):
+                break
+            if resp.status_code in (500, 503) and attempt < 2:
+                time.sleep(10)
+                resp = client.post("/types/typedefs", json_data=payload)
+        assert resp.status_code in (200, 409), (
+            f"Throwaway BM typedef creation failed after retries (status={resp.status_code})"
+        )
 
         time.sleep(15)
 

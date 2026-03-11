@@ -5,7 +5,7 @@ import time
 from core.decorators import suite, test
 from core.assertions import (
     assert_status, assert_status_in, assert_field_present,
-    assert_field_equals, assert_field_not_empty,
+    assert_field_equals, assert_field_not_empty, SkipTestError,
 )
 from core.audit_helpers import assert_audit_event_exists
 from core.kafka_helpers import assert_entity_in_kafka
@@ -69,14 +69,14 @@ class GlossarySuite:
         resp = client.post("/glossary", json_data={
             "name": self.glossary_name,
             "shortDescription": "Test harness glossary",
-        }, timeout=120)
+        }, timeout=180)
 
         guid = None
         if resp.status_code == 200:
             guid = resp.json().get("guid")
         elif resp.status_code == 408:
             # Timeout — server may still be creating it. Poll until it appears.
-            guid = _poll_for_glossary(self.glossary_name, max_wait=90, interval=15)
+            guid = _poll_for_glossary(self.glossary_name, max_wait=120, interval=15)
 
         assert guid, (
             f"Failed to create glossary after retries (last status={resp.status_code})"
@@ -145,11 +145,12 @@ class GlossarySuite:
     @test("glossary_create_audit", tags=["glossary", "audit"], order=7, depends_on=["create_glossary"])
     def test_glossary_create_audit(self, client, ctx):
         guid = ctx.get_entity_guid("glossary")
-        if not guid:
-            return
-        event = assert_audit_event_exists(client, guid, "ENTITY_CREATE")
-        if event is None:
-            return  # Audit endpoint not available on this environment
+        assert guid, "Glossary GUID not found in context — create_glossary must have failed"
+        event = assert_audit_event_exists(client, guid, "ENTITY_CREATE",
+                                          max_wait=60, interval=10)
+        assert event is not None, (
+            f"Expected ENTITY_CREATE audit event for glossary {guid}"
+        )
 
     # ---- Term CRUD ----
 
@@ -203,8 +204,7 @@ class GlossarySuite:
     @test("get_term", tags=["glossary"], order=12, depends_on=["create_term"])
     def test_get_term(self, client, ctx):
         guid = ctx.get_entity_guid("term1")
-        if not guid:
-            return
+        assert guid, "term1 GUID not found in context — create_term must have failed"
         resp = client.get(f"/glossary/term/{guid}")
         assert_status(resp, 200)
         assert_field_equals(resp, "name", self.term_name)
@@ -212,8 +212,7 @@ class GlossarySuite:
     @test("update_term", tags=["glossary", "crud"], order=13, depends_on=["create_term"])
     def test_update_term(self, client, ctx):
         guid = ctx.get_entity_guid("term1")
-        if not guid:
-            return
+        assert guid, "term1 GUID not found in context — create_term must have failed"
         glossary_guid = ctx.get_entity_guid("glossary")
         resp = client.put(f"/glossary/term/{guid}", json_data={
             "guid": guid,
@@ -231,8 +230,7 @@ class GlossarySuite:
     @test("get_glossary_terms_list", tags=["glossary"], order=15, depends_on=["create_term"])
     def test_get_glossary_terms_list(self, client, ctx):
         guid = ctx.get_entity_guid("glossary")
-        if not guid:
-            return
+        assert guid, "Glossary GUID not found in context"
         resp = client.get(f"/glossary/{guid}/terms", params={
             "limit": 10, "offset": 0, "sort": "ASC",
         })
@@ -244,8 +242,7 @@ class GlossarySuite:
     @test("get_glossary_detailed_with_terms", tags=["glossary"], order=16, depends_on=["create_term"])
     def test_get_glossary_detailed_with_terms(self, client, ctx):
         guid = ctx.get_entity_guid("glossary")
-        if not guid:
-            return
+        assert guid, "Glossary GUID not found in context"
         resp = client.get(f"/glossary/{guid}/detailed")
         assert_status(resp, 200)
         body = resp.json()
@@ -280,8 +277,7 @@ class GlossarySuite:
     @test("get_category", tags=["glossary"], order=21, depends_on=["create_category"])
     def test_get_category(self, client, ctx):
         guid = ctx.get_entity_guid("category1")
-        if not guid:
-            return
+        assert guid, "category1 GUID not found in context — create_category must have failed"
         resp = client.get(f"/glossary/category/{guid}")
         assert_status(resp, 200)
         assert_field_equals(resp, "name", self.category_name)
@@ -339,8 +335,7 @@ class GlossarySuite:
     @test("get_glossary_categories_list", tags=["glossary"], order=25, depends_on=["create_category"])
     def test_get_glossary_categories_list(self, client, ctx):
         guid = ctx.get_entity_guid("glossary")
-        if not guid:
-            return
+        assert guid, "Glossary GUID not found in context"
         resp = client.get(f"/glossary/{guid}/categories", params={
             "limit": 10, "offset": 0, "sort": "ASC",
         })
@@ -352,8 +347,7 @@ class GlossarySuite:
     @test("get_category_terms", tags=["glossary"], order=26, depends_on=["create_term", "create_category"])
     def test_get_category_terms(self, client, ctx):
         cat_guid = ctx.get_entity_guid("category1")
-        if not cat_guid:
-            return
+        assert cat_guid, "category1 GUID not found in context"
         resp = client.get(f"/glossary/category/{cat_guid}/terms")
         # May be empty if term not assigned to category, just verify endpoint works
         assert_status_in(resp, [200, 204])
@@ -361,8 +355,7 @@ class GlossarySuite:
     @test("assign_term_to_entity", tags=["glossary"], order=30, depends_on=["create_term"])
     def test_assign_term_to_entity(self, client, ctx):
         term_guid = ctx.get_entity_guid("term1")
-        if not term_guid:
-            return
+        assert term_guid, "term1 GUID not found in context"
         # Create a DataSet entity for term assignment
         qn = unique_qn("term-assign-test")
         entity = build_dataset_entity(qn=qn, name=unique_name("term-assign"))
@@ -406,13 +399,11 @@ class GlossarySuite:
     def test_disassociate_term_from_entity(self, client, ctx):
         term_guid = ctx.get_entity_guid("term1")
         entity_guid = ctx.get_entity_guid("term_assign_entity")
-        if not entity_guid:
-            return
+        assert entity_guid, "term_assign_entity GUID not found in context"
 
         # First get the relationship guid
         resp = client.get(f"/glossary/terms/{term_guid}/assignedEntities")
-        if resp.status_code != 200:
-            return
+        assert_status(resp, 200)
         body = resp.json()
         entities = body if isinstance(body, list) else []
         # Find the assignment with matching guid
@@ -421,8 +412,9 @@ class GlossarySuite:
             if e.get("guid") == entity_guid:
                 assignment = e
                 break
-        if not assignment:
-            return
+        assert assignment, (
+            f"Entity {entity_guid} not found in assigned entities of term {term_guid}"
+        )
 
         # Disassociate
         resp = client.put(
@@ -435,8 +427,7 @@ class GlossarySuite:
     @test("update_category", tags=["glossary", "crud"], order=22, depends_on=["create_category"])
     def test_update_category(self, client, ctx):
         guid = ctx.get_entity_guid("category1")
-        if not guid:
-            return
+        assert guid, "category1 GUID not found in context"
         glossary_guid = ctx.get_entity_guid("glossary")
         resp = client.put(f"/glossary/category/{guid}", json_data={
             "guid": guid,
@@ -459,51 +450,59 @@ class GlossarySuite:
     def test_term_assignment_in_search(self, client, ctx):
         entity_guid = ctx.get_entity_guid("term_assign_entity")
         term_guid = ctx.get_entity_guid("term1")
-        if not entity_guid or not term_guid:
-            return
+        assert entity_guid, "term_assign_entity GUID not found in context"
+        assert term_guid, "term1 GUID not found in context"
 
-        time.sleep(ctx.get("es_sync_wait", 5))
+        # Poll ES until entity appears with meanings populated
+        print(f"  [glossary-search] Polling ES for entity {entity_guid} with meanings...")
+        found_entity = None
+        meanings_found = False
+        for i in range(6):
+            time.sleep(5)
+            resp = client.post("/search/indexsearch", json_data={
+                "dsl": {
+                    "from": 0, "size": 1,
+                    "query": {"bool": {"must": [
+                        {"term": {"__guid": entity_guid}},
+                        {"term": {"__state": "ACTIVE"}},
+                    ]}}
+                }
+            })
+            if resp.status_code != 200:
+                print(f"  [glossary-search] Search returned {resp.status_code} ({(i+1)*5}s/30s)")
+                continue
+            entities = resp.json().get("entities", [])
+            if not entities:
+                print(f"  [glossary-search] Entity not in ES yet ({(i+1)*5}s/30s)")
+                continue
+            found_entity = entities[0]
+            meanings = found_entity.get("meanings", [])
+            if meanings and isinstance(meanings, list) and len(meanings) > 0:
+                meanings_found = True
+                print(f"  [glossary-search] Meanings found after {(i+1)*5}s")
+                break
+            print(f"  [glossary-search] Entity found but no meanings yet ({(i+1)*5}s/30s)")
 
-        # Search entity by GUID and verify meanings in response
-        resp = client.post("/search/indexsearch", json_data={
-            "dsl": {
-                "from": 0, "size": 1,
-                "query": {"bool": {"must": [
-                    {"term": {"__guid": entity_guid}},
-                    {"term": {"__state": "ACTIVE"}},
-                ]}}
-            }
-        })
-        if resp.status_code != 200:
-            return  # Search not available
+        assert found_entity is not None, (
+            f"Entity {entity_guid} not found in ES after 30s polling"
+        )
+        meanings = found_entity.get("meanings", [])
+        assert meanings_found and meanings, (
+            f"Expected meanings on entity {entity_guid} after term assignment, "
+            f"but meanings is empty after 30s polling"
+        )
 
-        body = resp.json()
-        entities = body.get("entities", [])
-        if not entities:
-            return  # Entity not yet in search
-
-        entity = entities[0]
-
-        # Check meanings array has termGuid
-        meanings = entity.get("meanings", [])
-        if meanings and isinstance(meanings, list):
-            if isinstance(meanings[0], dict):
-                term_guids = [m.get("termGuid") for m in meanings]
-                assert term_guid in term_guids, (
-                    f"Expected termGuid {term_guid} in meanings, got {term_guids}"
-                )
-
-        # Check meaningNames field is present (if populated)
-        meaning_names = entity.get("meaningNames", [])
-        if meaning_names:
-            assert len(meaning_names) > 0, "Expected non-empty meaningNames"
+        # Verify termGuid in meanings
+        if isinstance(meanings[0], dict):
+            term_guids = [m.get("termGuid") for m in meanings]
+            assert term_guid in term_guids, (
+                f"Expected termGuid {term_guid} in meanings, got {term_guids}"
+            )
 
     @test("delete_glossary_not_empty", tags=["glossary"], order=79)
     def test_delete_glossary_not_empty(self, client, ctx):
-        # Try to delete glossary with terms still present
         guid = ctx.get_entity_guid("glossary")
-        if not guid:
-            return
+        assert guid, "Glossary GUID not found in context"
         resp = client.delete(f"/glossary/{guid}")
         # May return 409 (conflict) if cascade not supported, or 200 if cascade delete
         assert_status_in(resp, [200, 204, 409])
@@ -519,19 +518,17 @@ class GlossarySuite:
     @test("delete_category", tags=["glossary", "crud"], order=80, depends_on=["create_category"])
     def test_delete_category(self, client, ctx):
         if ctx.get("glossary_cascade_deleted"):
-            return  # Already deleted by cascade
+            raise SkipTestError("Glossary was cascade-deleted — category already gone")
         guid = ctx.get_entity_guid("category1")
-        if not guid:
-            return
+        assert guid, "category1 GUID not found in context"
         resp = client.delete(f"/glossary/category/{guid}")
         assert_status_in(resp, [200, 204])
 
     @test("delete_term", tags=["glossary", "crud"], order=81, depends_on=["create_term"])
     def test_delete_term(self, client, ctx):
         if ctx.get("glossary_cascade_deleted"):
-            return  # Already deleted by cascade
+            raise SkipTestError("Glossary was cascade-deleted — term already gone")
         guid = ctx.get_entity_guid("term1")
-        if not guid:
-            return
+        assert guid, "term1 GUID not found in context"
         resp = client.delete(f"/glossary/term/{guid}")
         assert_status_in(resp, [200, 204])

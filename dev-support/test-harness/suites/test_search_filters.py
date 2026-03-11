@@ -8,7 +8,7 @@ advanced attribute operators via the basic search API.
 import time
 
 from core.decorators import suite, test
-from core.assertions import assert_status, assert_status_in
+from core.assertions import assert_status, assert_status_in, SkipTestError
 from core.data_factory import (
     build_dataset_entity, build_business_metadata_def,
     unique_name, unique_qn, unique_type_name, PREFIX,
@@ -19,14 +19,19 @@ from core.data_factory import (
 QN_FIELDS = ("qualifiedName.keyword", "qualifiedName", "__qualifiedName")
 
 
-def _index_search(client, dsl):
-    """Issue an indexsearch query and return (available, body)."""
-    resp = client.post("/search/indexsearch", json_data={"dsl": dsl})
-    if resp.status_code in (404, 400, 405):
+def _index_search(client, dsl, retries=2, interval=3):
+    """Issue an indexsearch query and return (available, body). Retries on 500/503."""
+    for attempt in range(retries + 1):
+        resp = client.post("/search/indexsearch", json_data={"dsl": dsl})
+        if resp.status_code in (404, 400, 405):
+            return False, {}
+        if resp.status_code == 200:
+            return True, resp.json()
+        if resp.status_code in (500, 503) and attempt < retries:
+            time.sleep(interval)
+            continue
         return False, {}
-    if resp.status_code != 200:
-        return False, {}
-    return True, resp.json()
+    return False, {}
 
 
 def _search_by_guid(client, guid):
@@ -38,6 +43,38 @@ def _search_by_guid(client, guid):
             {"term": {"__state": "ACTIVE"}},
         ]}}
     })
+
+
+def _poll_index_search(client, dsl, max_wait=30, interval=5, label="search"):
+    """Poll ES until query returns at least 1 result."""
+    last_body = {}
+    for i in range(max_wait // interval):
+        if i > 0:
+            time.sleep(interval)
+        available, body = _index_search(client, dsl)
+        if not available:
+            return False, {}
+        if body.get("approximateCount", 0) > 0:
+            return True, body
+        last_body = body
+        print(f"  [{label}] Polling ES ({(i+1)*interval}s/{max_wait}s)")
+    return True, last_body
+
+
+def _poll_search_by_guid(client, guid, max_wait=30, interval=5):
+    """Poll ES until entity appears in search results."""
+    last_body = {}
+    for i in range(max_wait // interval):
+        if i > 0:
+            time.sleep(interval)
+        available, body = _search_by_guid(client, guid)
+        if not available:
+            return False, {}
+        if body.get("entities"):
+            return True, body
+        last_body = body
+        print(f"  [poll-es] Waiting for {guid} in ES ({(i+1)*interval}s/{max_wait}s)")
+    return True, last_body
 
 
 def _create_entity_and_register(client, ctx, suffix, extra_attrs=None,
@@ -92,30 +129,43 @@ class SearchFiltersSuite:
             client, ctx, "filt-e",
         )
 
-        # --- BM typedef + Entity D ---
+        # --- BM typedef + Entity D (with retry on type cache) ---
         self.bm_ok = False
         self.bm_name = unique_type_name("FiltBM")
-        bm_resp = client.post("/types/typedefs", json_data={
-            "businessMetadataDefs": [build_business_metadata_def(name=self.bm_name)]
-        })
-        if bm_resp.status_code in (200, 409):
-            time.sleep(10)  # type cache propagation
-            ctx.register_cleanup(
-                lambda: client.delete(f"/types/typedef/name/{self.bm_name}")
-            )
+        for attempt in range(3):
+            bm_resp = client.post("/types/typedefs", json_data={
+                "businessMetadataDefs": [build_business_metadata_def(name=self.bm_name)]
+            })
+            if bm_resp.status_code in (200, 409):
+                break
+            if attempt < 2:
+                time.sleep(10)
+        assert bm_resp.status_code in (200, 409), (
+            f"BM typedef creation failed after 3 attempts (last status={bm_resp.status_code})"
+        )
+        time.sleep(15)  # type cache propagation
+        ctx.register_cleanup(
+            lambda: client.delete(f"/types/typedef/name/{self.bm_name}")
+        )
 
-            self.guid_d, self.qn_d, self.name_d = _create_entity_and_register(
-                client, ctx, "filt-d",
-            )
-            # Set BM value on Entity D
+        self.guid_d, self.qn_d, self.name_d = _create_entity_and_register(
+            client, ctx, "filt-d",
+        )
+        # Set BM value on Entity D (retry on 404 type cache lag)
+        for attempt in range(3):
             bm_set_resp = client.post(
                 f"/entity/guid/{self.guid_d}/businessmetadata",
                 json_data={self.bm_name: {"bmField1": "filter-bm-val"}},
             )
             if bm_set_resp.status_code in (200, 204):
                 self.bm_ok = True
-        else:
-            self.guid_d = self.qn_d = self.name_d = None
+                break
+            if attempt < 2:
+                time.sleep(10)
+        assert self.bm_ok, (
+            f"Failed to set BM on entity {self.guid_d} after 3 attempts "
+            f"(last status={bm_set_resp.status_code})"
+        )
 
         # --- Glossary + Term assigned to Entity A ---
         self.glossary_ok = False
@@ -126,31 +176,37 @@ class SearchFiltersSuite:
             "name": unique_name("filt-gloss"),
             "shortDescription": "Filter test glossary",
         })
-        if glossary_resp.status_code == 200:
-            glossary_guid = glossary_resp.json().get("guid")
-            ctx.register_cleanup(lambda: client.delete(f"/glossary/{glossary_guid}"))
+        assert glossary_resp.status_code == 200, (
+            f"Glossary creation failed (status={glossary_resp.status_code})"
+        )
+        glossary_guid = glossary_resp.json().get("guid")
+        ctx.register_cleanup(lambda: client.delete(f"/glossary/{glossary_guid}"))
 
-            term_name = unique_name("filt-term")
-            term_resp = client.post("/glossary/term", json_data={
-                "name": term_name,
-                "shortDescription": "Filter test term",
-                "anchor": {"glossaryGuid": glossary_guid},
-            })
-            if term_resp.status_code == 200:
-                term_body = term_resp.json()
-                self.term_guid = term_body.get("guid")
-                self.term_qn = term_body.get("qualifiedName")
-                ctx.register_cleanup(
-                    lambda: client.delete(f"/glossary/term/{self.term_guid}")
-                )
+        term_name = unique_name("filt-term")
+        term_resp = client.post("/glossary/term", json_data={
+            "name": term_name,
+            "shortDescription": "Filter test term",
+            "anchor": {"glossaryGuid": glossary_guid},
+        })
+        assert term_resp.status_code == 200, (
+            f"Term creation failed (status={term_resp.status_code})"
+        )
+        term_body = term_resp.json()
+        self.term_guid = term_body.get("guid")
+        self.term_qn = term_body.get("qualifiedName")
+        ctx.register_cleanup(
+            lambda: client.delete(f"/glossary/term/{self.term_guid}")
+        )
 
-                # Assign term to Entity A
-                assign_resp = client.post(
-                    f"/glossary/terms/{self.term_guid}/assignedEntities",
-                    json_data=[{"guid": self.guid_a, "typeName": "DataSet"}],
-                )
-                if assign_resp.status_code in (200, 204):
-                    self.glossary_ok = True
+        # Assign term to Entity A
+        assign_resp = client.post(
+            f"/glossary/terms/{self.term_guid}/assignedEntities",
+            json_data=[{"guid": self.guid_a, "typeName": "DataSet"}],
+        )
+        assert assign_resp.status_code in (200, 204), (
+            f"Term assignment failed (status={assign_resp.status_code})"
+        )
+        self.glossary_ok = True
 
         # Single ES sync wait after all setup
         time.sleep(max(es_wait, 5))
@@ -163,19 +219,22 @@ class SearchFiltersSuite:
           order=1)
     def test_filter_certificate_verified(self, client, ctx):
         """DSL term filter on certificateStatus=VERIFIED."""
-        available, body = _index_search(client, {
+        dsl = {
             "from": 0, "size": 10,
             "query": {"bool": {"must": [
                 {"term": {"certificateStatus": "VERIFIED"}},
                 {"term": {"__typeName.keyword": "DataSet"}},
                 {"term": {"__state": "ACTIVE"}},
             ]}}
-        })
-        if not available:
-            return
+        }
+        available, body = _poll_index_search(client, dsl, max_wait=30, interval=5,
+                                             label="cert-verified")
+        assert available, "Index search API not available"
         count = body.get("approximateCount", 0)
-        if count == 0:
-            return  # certificateStatus may not be indexed on this env
+        assert count > 0, (
+            f"Expected certificateStatus=VERIFIED to return results, got count=0. "
+            f"Verify certificateStatus is indexed on this environment."
+        )
 
         guids = [e.get("guid") for e in body.get("entities", [])]
         assert self.guid_a in guids, (
@@ -190,19 +249,19 @@ class SearchFiltersSuite:
           order=2)
     def test_filter_certificate_draft(self, client, ctx):
         """DSL term filter on certificateStatus=DRAFT."""
-        available, body = _index_search(client, {
+        dsl = {
             "from": 0, "size": 10,
             "query": {"bool": {"must": [
                 {"term": {"certificateStatus": "DRAFT"}},
                 {"term": {"__typeName.keyword": "DataSet"}},
                 {"term": {"__state": "ACTIVE"}},
             ]}}
-        })
-        if not available:
-            return
+        }
+        available, body = _poll_index_search(client, dsl, max_wait=30, interval=5,
+                                             label="cert-draft")
+        assert available, "Index search API not available"
         count = body.get("approximateCount", 0)
-        if count == 0:
-            return  # certificateStatus not indexed
+        assert count > 0, "Expected certificateStatus=DRAFT to return results, got count=0"
 
         guids = [e.get("guid") for e in body.get("entities", [])]
         assert self.guid_b in guids, (
@@ -213,28 +272,33 @@ class SearchFiltersSuite:
           order=3)
     def test_filter_certificate_basic_search_api(self, client, ctx):
         """Basic search API with entityFilters for certificateStatus=VERIFIED."""
-        resp = client.post("/search/basic", json_data={
-            "typeName": "DataSet",
-            "excludeDeletedEntities": True,
-            "limit": 10,
-            "entityFilters": {
-                "condition": "AND",
-                "criterion": [{
-                    "attributeName": "certificateStatus",
-                    "operator": "eq",
-                    "attributeValue": "VERIFIED",
-                }],
-            },
-        })
-        if resp.status_code in (400, 404, 405):
-            return  # Basic search not available or filter not supported
-        if resp.status_code != 200:
-            return
-
-        body = resp.json()
-        entities = body.get("entities", [])
-        if not entities:
-            return  # certificateStatus not indexed
+        # Retry on transient errors
+        entities = []
+        for attempt in range(3):
+            resp = client.post("/search/basic", json_data={
+                "typeName": "DataSet",
+                "excludeDeletedEntities": True,
+                "limit": 10,
+                "entityFilters": {
+                    "condition": "AND",
+                    "criterion": [{
+                        "attributeName": "certificateStatus",
+                        "operator": "eq",
+                        "attributeValue": "VERIFIED",
+                    }],
+                },
+            })
+            if resp.status_code == 200:
+                body = resp.json()
+                entities = body.get("entities", [])
+                if entities:
+                    break
+            if attempt < 2:
+                time.sleep(5)
+        assert_status(resp, 200)
+        assert entities, (
+            "Basic search with certificateStatus=VERIFIED returned no entities"
+        )
 
         guids = [e.get("guid") for e in entities]
         assert self.guid_a in guids, (
@@ -249,19 +313,19 @@ class SearchFiltersSuite:
     @test("filter_by_label_dsl", tags=["filter", "search", "label"], order=4)
     def test_filter_by_label_dsl(self, client, ctx):
         """DSL term filter on __labels."""
-        available, body = _index_search(client, {
+        dsl = {
             "from": 0, "size": 10,
             "query": {"bool": {"must": [
                 {"term": {"__labels": "filter-label-x"}},
                 {"term": {"__typeName.keyword": "DataSet"}},
                 {"term": {"__state": "ACTIVE"}},
             ]}}
-        })
-        if not available:
-            return
+        }
+        available, body = _poll_index_search(client, dsl, max_wait=30, interval=5,
+                                             label="label-filter")
+        assert available, "Index search API not available"
         count = body.get("approximateCount", 0)
-        if count == 0:
-            return  # Labels not indexed
+        assert count > 0, "Expected __labels=filter-label-x to return results, got count=0"
 
         guids = [e.get("guid") for e in body.get("entities", [])]
         assert self.guid_c in guids, (
@@ -280,8 +344,7 @@ class SearchFiltersSuite:
                 {"term": {"__state": "ACTIVE"}},
             ]}}
         })
-        if not available:
-            return
+        assert available, "Index search API not available"
         count = body.get("approximateCount", 0)
         assert count == 0, (
             f"Entity E ({self.guid_e}) should NOT match label filter, "
@@ -296,27 +359,24 @@ class SearchFiltersSuite:
           order=6)
     def test_filter_by_bm_value_in_search(self, client, ctx):
         """Search Entity D by GUID and verify BM attribute in search result."""
-        if not self.bm_ok:
-            return  # BM setup failed
-
-        available, body = _search_by_guid(client, self.guid_d)
-        if not available:
-            return
+        available, body = _poll_search_by_guid(client, self.guid_d, max_wait=30)
+        assert available, "Index search API not available"
 
         entities = body.get("entities", [])
-        if not entities:
-            return  # Entity not yet in search
+        assert entities, f"Entity D ({self.guid_d}) not found in search after polling"
 
         entity = entities[0]
         assert entity.get("guid") == self.guid_d, (
             f"Expected guid={self.guid_d}, got {entity.get('guid')}"
         )
-        # Best-effort: check BM attributes in search result
         bm = entity.get("businessAttributes", {}).get(self.bm_name, {})
-        if bm:
-            assert bm.get("bmField1") == "filter-bm-val", (
-                f"Expected bmField1='filter-bm-val', got {bm}"
-            )
+        assert bm, (
+            f"Expected businessAttributes.{self.bm_name} in search result, "
+            f"got businessAttributes={entity.get('businessAttributes', {})}"
+        )
+        assert bm.get("bmField1") == "filter-bm-val", (
+            f"Expected bmField1='filter-bm-val', got {bm}"
+        )
 
     # ----------------------------------------------------------------
     # Glossary Term / Meanings Filter
@@ -325,21 +385,20 @@ class SearchFiltersSuite:
     @test("filter_by_meanings_dsl", tags=["filter", "search", "glossary"], order=7)
     def test_filter_by_meanings_dsl(self, client, ctx):
         """DSL term filter on __meanings by term qualifiedName."""
-        if not self.glossary_ok or not self.term_qn:
-            return  # Glossary setup failed
-
-        available, body = _index_search(client, {
+        dsl = {
             "from": 0, "size": 10,
             "query": {"bool": {"must": [
                 {"term": {"__meanings": self.term_qn}},
                 {"term": {"__state": "ACTIVE"}},
             ]}}
-        })
-        if not available:
-            return
+        }
+        available, body = _poll_index_search(client, dsl, max_wait=30, interval=5,
+                                             label="meanings-filter")
+        assert available, "Index search API not available"
         count = body.get("approximateCount", 0)
-        if count == 0:
-            return  # Meanings not indexed
+        assert count > 0, (
+            f"Expected __meanings={self.term_qn} to return results, got count=0"
+        )
 
         guids = [e.get("guid") for e in body.get("entities", [])]
         assert self.guid_a in guids, (
@@ -351,34 +410,27 @@ class SearchFiltersSuite:
           order=8)
     def test_filter_meanings_in_result(self, client, ctx):
         """Search Entity A by GUID and verify meanings field contains the term."""
-        if not self.glossary_ok or not self.term_guid:
-            return
-
-        available, body = _search_by_guid(client, self.guid_a)
-        if not available:
-            return
+        available, body = _poll_search_by_guid(client, self.guid_a, max_wait=30)
+        assert available, "Index search API not available"
 
         entities = body.get("entities", [])
-        if not entities:
-            return
+        assert entities, f"Entity A ({self.guid_a}) not found in search after polling"
 
         entity = entities[0]
         meanings = entity.get("meanings", [])
         meaning_names = entity.get("meaningNames", [])
 
+        assert meanings or meaning_names, (
+            f"Expected meanings or meaningNames on entity {self.guid_a}, "
+            f"but both are empty in search result"
+        )
         # Check meanings objects (list of dicts with termGuid)
-        if meanings and isinstance(meanings, list):
-            if isinstance(meanings[0], dict):
-                term_guids = [m.get("termGuid") for m in meanings]
-                assert self.term_guid in term_guids, (
-                    f"Expected termGuid {self.term_guid} in meanings, "
-                    f"got {term_guids}"
-                )
-                return
-        # Fallback: check meaningNames (list of strings)
-        if meaning_names and isinstance(meaning_names, list):
-            # At least the term name should be present
-            pass  # Best-effort — shape varies by environment
+        if meanings and isinstance(meanings, list) and isinstance(meanings[0], dict):
+            term_guids = [m.get("termGuid") for m in meanings]
+            assert self.term_guid in term_guids, (
+                f"Expected termGuid {self.term_guid} in meanings, "
+                f"got {term_guids}"
+            )
 
     # ----------------------------------------------------------------
     # Advanced Attribute Filter Operators via Basic Search API
@@ -387,26 +439,31 @@ class SearchFiltersSuite:
     @test("filter_attr_equals", tags=["filter", "search", "operator"], order=9)
     def test_filter_attr_equals(self, client, ctx):
         """Basic search EQUALS operator on qualifiedName."""
-        resp = client.post("/search/basic", json_data={
-            "typeName": "DataSet",
-            "excludeDeletedEntities": True,
-            "limit": 10,
-            "entityFilters": {
-                "condition": "AND",
-                "criterion": [{
-                    "attributeName": "qualifiedName",
-                    "operator": "eq",
-                    "attributeValue": self.qn_a,
-                }],
-            },
-        })
-        if resp.status_code in (400, 404, 405):
-            return  # Operator not supported
-        if resp.status_code != 200:
-            return
-
-        body = resp.json()
-        entities = body.get("entities", [])
+        entities = []
+        for attempt in range(3):
+            resp = client.post("/search/basic", json_data={
+                "typeName": "DataSet",
+                "excludeDeletedEntities": True,
+                "limit": 10,
+                "entityFilters": {
+                    "condition": "AND",
+                    "criterion": [{
+                        "attributeName": "qualifiedName",
+                        "operator": "eq",
+                        "attributeValue": self.qn_a,
+                    }],
+                },
+            })
+            if resp.status_code == 200:
+                entities = resp.json().get("entities", [])
+                if entities:
+                    break
+            if attempt < 2:
+                time.sleep(5)
+        assert_status(resp, 200)
+        assert entities, (
+            f"Basic search EQUALS on QN={self.qn_a} returned no entities"
+        )
         guids = [e.get("guid") for e in entities]
         assert self.guid_a in guids, (
             f"Entity A ({self.guid_a}) not found with EQUALS on QN "
@@ -416,28 +473,32 @@ class SearchFiltersSuite:
     @test("filter_attr_contains", tags=["filter", "search", "operator"], order=10)
     def test_filter_attr_contains(self, client, ctx):
         """Basic search CONTAINS operator on qualifiedName."""
-        # Use a substring of Entity A's qualifiedName (keyword field, works with wildcard)
         substring = self.qn_a.split("/")[-1] if "/" in self.qn_a else self.qn_a[-12:]
-        resp = client.post("/search/basic", json_data={
-            "typeName": "DataSet",
-            "excludeDeletedEntities": True,
-            "limit": 10,
-            "entityFilters": {
-                "condition": "AND",
-                "criterion": [{
-                    "attributeName": "qualifiedName",
-                    "operator": "contains",
-                    "attributeValue": substring,
-                }],
-            },
-        })
-        if resp.status_code in (400, 404, 405):
-            return
-        if resp.status_code != 200:
-            return
-
-        body = resp.json()
-        entities = body.get("entities", [])
+        entities = []
+        for attempt in range(3):
+            resp = client.post("/search/basic", json_data={
+                "typeName": "DataSet",
+                "excludeDeletedEntities": True,
+                "limit": 10,
+                "entityFilters": {
+                    "condition": "AND",
+                    "criterion": [{
+                        "attributeName": "qualifiedName",
+                        "operator": "contains",
+                        "attributeValue": substring,
+                    }],
+                },
+            })
+            if resp.status_code == 200:
+                entities = resp.json().get("entities", [])
+                if entities:
+                    break
+            if attempt < 2:
+                time.sleep(5)
+        assert_status(resp, 200)
+        assert entities, (
+            f"Basic search CONTAINS '{substring}' returned no entities"
+        )
         guids = [e.get("guid") for e in entities]
         assert self.guid_a in guids, (
             f"Entity A ({self.guid_a}) not found with CONTAINS "
@@ -447,28 +508,30 @@ class SearchFiltersSuite:
     @test("filter_attr_ends_with", tags=["filter", "search", "operator"], order=11)
     def test_filter_attr_ends_with(self, client, ctx):
         """Basic search ENDS_WITH operator on qualifiedName."""
-        # Use the last segment of Entity A's QN
         suffix = self.qn_a.split("/")[-1] if "/" in self.qn_a else self.qn_a[-12:]
-        resp = client.post("/search/basic", json_data={
-            "typeName": "DataSet",
-            "excludeDeletedEntities": True,
-            "limit": 10,
-            "entityFilters": {
-                "condition": "AND",
-                "criterion": [{
-                    "attributeName": "qualifiedName",
-                    "operator": "endsWith",
-                    "attributeValue": suffix,
-                }],
-            },
-        })
-        if resp.status_code in (400, 404, 405):
-            return
-        if resp.status_code != 200:
-            return
-
-        body = resp.json()
-        entities = body.get("entities", [])
+        entities = []
+        for attempt in range(3):
+            resp = client.post("/search/basic", json_data={
+                "typeName": "DataSet",
+                "excludeDeletedEntities": True,
+                "limit": 10,
+                "entityFilters": {
+                    "condition": "AND",
+                    "criterion": [{
+                        "attributeName": "qualifiedName",
+                        "operator": "endsWith",
+                        "attributeValue": suffix,
+                    }],
+                },
+            })
+            if resp.status_code == 200:
+                entities = resp.json().get("entities", [])
+                if entities:
+                    break
+            if attempt < 2:
+                time.sleep(5)
+        assert_status(resp, 200)
+        assert entities, f"Basic search ENDS_WITH '{suffix}' returned no entities"
         guids = [e.get("guid") for e in entities]
         assert self.guid_a in guids, (
             f"Entity A ({self.guid_a}) not found with ENDS_WITH "
@@ -478,35 +541,38 @@ class SearchFiltersSuite:
     @test("filter_attr_not_null", tags=["filter", "search", "operator"], order=12)
     def test_filter_attr_not_null(self, client, ctx):
         """Basic search NOT_NULL operator on description, scoped by QN prefix."""
-        resp = client.post("/search/basic", json_data={
-            "typeName": "DataSet",
-            "excludeDeletedEntities": True,
-            "limit": 25,
-            "entityFilters": {
-                "condition": "AND",
-                "criterion": [
-                    {
-                        "attributeName": "description",
-                        "operator": "not_null",
-                    },
-                    {
-                        "attributeName": "qualifiedName",
-                        "operator": "startsWith",
-                        "attributeValue": PREFIX,
-                    },
-                ],
-            },
-        })
-        if resp.status_code in (400, 404, 405):
-            return
-        if resp.status_code != 200:
-            return
-
-        body = resp.json()
-        entities = body.get("entities", [])
-        if not entities:
-            return  # Operator combination not supported or no match
-
+        entities = []
+        for attempt in range(3):
+            resp = client.post("/search/basic", json_data={
+                "typeName": "DataSet",
+                "excludeDeletedEntities": True,
+                "limit": 25,
+                "entityFilters": {
+                    "condition": "AND",
+                    "criterion": [
+                        {
+                            "attributeName": "description",
+                            "operator": "not_null",
+                        },
+                        {
+                            "attributeName": "qualifiedName",
+                            "operator": "startsWith",
+                            "attributeValue": PREFIX,
+                        },
+                    ],
+                },
+            })
+            if resp.status_code == 200:
+                entities = resp.json().get("entities", [])
+                if entities:
+                    break
+            if attempt < 2:
+                time.sleep(5)
+        assert_status(resp, 200)
+        assert entities, (
+            f"Basic search NOT_NULL on description + startsWith({PREFIX}) "
+            f"returned no entities"
+        )
         guids = [e.get("guid") for e in entities]
         assert self.guid_a in guids, (
             f"Entity A ({self.guid_a}) with description should appear in "

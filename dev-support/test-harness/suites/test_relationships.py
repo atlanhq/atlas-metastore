@@ -5,7 +5,7 @@ import time
 from core.decorators import suite, test
 from core.assertions import (
     assert_status, assert_status_in, assert_field_present,
-    assert_field_equals,
+    assert_field_equals, SkipTestError,
 )
 from core.data_factory import build_dataset_entity, build_relationship_def, unique_qn, unique_name, unique_type_name
 
@@ -85,8 +85,7 @@ class RelationshipsSuite:
     @test("get_relationship_by_guid", tags=["relationship"], order=2)
     def test_get_relationship_by_guid(self, client, ctx):
         # Get entity and look for relationship GUIDs
-        if not self.src_guid:
-            return
+        assert self.src_guid, "src_guid not found — setup must have failed"
         resp = client.get(f"/entity/guid/{self.src_guid}")
         assert_status(resp, 200)
         # Check if entity has any relationship attributes with GUIDs
@@ -119,8 +118,9 @@ class RelationshipsSuite:
 
     @test("create_direct_relationship", tags=["relationship", "crud"], order=4)
     def test_create_direct_relationship(self, client, ctx):
-        if not self.src_guid or not self.tgt_guid:
-            return
+        assert self.src_guid and self.tgt_guid, (
+            "src_guid or tgt_guid not found — setup must have failed"
+        )
         # Create a custom relationship def first
         rel_def_name = unique_type_name("TestRelDef")
         payload = {"relationshipDefs": [build_relationship_def(name=rel_def_name)]}
@@ -155,8 +155,10 @@ class RelationshipsSuite:
     @test("get_relationship_extended_info", tags=["relationship"], order=5, depends_on=["create_direct_relationship"])
     def test_get_relationship_extended_info(self, client, ctx):
         rel_guid = ctx.get("direct_rel_guid") or ctx.get("test_rel_guid")
-        if not rel_guid:
-            return
+        assert rel_guid, (
+            "No relationship GUID found in context — "
+            "create_direct_relationship or get_relationship_by_guid must have failed"
+        )
         resp = client.get(f"/relationship/guid/{rel_guid}", params={"extendedInfo": "true"})
         assert_status(resp, 200)
         body = resp.json()
@@ -170,8 +172,8 @@ class RelationshipsSuite:
     def test_update_relationship_propagate_tags(self, client, ctx):
         rel_guid = ctx.get("direct_rel_guid")
         rel_def_name = ctx.get("direct_rel_def_name")
-        if not rel_guid or not rel_def_name:
-            return
+        assert rel_guid, "direct_rel_guid not found in context — create_direct_relationship must have failed"
+        assert rel_def_name, "direct_rel_def_name not found in context — create_direct_relationship must have failed"
         payload = {
             "guid": rel_guid,
             "typeName": rel_def_name,
@@ -184,19 +186,18 @@ class RelationshipsSuite:
         if resp.status_code in [200, 204]:
             # Read-after-write: verify propagateTags updated
             resp2 = client.get(f"/relationship/guid/{rel_guid}")
-            if resp2.status_code == 200:
-                body = resp2.json()
-                rel = body.get("relationship", body)
-                if isinstance(rel, dict) and "propagateTags" in rel:
-                    assert rel["propagateTags"] == "ONE_TO_TWO", (
-                        f"Expected propagateTags=ONE_TO_TWO, got {rel['propagateTags']}"
-                    )
+            assert_status(resp2, 200)
+            body = resp2.json()
+            rel = body.get("relationship", body)
+            if isinstance(rel, dict) and "propagateTags" in rel:
+                assert rel["propagateTags"] == "ONE_TO_TWO", (
+                    f"Expected propagateTags=ONE_TO_TWO, got {rel['propagateTags']}"
+                )
 
     @test("delete_direct_relationship", tags=["relationship", "crud"], order=7, depends_on=["create_direct_relationship"])
     def test_delete_direct_relationship(self, client, ctx):
         rel_guid = ctx.get("direct_rel_guid")
-        if not rel_guid:
-            return
+        assert rel_guid, "direct_rel_guid not found — create_direct_relationship must have failed"
         resp = client.delete(f"/relationship/guid/{rel_guid}")
         assert_status_in(resp, [200, 204])
 
@@ -215,11 +216,11 @@ class RelationshipsSuite:
 
     @test("bulk_relationship_create", tags=["relationship", "crud"], order=8)
     def test_bulk_relationship_create(self, client, ctx):
-        if not self.src_guid or not self.tgt_guid:
-            return
+        assert self.src_guid and self.tgt_guid, "src/tgt GUIDs not found — setup must have failed"
         rel_def_name = ctx.get("direct_rel_def_name")
-        if not rel_def_name:
-            return
+        assert rel_def_name, (
+            "direct_rel_def_name not found — create_direct_relationship must have failed"
+        )
         # Bulk create relationships
         rels = [{
             "typeName": rel_def_name,
@@ -243,7 +244,6 @@ class RelationshipsSuite:
     @test("delete_relationship", tags=["relationship", "crud"], order=10)
     def test_delete_relationship(self, client, ctx):
         rel_guid = ctx.get("test_rel_guid")
-        if not rel_guid:
-            return  # No relationship to delete
+        assert rel_guid, "test_rel_guid not found — get_relationship_by_guid must have failed"
         resp = client.delete(f"/relationship/guid/{rel_guid}")
         assert_status_in(resp, [200, 204])

@@ -3,7 +3,7 @@
 from core.decorators import suite, test
 from core.assertions import (
     assert_status, assert_status_in, assert_field_present,
-    assert_field_equals, assert_field_not_empty,
+    assert_field_equals, assert_field_not_empty, SkipTestError,
 )
 from core.data_factory import (
     build_persona_entity, build_purpose_entity, build_auth_policy_entity,
@@ -26,36 +26,39 @@ class PersonaPurposeSuite:
     def test_create_persona(self, client, ctx):
         entity = build_persona_entity(name=self.persona_name)
         resp = client.post("/entity", json_data={"entity": entity})
-        # 400/403 if Keycloak unavailable
+        # 400/403 if Keycloak unavailable — genuine environment limitation
         assert_status_in(resp, [200, 400, 403])
         if resp.status_code != 200:
             ctx.set("persona_unavailable", True)
-            return
+            raise SkipTestError(
+                f"Persona creation returned {resp.status_code} — "
+                f"Keycloak/preprocessor not configured on this environment"
+            )
 
         body = resp.json()
         creates = body.get("mutatedEntities", {}).get("CREATE", [])
         updates = body.get("mutatedEntities", {}).get("UPDATE", [])
         entities = creates or updates
-        if entities:
-            guid = entities[0]["guid"]
-            ctx.register_entity("persona1", guid, "Persona")
-            ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+        assert entities, "Persona creation returned 200 but no entities in mutatedEntities"
+        guid = entities[0]["guid"]
+        ctx.register_entity("persona1", guid, "Persona")
+        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
 
-            # Read back the auto-generated QN and verify field values
-            resp2 = client.get(f"/entity/guid/{guid}")
-            if resp2.status_code == 200:
-                assert_field_equals(resp2, "entity.typeName", "Persona")
-                assert_field_equals(resp2, "entity.attributes.name", self.persona_name)
-                qn = resp2.json().get("entity", {}).get("attributes", {}).get("qualifiedName")
-                ctx.set("persona1_qn", qn)
+        # Read back the auto-generated QN and verify field values
+        resp2 = client.get(f"/entity/guid/{guid}")
+        assert_status(resp2, 200)
+        assert_field_equals(resp2, "entity.typeName", "Persona")
+        assert_field_equals(resp2, "entity.attributes.name", self.persona_name)
+        qn = resp2.json().get("entity", {}).get("attributes", {}).get("qualifiedName")
+        assert qn, f"Expected qualifiedName on persona {guid}"
+        ctx.set("persona1_qn", qn)
 
     @test("get_persona", tags=["persona_purpose"], order=2, depends_on=["create_persona"])
     def test_get_persona(self, client, ctx):
         if ctx.get("persona_unavailable"):
-            return
+            raise SkipTestError("Persona not available — Keycloak not configured")
         guid = ctx.get_entity_guid("persona1")
-        if not guid:
-            return
+        assert guid, "persona1 GUID not found in context — create_persona must have failed"
         resp = client.get(f"/entity/guid/{guid}")
         assert_status(resp, 200)
         assert_field_equals(resp, "entity.typeName", "Persona")
@@ -65,11 +68,11 @@ class PersonaPurposeSuite:
     def test_assign_users_to_persona(self, client, ctx):
         """P-02: Update persona to set personaUsers and personaGroups, verify persistence."""
         if ctx.get("persona_unavailable"):
-            return
+            raise SkipTestError("Persona not available — Keycloak not configured")
         guid = ctx.get_entity_guid("persona1")
+        assert guid, "persona1 GUID not found in context — create_persona must have failed"
         persona_qn = ctx.get("persona1_qn")
-        if not guid or not persona_qn:
-            return
+        assert persona_qn, "persona1_qn not found in context — create_persona must have failed"
 
         resp = client.post("/entity", json_data={
             "entity": {
@@ -86,7 +89,9 @@ class PersonaPurposeSuite:
         # 400/500 can happen if Keycloak validates user/group existence
         assert_status_in(resp, [200, 400, 500])
         if resp.status_code != 200:
-            return  # Keycloak validation rejected fake users — skip gracefully
+            raise SkipTestError(
+                f"Keycloak rejected fake user/group assignment (status={resp.status_code})"
+            )
 
         # Read back and verify lists persisted
         resp2 = client.get(f"/entity/guid/{guid}")
@@ -101,11 +106,11 @@ class PersonaPurposeSuite:
     @test("update_persona", tags=["persona_purpose", "crud"], order=3, depends_on=["create_persona"])
     def test_update_persona(self, client, ctx):
         if ctx.get("persona_unavailable"):
-            return
+            raise SkipTestError("Persona not available — Keycloak not configured")
         guid = ctx.get_entity_guid("persona1")
+        assert guid, "persona1 GUID not found in context — create_persona must have failed"
         persona_qn = ctx.get("persona1_qn")
-        if not guid or not persona_qn:
-            return
+        assert persona_qn, "persona1_qn not found in context — create_persona must have failed"
         resp = client.post("/entity", json_data={
             "entity": {
                 "typeName": "Persona",
@@ -120,10 +125,14 @@ class PersonaPurposeSuite:
         # 500 can happen due to NullPointerException in AccessControlUtils when
         # required Persona attributes (e.g. isEnabled) are missing from the update
         assert_status_in(resp, [200, 400, 500])
-        if resp.status_code == 200:
-            resp2 = client.get(f"/entity/guid/{guid}")
-            assert_status(resp2, 200)
-            assert_field_equals(resp2, "entity.attributes.description", "Updated persona by test harness")
+        if resp.status_code != 200:
+            raise SkipTestError(
+                f"Persona update returned {resp.status_code} — "
+                f"Keycloak/AccessControlUtils rejected update"
+            )
+        resp2 = client.get(f"/entity/guid/{guid}")
+        assert_status(resp2, 200)
+        assert_field_equals(resp2, "entity.attributes.description", "Updated persona by test harness")
 
     # ---- Purpose CRUD ----
 
@@ -131,35 +140,38 @@ class PersonaPurposeSuite:
     def test_create_purpose(self, client, ctx):
         entity = build_purpose_entity(name=self.purpose_name)
         resp = client.post("/entity", json_data={"entity": entity})
-        # 400/403 if Keycloak unavailable
+        # 400/403 if Keycloak unavailable — genuine environment limitation
         assert_status_in(resp, [200, 400, 403])
         if resp.status_code != 200:
             ctx.set("purpose_unavailable", True)
-            return
+            raise SkipTestError(
+                f"Purpose creation returned {resp.status_code} — "
+                f"Keycloak/preprocessor not configured on this environment"
+            )
 
         body = resp.json()
         creates = body.get("mutatedEntities", {}).get("CREATE", [])
         updates = body.get("mutatedEntities", {}).get("UPDATE", [])
         entities = creates or updates
-        if entities:
-            guid = entities[0]["guid"]
-            ctx.register_entity("purpose1", guid, "Purpose")
-            ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+        assert entities, "Purpose creation returned 200 but no entities in mutatedEntities"
+        guid = entities[0]["guid"]
+        ctx.register_entity("purpose1", guid, "Purpose")
+        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
 
-            resp2 = client.get(f"/entity/guid/{guid}")
-            if resp2.status_code == 200:
-                assert_field_equals(resp2, "entity.typeName", "Purpose")
-                assert_field_equals(resp2, "entity.attributes.name", self.purpose_name)
-                qn = resp2.json().get("entity", {}).get("attributes", {}).get("qualifiedName")
-                ctx.set("purpose1_qn", qn)
+        resp2 = client.get(f"/entity/guid/{guid}")
+        assert_status(resp2, 200)
+        assert_field_equals(resp2, "entity.typeName", "Purpose")
+        assert_field_equals(resp2, "entity.attributes.name", self.purpose_name)
+        qn = resp2.json().get("entity", {}).get("attributes", {}).get("qualifiedName")
+        assert qn, f"Expected qualifiedName on purpose {guid}"
+        ctx.set("purpose1_qn", qn)
 
     @test("get_purpose", tags=["persona_purpose"], order=11, depends_on=["create_purpose"])
     def test_get_purpose(self, client, ctx):
         if ctx.get("purpose_unavailable"):
-            return
+            raise SkipTestError("Purpose not available — Keycloak not configured")
         guid = ctx.get_entity_guid("purpose1")
-        if not guid:
-            return
+        assert guid, "purpose1 GUID not found in context — create_purpose must have failed"
         resp = client.get(f"/entity/guid/{guid}")
         assert_status(resp, 200)
         assert_field_equals(resp, "entity.typeName", "Purpose")
@@ -167,11 +179,11 @@ class PersonaPurposeSuite:
     @test("update_purpose", tags=["persona_purpose", "crud"], order=12, depends_on=["create_purpose"])
     def test_update_purpose(self, client, ctx):
         if ctx.get("purpose_unavailable"):
-            return
+            raise SkipTestError("Purpose not available — Keycloak not configured")
         guid = ctx.get_entity_guid("purpose1")
+        assert guid, "purpose1 GUID not found in context — create_purpose must have failed"
         purpose_qn = ctx.get("purpose1_qn")
-        if not guid or not purpose_qn:
-            return
+        assert purpose_qn, "purpose1_qn not found in context — create_purpose must have failed"
         resp = client.post("/entity", json_data={
             "entity": {
                 "typeName": "Purpose",
@@ -184,65 +196,69 @@ class PersonaPurposeSuite:
             }
         })
         assert_status_in(resp, [200, 400])
-        if resp.status_code == 200:
-            resp2 = client.get(f"/entity/guid/{guid}")
-            assert_status(resp2, 200)
-            assert_field_equals(resp2, "entity.attributes.description", "Updated purpose by test harness")
+        if resp.status_code != 200:
+            raise SkipTestError(
+                f"Purpose update returned {resp.status_code} — Keycloak rejected update"
+            )
+        resp2 = client.get(f"/entity/guid/{guid}")
+        assert_status(resp2, 200)
+        assert_field_equals(resp2, "entity.attributes.description", "Updated purpose by test harness")
 
     # ---- AuthPolicy CRUD ----
 
     @test("create_auth_policy", tags=["persona_purpose", "crud"], order=20, depends_on=["create_persona"])
     def test_create_auth_policy(self, client, ctx):
         if ctx.get("persona_unavailable"):
-            return
+            raise SkipTestError("Persona not available — Keycloak not configured")
         persona_guid = ctx.get_entity_guid("persona1")
-        if not persona_guid:
-            return
+        assert persona_guid, "persona1 GUID not found in context — create_persona must have failed"
         entity = build_auth_policy_entity(persona_guid, name=self.policy_name)
         resp = client.post("/entity", json_data={"entity": entity})
         assert_status_in(resp, [200, 400, 403])
-        if resp.status_code == 200:
-            body = resp.json()
-            creates = body.get("mutatedEntities", {}).get("CREATE", [])
-            updates = body.get("mutatedEntities", {}).get("UPDATE", [])
-            entities = creates or updates
-            if entities:
-                assert entities[0].get("typeName") == "AuthPolicy", (
-                    f"Expected typeName=AuthPolicy, got {entities[0].get('typeName')}"
-                )
-                guid = entities[0]["guid"]
-                ctx.register_entity("auth_policy1", guid, "AuthPolicy")
-                ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+        if resp.status_code != 200:
+            raise SkipTestError(
+                f"AuthPolicy creation returned {resp.status_code} — Keycloak rejected"
+            )
+        body = resp.json()
+        creates = body.get("mutatedEntities", {}).get("CREATE", [])
+        updates = body.get("mutatedEntities", {}).get("UPDATE", [])
+        entities = creates or updates
+        assert entities, "AuthPolicy creation returned 200 but no entities in mutatedEntities"
+        assert entities[0].get("typeName") == "AuthPolicy", (
+            f"Expected typeName=AuthPolicy, got {entities[0].get('typeName')}"
+        )
+        guid = entities[0]["guid"]
+        ctx.register_entity("auth_policy1", guid, "AuthPolicy")
+        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
 
     @test("get_persona_with_policies", tags=["persona_purpose"], order=21, depends_on=["create_auth_policy"])
     def test_get_persona_with_policies(self, client, ctx):
         if ctx.get("persona_unavailable"):
-            return
+            raise SkipTestError("Persona not available — Keycloak not configured")
         persona_guid = ctx.get_entity_guid("persona1")
-        if not persona_guid:
-            return
+        assert persona_guid, "persona1 GUID not found in context — create_persona must have failed"
         resp = client.get(f"/entity/guid/{persona_guid}", params={"ignoreRelationships": "false"})
         assert_status(resp, 200)
         entity = resp.json().get("entity", {})
         rel_attrs = entity.get("relationshipAttributes", {})
         policies = rel_attrs.get("policies", [])
         policy_guid = ctx.get_entity_guid("auth_policy1")
-        if policy_guid and policies:
-            found = any(
-                isinstance(p, dict) and p.get("guid") == policy_guid
-                for p in policies
-            )
-            assert found, f"Expected policy {policy_guid} in persona's policies"
+        assert policy_guid, "auth_policy1 GUID not found in context — create_auth_policy must have failed"
+        assert policies, f"Expected policies in persona's relationshipAttributes, got empty list"
+        found = any(
+            isinstance(p, dict) and p.get("guid") == policy_guid
+            for p in policies
+        )
+        assert found, f"Expected policy {policy_guid} in persona's policies, got {policies}"
 
     # ---- DELETE ----
 
     @test("delete_auth_policy", tags=["persona_purpose", "crud"], order=70, depends_on=["create_auth_policy"])
     def test_delete_auth_policy(self, client, ctx):
         if ctx.get("persona_unavailable"):
-            return
+            raise SkipTestError("Persona not available — Keycloak not configured")
         guid = ctx.get_entity_guid("auth_policy1")
-        if not guid:
-            return
+        assert guid, "auth_policy1 GUID not found in context — create_auth_policy must have failed"
         resp = client.delete(f"/entity/guid/{guid}")
         assert_status_in(resp, [200, 204])
 
@@ -257,10 +273,9 @@ class PersonaPurposeSuite:
     @test("delete_persona", tags=["persona_purpose", "crud"], order=80, depends_on=["create_persona"])
     def test_delete_persona(self, client, ctx):
         if ctx.get("persona_unavailable"):
-            return
+            raise SkipTestError("Persona not available — Keycloak not configured")
         guid = ctx.get_entity_guid("persona1")
-        if not guid:
-            return
+        assert guid, "persona1 GUID not found in context — create_persona must have failed"
         resp = client.delete(f"/entity/guid/{guid}")
         assert_status_in(resp, [200, 204])
 
@@ -273,10 +288,9 @@ class PersonaPurposeSuite:
     @test("delete_purpose", tags=["persona_purpose", "crud"], order=81, depends_on=["create_purpose"])
     def test_delete_purpose(self, client, ctx):
         if ctx.get("purpose_unavailable"):
-            return
+            raise SkipTestError("Purpose not available — Keycloak not configured")
         guid = ctx.get_entity_guid("purpose1")
-        if not guid:
-            return
+        assert guid, "purpose1 GUID not found in context — create_purpose must have failed"
         resp = client.delete(f"/entity/guid/{guid}")
         assert_status_in(resp, [200, 204])
 
