@@ -148,7 +148,7 @@ class LineageSuite:
         updates = body.get("mutatedEntities", {}).get("UPDATE", [])
         entities = creates or updates
         guid = entities[0]["guid"]
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+        ctx.register_entity_cleanup(guid)
 
         resp2 = client.get(f"/lineage/{guid}", params={
             "direction": "BOTH",
@@ -282,9 +282,14 @@ class LineageSuite:
             "depth": 3,
         })
         assert_status_in(resp, [200, 404])
-        if resp.status_code == 200:
+        if resp.status_code == 404:
             body = resp.json()
-            guid_map = body.get("guidEntityMap", {})
+            if isinstance(body, dict):
+                assert any(k in body for k in ("errorMessage", "errorCode", "message", "error")), (
+                    f"Expected error details for nonexistent GUID, got keys: {list(body.keys())}"
+                )
+        elif resp.status_code == 200:
+            body = resp.json()
             relations = body.get("relations", [])
             assert len(relations) == 0, (
                 f"Expected no relations for nonexistent GUID, got {len(relations)}"
@@ -374,8 +379,8 @@ class LineageSuite:
         if len(guids) < 2:
             raise SkipTestError("Could not create 2 entities for diamond topology")
         guid_a, guid_b = guids[0], guids[1]
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid_a}"))
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid_b}"))
+        ctx.register_entity_cleanup(guid_a)
+        ctx.register_entity_cleanup(guid_b)
 
         # Create P1: A -> B
         proc1 = build_process_entity(
@@ -388,7 +393,7 @@ class LineageSuite:
             p1_entities = resp_p1.json().get("mutatedEntities", {}).get("CREATE", [])
             if p1_entities:
                 p1_guid = p1_entities[0]["guid"]
-                ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{p1_guid}"))
+                ctx.register_entity_cleanup(p1_guid)
 
         # Create P2: A -> B (second path)
         proc2 = build_process_entity(
@@ -401,7 +406,7 @@ class LineageSuite:
             p2_entities = resp_p2.json().get("mutatedEntities", {}).get("CREATE", [])
             if p2_entities:
                 p2_guid = p2_entities[0]["guid"]
-                ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{p2_guid}"))
+                ctx.register_entity_cleanup(p2_guid)
 
         import time
         time.sleep(2)

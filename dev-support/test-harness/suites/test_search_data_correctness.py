@@ -16,6 +16,7 @@ from core.data_factory import (
     build_dataset_entity, build_classification_def, build_business_metadata_def,
     unique_name, unique_qn, unique_type_name, PREFIX,
 )
+from core.typedef_helpers import ensure_classification_types, create_typedef_verified
 
 
 # ES field names for qualifiedName differ between local and staging
@@ -95,25 +96,23 @@ class SearchDataCorrectnessSuite:
         es_wait = ctx.get("es_sync_wait", 5)
 
         # --- Classification typedef ---
-        self.tag_name = unique_type_name("DCorTag")
-        tag_resp = client.post("/types/typedefs", json_data={
-            "classificationDefs": [build_classification_def(name=self.tag_name)]
-        })
-        self.tag_ok = tag_resp.status_code in (200, 409)
-        if self.tag_ok:
-            time.sleep(10)  # type cache propagation
+        requested = [unique_type_name("DCorTag")]
+        names, created_tag, self.tag_ok = ensure_classification_types(
+            client, requested,
+        )
+        self.tag_name = names[0]
+        if created_tag:
             ctx.register_cleanup(
                 lambda: client.delete(f"/types/typedef/name/{self.tag_name}")
             )
 
         # --- BM typedef ---
         self.bm_name = unique_type_name("DCorBM")
-        bm_resp = client.post("/types/typedefs", json_data={
-            "businessMetadataDefs": [build_business_metadata_def(name=self.bm_name)]
-        })
-        self.bm_ok = bm_resp.status_code in (200, 409)
+        self.bm_ok, _ = create_typedef_verified(
+            client,
+            {"businessMetadataDefs": [build_business_metadata_def(name=self.bm_name)]},
+        )
         if self.bm_ok:
-            time.sleep(10)
             ctx.register_cleanup(
                 lambda: client.delete(f"/types/typedef/name/{self.bm_name}")
             )
@@ -141,7 +140,7 @@ class SearchDataCorrectnessSuite:
         updates = body.get("mutatedEntities", {}).get("UPDATE", [])
         entities = creates or updates
         self.guid_a = entities[0]["guid"]
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{self.guid_a}"))
+        ctx.register_entity_cleanup(self.guid_a)
 
         # Add classification to Entity A (with retry)
         self.tag_added = False

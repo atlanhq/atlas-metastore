@@ -125,8 +125,8 @@ class SearchSuite:
         resp = client.get("/search/dsl", params={
             "query": "from DataSet select name limit 5",
         })
-        # DSL may or may not be enabled; staging may return 500
-        assert_status_in(resp, [200, 400, 404, 500])
+        # DSL may or may not be enabled
+        assert_status_in(resp, [200, 400, 404])
         if resp.status_code == 200:
             body = resp.json()
             assert body, "Expected non-empty response from DSL search"
@@ -138,7 +138,7 @@ class SearchSuite:
             "limit": 5,
         }, timeout=60)
         # Wildcard classification search can be slow or unsupported
-        assert_status_in(resp, [200, 400, 408, 500])
+        assert_status_in(resp, [200, 400, 408])
         if resp.status_code == 200:
             body = resp.json()
             assert isinstance(body, dict), f"Expected dict response, got {type(body).__name__}"
@@ -387,7 +387,11 @@ class SearchSuite:
 
     @test("basic_search_sort_ascending", tags=["search"], order=20)
     def test_basic_search_sort_ascending(self, client, ctx):
-        """POST /search/basic with sortOrder=ASCENDING."""
+        """POST /search/basic with sortOrder=ASCENDING.
+
+        sortBy on basic search goes through JanusGraph which may fail with
+        PermanentBackendException on some environments.
+        """
         resp = client.post("/search/basic", json_data={
             "typeName": "DataSet",
             "limit": 5,
@@ -396,19 +400,24 @@ class SearchSuite:
             "sortOrder": "ASCENDING",
         }, timeout=60)
         assert_status(resp, 200)
-        body = resp.json()
-        entities = body.get("entities", [])
-        if len(entities) >= 2:
-            names = [e.get("attributes", {}).get("name", "") or e.get("displayText", "") for e in entities]
-            names_clean = [n for n in names if n]
-            if len(names_clean) >= 2:
-                assert names_clean == sorted(names_clean, key=str.lower), (
-                    f"Expected ascending sort, got: {names_clean}"
-                )
+        if resp.status_code == 200:
+            body = resp.json()
+            entities = body.get("entities", [])
+            if len(entities) >= 2:
+                names = [e.get("attributes", {}).get("name", "") or e.get("displayText", "") for e in entities]
+                names_clean = [n for n in names if n]
+                if len(names_clean) >= 2:
+                    assert names_clean == sorted(names_clean, key=str.lower), (
+                        f"Expected ascending sort, got: {names_clean}"
+                    )
 
     @test("basic_search_sort_descending", tags=["search"], order=21)
     def test_basic_search_sort_descending(self, client, ctx):
-        """POST /search/basic with sortOrder=DESCENDING."""
+        """POST /search/basic with sortOrder=DESCENDING.
+
+        sortBy on basic search goes through JanusGraph which may fail with
+        PermanentBackendException on some environments.
+        """
         resp = client.post("/search/basic", json_data={
             "typeName": "DataSet",
             "limit": 5,
@@ -417,15 +426,16 @@ class SearchSuite:
             "sortOrder": "DESCENDING",
         }, timeout=60)
         assert_status(resp, 200)
-        body = resp.json()
-        entities = body.get("entities", [])
-        if len(entities) >= 2:
-            names = [e.get("attributes", {}).get("name", "") or e.get("displayText", "") for e in entities]
-            names_clean = [n for n in names if n]
-            if len(names_clean) >= 2:
-                assert names_clean == sorted(names_clean, key=str.lower, reverse=True), (
-                    f"Expected descending sort, got: {names_clean}"
-                )
+        if resp.status_code == 200:
+            body = resp.json()
+            entities = body.get("entities", [])
+            if len(entities) >= 2:
+                names = [e.get("attributes", {}).get("name", "") or e.get("displayText", "") for e in entities]
+                names_clean = [n for n in names if n]
+                if len(names_clean) >= 2:
+                    assert names_clean == sorted(names_clean, key=str.lower, reverse=True), (
+                        f"Expected descending sort, got: {names_clean}"
+                    )
 
     @test("index_search_wildcard", tags=["search"], order=22)
     def test_index_search_wildcard(self, client, ctx):

@@ -46,7 +46,9 @@ def resolve_order(suite_filter=None):
                      f"test_{name}" in normalized or
                      name.replace("test_", "") in normalized}
 
-        # Include dependencies
+        requested = set(available)  # snapshot of explicitly requested suites
+
+        # Include dependencies (recursive)
         def add_deps(name):
             if name in available:
                 return
@@ -57,6 +59,12 @@ def resolve_order(suite_filter=None):
         for name in list(available):
             for dep in registry.get(name, {}).get("depends_on", []):
                 add_deps(dep)
+
+        # Print auto-resolved dependencies so user knows what's happening
+        auto_added = available - requested
+        if auto_added:
+            dep_list = ", ".join(sorted(auto_added))
+            print(f"\033[90m[deps] Auto-including dependent suites: {dep_list}\033[0m")
     else:
         available = set(registry.keys())
 

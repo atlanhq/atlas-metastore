@@ -16,7 +16,7 @@ from core.data_factory import (
     build_dataset_entity, build_process_entity, build_classification_def,
     build_business_metadata_def, unique_qn, unique_name, unique_type_name,
 )
-from core.typedef_helpers import create_typedef_verified
+from core.typedef_helpers import create_typedef_verified, ensure_classification_types
 
 
 @suite("entity_lifecycle", depends_on_suites=["entity_crud", "typedefs"],
@@ -24,21 +24,25 @@ from core.typedef_helpers import create_typedef_verified
 class EntityLifecycleSuite:
 
     def setup(self, client, ctx):
-        # Create classification typedef for lifecycle tests
-        self.tag_name = unique_type_name("LifecycleTag")
-        payload = {"classificationDefs": [build_classification_def(name=self.tag_name)]}
-        self.tag_ok, _ = create_typedef_verified(client, payload, max_wait=45, interval=15)
-        ctx.register_cleanup(
-            lambda: client.delete(f"/types/typedef/name/{self.tag_name}")
+        # Get 1 usable classification type (create new or use existing)
+        requested = [unique_type_name("LifecycleTag")]
+        names, self.created_tag, self.tag_ok = ensure_classification_types(
+            client, requested,
         )
+        self.tag_name = names[0]
+        if self.created_tag:
+            ctx.register_cleanup(
+                lambda: client.delete(f"/types/typedef/name/{self.tag_name}")
+            )
 
         # Create BM typedef
         self.bm_name = unique_type_name("LifecycleBM")
         bm_payload = {"businessMetadataDefs": [build_business_metadata_def(name=self.bm_name)]}
-        self.bm_ok, _ = create_typedef_verified(client, bm_payload, max_wait=45, interval=15)
-        ctx.register_cleanup(
-            lambda: client.delete(f"/types/typedef/name/{self.bm_name}")
-        )
+        self.bm_ok, _ = create_typedef_verified(client, bm_payload)
+        if self.bm_ok:
+            ctx.register_cleanup(
+                lambda: client.delete(f"/types/typedef/name/{self.bm_name}")
+            )
 
     @test("lifecycle_create", tags=["lifecycle", "crud"], order=1)
     def test_lifecycle_create(self, client, ctx):
@@ -108,9 +112,16 @@ class EntityLifecycleSuite:
         if resp.status_code == 404:
             raise SkipTestError("Classification type not yet propagated")
 
-        resp2 = client.get(f"/entity/guid/{guid}")
-        assert_status(resp2, 200)
-        cls_names = resp2.json().get("entity", {}).get("classificationNames", []) or []
+        # Poll for classification to appear (read-after-write delay on staging)
+        cls_names = []
+        for _attempt in range(5):
+            time.sleep(2)
+            resp2 = client.get(f"/entity/guid/{guid}")
+            if resp2.status_code != 200:
+                continue
+            cls_names = resp2.json().get("entity", {}).get("classificationNames", []) or []
+            if self.tag_name in cls_names:
+                break
         assert self.tag_name in cls_names, (
             f"Expected {self.tag_name} in classificationNames, got {cls_names}"
         )
@@ -171,7 +182,7 @@ class EntityLifecycleSuite:
         if not entities:
             raise SkipTestError("Could not create output entity for lineage")
         out_guid = entities[0]["guid"]
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{out_guid}"))
+        ctx.register_entity_cleanup(out_guid)
 
         proc = build_process_entity(
             inputs=[{"guid": guid, "typeName": "DataSet"}],
@@ -183,7 +194,7 @@ class EntityLifecycleSuite:
             p_creates = resp2.json().get("mutatedEntities", {}).get("CREATE", [])
             if p_creates:
                 proc_guid = p_creates[0]["guid"]
-                ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{proc_guid}"))
+                ctx.register_entity_cleanup(proc_guid)
 
     @test("lifecycle_verify_search", tags=["lifecycle", "search"], order=7,
           depends_on=["lifecycle_create"])

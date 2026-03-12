@@ -14,12 +14,20 @@ Usage:
 """
 
 import os
+import shutil
 import signal
 import sys
 import time
 
+# Clear __pycache__ to avoid running stale bytecode after edits
+_harness_root = os.path.dirname(os.path.abspath(__file__))
+for _dirpath, _dirnames, _ in os.walk(_harness_root):
+    if "__pycache__" in _dirnames:
+        shutil.rmtree(os.path.join(_dirpath, "__pycache__"), ignore_errors=True)
+        _dirnames.remove("__pycache__")
+
 # Ensure the harness root is on sys.path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _harness_root)
 
 from core.config import parse_args
 from core.auth import build_auth_provider
@@ -91,7 +99,7 @@ def main():
     def handle_signal(signum, frame):
         print(f"\nInterrupted (signal {signum}). Running cleanup...")
         if not config.skip_cleanup:
-            errors = ctx.run_cleanup()
+            errors = ctx.run_cleanup(client=client)
             if errors:
                 print(f"  Cleanup errors: {len(errors)}")
         reporter.print_summary()
@@ -114,6 +122,12 @@ def main():
         print(f"  ERROR: Cannot reach Atlas at {config.atlas_url}: {e}")
         sys.exit(1)
 
+    # Cleanup mode — delete artifacts from previous runs, then exit
+    if config.cleanup:
+        from core.cleanup import run_cleanup_all
+        run_cleanup_all(client, verbose=config.verbose)
+        sys.exit(0)
+
     # Run tests
     try:
         runner.run(client, ctx, reporter, config)
@@ -128,7 +142,7 @@ def main():
         # Cleanup
         if not config.skip_cleanup:
             print("\nRunning cleanup...")
-            errors = ctx.run_cleanup()
+            errors = ctx.run_cleanup(client=client)
             if errors:
                 print(f"  Cleanup completed with {len(errors)} errors")
                 if config.verbose:

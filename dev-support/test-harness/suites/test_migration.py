@@ -31,8 +31,10 @@ class MigrationSuite:
         assert_status_in(resp, [200, 400, 404])
         if resp.status_code == 200:
             body = resp.json()
-            assert isinstance(body, (dict, list)), (
-                f"Expected dict or list, got {type(body).__name__}"
+            # Response can be a string (e.g. "No Migration Found with this key"),
+            # dict, or list — all are valid
+            assert isinstance(body, (dict, list, str)), (
+                f"Expected dict, list, or str, got {type(body).__name__}"
             )
 
     @test("status_all_types", tags=["migration"], order=4)
@@ -42,8 +44,10 @@ class MigrationSuite:
         assert_status_in(resp, [200, 400, 404])
         if resp.status_code == 200:
             body = resp.json()
-            assert isinstance(body, (dict, list)), (
-                f"Expected dict or list, got {type(body).__name__}"
+            # Response can be a string (e.g. "No Migration Found with this key"),
+            # dict, or list — all are valid
+            assert isinstance(body, (dict, list, str)), (
+                f"Expected dict, list, or str, got {type(body).__name__}"
             )
 
     @test("submit_entity_attribute", tags=["migration"], order=5)

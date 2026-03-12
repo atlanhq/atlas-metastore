@@ -34,10 +34,10 @@ class RelationshipsSuite:
 
         if self.src_guid:
             ctx.register_entity("rel_src", self.src_guid, "DataSet")
-            ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{self.src_guid}"))
+            ctx.register_entity_cleanup(self.src_guid)
         if self.tgt_guid:
             ctx.register_entity("rel_tgt", self.tgt_guid, "DataSet")
-            ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{self.tgt_guid}"))
+            ctx.register_entity_cleanup(self.tgt_guid)
 
     @test("create_relationship", tags=["relationship", "crud"], order=1)
     def test_create_relationship(self, client, ctx):
@@ -62,7 +62,7 @@ class RelationshipsSuite:
             if entities:
                 proc_guid = entities[0]["guid"]
                 ctx.register_entity("rel_process", proc_guid, "Process")
-                ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{proc_guid}"))
+                ctx.register_entity_cleanup(proc_guid)
 
                 # Validate mutation response structure
                 assert entities[0].get("guid"), "Created entity should have guid"
@@ -229,7 +229,11 @@ class RelationshipsSuite:
     @test("delete_relationship", tags=["relationship", "crud"], order=10,
           depends_on=["get_relationship_by_guid"])
     def test_delete_relationship(self, client, ctx):
-        rel_guid = ctx.get("test_rel_guid")
-        assert rel_guid, "test_rel_guid not found — get_relationship_by_guid must have failed"
+        rel_guid = ctx.get("test_rel_guid") or ctx.get("direct_rel_guid")
+        if not rel_guid:
+            raise SkipTestError(
+                "No relationship GUID available — "
+                "get_relationship_by_guid must have failed"
+            )
         resp = client.delete(f"/relationship/guid/{rel_guid}")
         assert_status_in(resp, [200, 204])

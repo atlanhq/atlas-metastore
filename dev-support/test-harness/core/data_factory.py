@@ -230,9 +230,24 @@ def build_domain_entity(name=None, parent_domain_qn=None):
 
 
 def build_data_product_entity(name=None, domain_guid=None):
-    """DataProduct entity linked to a domain."""
+    """DataProduct entity linked to a domain.
+
+    dataProductAssetsDSL is mandatory (DataProductPreProcessor validates it).
+    We use a narrow DSL that matches nothing to avoid scanning all assets.
+    """
+    import json
     name = name or unique_name("product")
-    attrs = {"qualifiedName": unique_qn("product"), "name": name}
+    # DSL that matches no real assets (fake GUID filter)
+    assets_dsl = json.dumps({
+        "query": {"bool": {"must": [
+            {"term": {"__guid": "00000000-0000-0000-0000-000000000000"}},
+        ]}}
+    })
+    attrs = {
+        "qualifiedName": unique_qn("product"),
+        "name": name,
+        "dataProductAssetsDSL": assets_dsl,
+    }
     entity = {
         "typeName": "DataProduct",
         "attributes": attrs,

@@ -20,6 +20,7 @@ class HarnessConfig:
     tags: List[str] = field(default_factory=list)
     exclude_tags: List[str] = field(default_factory=list)
     skip_cleanup: bool = False
+    cleanup: bool = False
     timeout: int = 30
     es_sync_wait: int = 5
     verbose: bool = False
@@ -77,6 +78,8 @@ Examples:
                         help="Skip tests with these tags")
     parser.add_argument("--skip-cleanup", action="store_true",
                         help="Leave test data after run")
+    parser.add_argument("--cleanup", action="store_true",
+                        help="Delete all test-harness artifacts from previous runs (no tests run)")
     parser.add_argument("--timeout", type=int, default=30,
                         help="HTTP request timeout in seconds (default: 30)")
     parser.add_argument("--es-sync-wait", type=int, default=5,
@@ -103,6 +106,7 @@ Examples:
     cfg.tags = args.tags
     cfg.exclude_tags = args.exclude_tags
     cfg.skip_cleanup = args.skip_cleanup
+    cfg.cleanup = args.cleanup
     cfg.timeout = args.timeout
     cfg.es_sync_wait = args.es_sync_wait
     cfg.creds_file = args.creds_file

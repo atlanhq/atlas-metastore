@@ -53,7 +53,7 @@ def _create_entity_and_register(client, ctx, suffix, extra_attrs=None):
     if not entities:
         return None, None, None
     guid = entities[0]["guid"]
-    ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+    ctx.register_entity_cleanup(guid)
     return guid, qn, name
 
 

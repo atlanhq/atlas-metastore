@@ -7,6 +7,33 @@ from core.assertions import (
 )
 
 
+def _is_500_not_found(resp):
+    """Detect HTTP 500 that is really a missing endpoint/resource.
+
+    Some environments return 500 instead of 404 for unregistered routes or
+    missing resources (e.g. NotFoundException wrapped in a 500, NullPointerException
+    on /session when no HTTP session exists).  These are server bugs but the
+    endpoint is genuinely unavailable, so the test should skip.
+    """
+    if resp.status_code != 500:
+        return False
+    try:
+        body = resp.json() if callable(getattr(resp, "json", None)) else {}
+    except Exception:
+        return False
+    # Check causes array for known "not found" exception types
+    causes = body.get("causes", [])
+    not_found_types = (
+        "NotFoundException", "NullPointerException",
+        "WebApplicationException",
+    )
+    for cause in causes:
+        err_type = cause.get("errorType", "")
+        if any(t in err_type for t in not_found_types):
+            return True
+    return False
+
+
 @suite("admin", description="Admin & health endpoints")
 class AdminSuite:
 
@@ -55,8 +82,12 @@ class AdminSuite:
     @test("get_session", tags=["admin"], order=5)
     def test_get_session(self, client, ctx):
         resp = client.get("/session", admin=True)
-        # Staging may return 500 if session endpoint is not supported
-        assert_status_in(resp, [200, 500])
+        if _is_500_not_found(resp):
+            raise SkipTestError(
+                "GET /session returned 500 (NullPointerException) — "
+                "endpoint unavailable in this environment"
+            )
+        assert_status_in(resp, [200, 404])
         if resp.status_code == 200:
             body = resp.json()
             assert isinstance(body, dict) and body, "Expected non-empty dict session response"
@@ -106,8 +137,11 @@ class AdminSuite:
     @test("get_stack", tags=["admin"], order=12)
     def test_get_stack(self, client, ctx):
         resp = client.get("/stack", admin=True)
-        # Staging may restrict stack trace endpoint
-        assert_status_in(resp, [200, 500])
+        if _is_500_not_found(resp):
+            raise SkipTestError(
+                "GET /stack returned 500 — endpoint unavailable in this environment"
+            )
+        assert_status_in(resp, [200, 404])
         if resp.status_code == 200:
             body = resp.body
             assert body, "Expected non-empty stack response"
@@ -169,8 +203,12 @@ class AdminSuite:
             task_guid = tasks[0].get("taskGuid") or tasks[0].get("guid")
             if task_guid:
                 resp2 = client.get(f"/tasks/{task_guid}", admin=True)
-                # 500 can happen if the endpoint doesn't support GET by GUID
-                assert_status_in(resp2, [200, 404, 500])
+                if _is_500_not_found(resp2):
+                    raise SkipTestError(
+                        f"GET /tasks/{task_guid} returned 500 — "
+                        f"single-task endpoint unavailable in this environment"
+                    )
+                assert_status_in(resp2, [200, 404])
                 if resp2.status_code == 200:
                     body2 = resp2.json()
                     if isinstance(body2, dict):
@@ -194,7 +232,7 @@ class AdminSuite:
     def test_push_metrics_statsd(self, client, ctx):
         resp = client.get("/pushMetricsToStatsd", admin=True)
         # May fail if StatsD not configured or timeout on staging
-        assert_status_in(resp, [200, 404, 408, 500])
+        assert_status_in(resp, [200, 404, 408])
 
     @test("check_state", tags=["admin"], order=20)
     def test_check_state(self, client, ctx):
@@ -223,10 +261,10 @@ class AdminSuite:
             )
         except Exception as e:
             raise SkipTestError(f"Feature flag endpoint not reachable: {e}")
-        assert_status_in(resp, [200, 204, 404, 500])
-        if resp.status_code in (404, 500):
+        assert_status_in(resp, [200, 204, 404])
+        if resp.status_code == 404:
             raise SkipTestError(
-                f"Feature flag endpoint returned {resp.status_code} — not supported"
+                f"Feature flag endpoint returned 404 — not supported"
             )
 
         # Delete
@@ -240,7 +278,11 @@ class AdminSuite:
     def test_get_session_structure(self, client, ctx):
         """Validate session response structure has user identity fields."""
         resp = client.get("/session", admin=True)
-        assert_status_in(resp, [200, 500])
+        if _is_500_not_found(resp):
+            raise SkipTestError(
+                "GET /session returned 500 — endpoint unavailable in this environment"
+            )
+        assert_status_in(resp, [200, 404])
         if resp.status_code != 200:
             raise SkipTestError("Session endpoint returned non-200")
         body = resp.json()
@@ -260,10 +302,12 @@ class AdminSuite:
         assert_status(resp, 200)
         body = resp.json()
         assert isinstance(body, dict), f"Expected dict, got {type(body).__name__}"
-        # Health response should have some component or status field
+        # Health response may nest under "components" or expose component names directly
+        # (e.g. elasticsearch, cassandra, typeDefCache as top-level keys)
+        known_components = {"elasticsearch", "cassandra", "typeDefCache", "kafka", "redis"}
         has_components = any(
             k in body for k in ("components", "status", "healthy", "checks")
-        )
+        ) or bool(known_components & set(body.keys()))
         assert has_components, (
             f"Health response missing component/status fields, got keys: {list(body.keys())}"
         )
@@ -308,7 +352,12 @@ class AdminSuite:
     def test_get_server_properties(self, client, ctx):
         """GET /admin/server-properties — validate server configuration."""
         resp = client.get("/server-properties", admin=True)
-        assert_status_in(resp, [200, 404, 500])
+        if _is_500_not_found(resp):
+            raise SkipTestError(
+                "GET /server-properties returned 500 — "
+                "endpoint unavailable in this environment"
+            )
+        assert_status_in(resp, [200, 404])
         if resp.status_code == 200:
             body = resp.json()
             assert isinstance(body, dict), f"Expected dict, got {type(body).__name__}"
@@ -317,7 +366,11 @@ class AdminSuite:
     def test_thread_dump_structure(self, client, ctx):
         """Verify /admin/stack returns meaningful thread dump content."""
         resp = client.get("/stack", admin=True)
-        assert_status_in(resp, [200, 500])
+        if _is_500_not_found(resp):
+            raise SkipTestError(
+                "GET /stack returned 500 — endpoint unavailable in this environment"
+            )
+        assert_status_in(resp, [200, 404])
         if resp.status_code != 200:
             raise SkipTestError(f"Stack endpoint returned {resp.status_code}")
         body_str = str(resp.body)

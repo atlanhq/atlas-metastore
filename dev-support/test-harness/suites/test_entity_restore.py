@@ -5,7 +5,7 @@ import time
 from core.decorators import suite, test
 from core.assertions import assert_status, assert_status_in, assert_field_equals, SkipTestError
 from core.data_factory import build_dataset_entity, build_classification_def, unique_qn, unique_name, unique_type_name
-from core.typedef_helpers import create_typedef_verified
+from core.typedef_helpers import create_typedef_verified, ensure_classification_types
 
 
 @suite("entity_restore", depends_on_suites=["entity_crud"],
@@ -26,7 +26,7 @@ class EntityRestoreSuite:
         self.entity_guid = entities[0]["guid"]
         self.entity_qn = qn
         ctx.register_entity("restore_test_entity", self.entity_guid, "DataSet")
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{self.entity_guid}"))
+        ctx.register_entity_cleanup(self.entity_guid)
 
     @test("soft_delete_entity", tags=["restore", "crud"], order=1)
     def test_soft_delete_entity(self, client, ctx):
@@ -130,13 +130,16 @@ class EntityRestoreSuite:
         if ctx.get("restore_unavailable"):
             raise SkipTestError("Restore endpoint not available on this environment")
 
-        # Create a fresh entity with classification
-        tag_name = unique_type_name("RestoreTag")
-        payload = {"classificationDefs": [build_classification_def(name=tag_name)]}
-        ok, _resp = create_typedef_verified(client, payload, max_wait=45, interval=15)
+        # Get 1 usable classification type (create new or use existing)
+        requested = [unique_type_name("RestoreTag")]
+        names, created_new, ok = ensure_classification_types(
+            client, requested,
+        )
         if not ok:
-            raise SkipTestError("Classification typedef creation failed")
-        ctx.register_cleanup(lambda: client.delete(f"/types/typedef/name/{tag_name}"))
+            raise SkipTestError("Classification type not available")
+        tag_name = names[0]
+        if created_new:
+            ctx.register_cleanup(lambda: client.delete(f"/types/typedef/name/{tag_name}"))
 
         qn = unique_qn("restore-cls")
         entity = build_dataset_entity(qn=qn, name=unique_name("restore-cls"))
@@ -149,7 +152,7 @@ class EntityRestoreSuite:
         entities = creates or updates
         assert entities, "Entity creation failed"
         guid = entities[0]["guid"]
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+        ctx.register_entity_cleanup(guid)
 
         # Soft delete
         client.delete(f"/entity/guid/{guid}")
@@ -159,12 +162,20 @@ class EntityRestoreSuite:
         if resp2.status_code == 404:
             raise SkipTestError("Restore endpoint not available")
 
-        # Verify classification preserved
-        resp3 = client.get(f"/entity/guid/{guid}")
-        assert_status(resp3, 200)
-        entity_data = resp3.json().get("entity", {})
+        # Verify classification preserved (poll for read-after-write delay)
+        cls_names = []
+        for _attempt in range(5):
+            time.sleep(2)
+            resp3 = client.get(f"/entity/guid/{guid}")
+            if resp3.status_code != 200:
+                continue
+            entity_data = resp3.json().get("entity", {})
+            if entity_data.get("status") != "ACTIVE":
+                continue
+            cls_names = entity_data.get("classificationNames", []) or []
+            if tag_name in cls_names:
+                break
         assert_field_equals(resp3, "entity.status", "ACTIVE")
-        cls_names = entity_data.get("classificationNames", []) or []
         assert tag_name in cls_names, (
             f"Expected {tag_name} in classificationNames after restore, got {cls_names}"
         )
@@ -185,7 +196,7 @@ class EntityRestoreSuite:
         entities = creates or updates
         assert entities, "Entity creation failed"
         guid = entities[0]["guid"]
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+        ctx.register_entity_cleanup(guid)
 
         # Add labels
         client.post(f"/entity/guid/{guid}/labels", json_data=["restore-label-1"])

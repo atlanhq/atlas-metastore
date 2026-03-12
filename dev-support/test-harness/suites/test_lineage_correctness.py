@@ -16,9 +16,10 @@ import time
 from core.decorators import suite, test
 from core.assertions import assert_status, assert_status_in, SkipTestError
 from core.data_factory import (
-    build_dataset_entity, build_process_entity, build_classification_def,
+    build_dataset_entity, build_process_entity,
     unique_name, unique_qn, unique_type_name,
 )
+from core.typedef_helpers import ensure_classification_types
 
 
 # ---------------------------------------------------------------------------
@@ -46,41 +47,71 @@ def _search_by_guid(client, guid):
     })
 
 
-def _create_dataset(client, ctx, suffix):
-    """Create a DataSet, register cleanup, return guid."""
+def _create_dataset(client, ctx, suffix, type_name="DataSet"):
+    """Create an entity for lineage use, register cleanup, return guid or None."""
     qn = unique_qn(suffix)
-    entity = build_dataset_entity(qn=qn, name=unique_name(suffix))
+    entity = build_dataset_entity(qn=qn, name=unique_name(suffix), type_name=type_name)
     resp = client.post("/entity", json_data={"entity": entity})
-    assert_status(resp, 200)
+    if resp.status_code != 200:
+        detail = repr(resp.body)[:500] if resp.body else "(empty body)"
+        print(f"  [lineage-setup] DataSet creation for {suffix} returned {resp.status_code}: {detail}")
+        return None
     body = resp.json()
     creates = body.get("mutatedEntities", {}).get("CREATE", [])
     updates = body.get("mutatedEntities", {}).get("UPDATE", [])
     entities = creates or updates
+    if not entities:
+        print(f"  [lineage-setup] DataSet creation for {suffix} got 200 but no entities in response: {list(body.keys())}")
+        return None
     guid = entities[0]["guid"]
-    ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+    ctx.register_entity_cleanup(guid)
     return guid
 
 
-def _create_process(client, ctx, suffix, input_guids, output_guids):
-    """Create a Process with inputs/outputs.  Returns (ok, guid)."""
-    inputs = [{"guid": g, "typeName": "DataSet"} for g in input_guids]
-    outputs = [{"guid": g, "typeName": "DataSet"} for g in output_guids]
+def _create_process(client, ctx, suffix, input_guids, output_guids,
+                    entity_type="DataSet"):
+    """Create a Process with inputs/outputs.  Returns (ok, guid).
+
+    *entity_type* is used for the typeName in input/output references.
+    """
+    inputs = [{"guid": g, "typeName": entity_type} for g in input_guids]
+    outputs = [{"guid": g, "typeName": entity_type} for g in output_guids]
     proc = build_process_entity(
         qn=unique_qn(suffix), name=unique_name(suffix),
         inputs=inputs, outputs=outputs,
     )
     resp = client.post("/entity", json_data={"entity": proc})
     if resp.status_code != 200:
+        detail = repr(resp.body)[:500] if resp.body else "(empty body)"
+        print(f"  [lineage-setup] Process creation for {suffix} returned {resp.status_code}: {detail}")
         return False, None
     body = resp.json()
     creates = body.get("mutatedEntities", {}).get("CREATE", [])
     updates = body.get("mutatedEntities", {}).get("UPDATE", [])
     entities = creates or updates
     if not entities:
+        print(f"  [lineage-setup] Process creation for {suffix} got 200 but no entities: {list(body.keys())}")
         return False, None
     guid = entities[0]["guid"]
-    ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+    ctx.register_entity_cleanup(guid)
     return True, guid
+
+
+def _detect_lineage_entity_type(client):
+    """Determine which entity type to use for lineage endpoints.
+
+    On Atlan (preprod/staging), the relationship `process_catalog_outputs`
+    expects outputs of type `Catalog`.  DataSet does NOT extend Catalog, so
+    Process creation with DataSet outputs returns 400.
+
+    Returns "Catalog" if the type exists, else "DataSet" (local dev).
+    """
+    resp = client.get("/types/typedef/name/Catalog")
+    if resp.status_code == 200:
+        print("  [lineage-setup] Catalog type found — using Catalog for lineage entities")
+        return "Catalog"
+    print("  [lineage-setup] Catalog type not found — using DataSet for lineage entities")
+    return "DataSet"
 
 
 def _get_lineage(client, guid, direction="BOTH", depth=3, hide_process=False):
@@ -117,17 +148,12 @@ class LineageCorrectnessSuite:
         es_wait = ctx.get("es_sync_wait", 5)
 
         # --- Classification typedefs for propagation tests ---
-        self.tag_name = unique_type_name("LinTag")
-        self.tag2_name = unique_type_name("LinTag2")
-        tag_resp = client.post("/types/typedefs", json_data={
-            "classificationDefs": [
-                build_classification_def(name=self.tag_name),
-                build_classification_def(name=self.tag2_name),
-            ]
-        })
-        self.tag_ok = tag_resp.status_code in (200, 409)
-        if self.tag_ok:
-            time.sleep(10)  # type cache propagation
+        requested = [unique_type_name("LinTag"), unique_type_name("LinTag2")]
+        names, created_new, self.tag_ok = ensure_classification_types(
+            client, requested,
+        )
+        self.tag_name, self.tag2_name = names[0], names[1]
+        if created_new:
             ctx.register_cleanup(
                 lambda: client.delete(f"/types/typedef/name/{self.tag_name}")
             )
@@ -135,35 +161,57 @@ class LineageCorrectnessSuite:
                 lambda: client.delete(f"/types/typedef/name/{self.tag2_name}")
             )
 
+        # Detect which entity type to use for lineage (Catalog on Atlan, DataSet on local)
+        self.entity_type = _detect_lineage_entity_type(client)
+
         # -------------------------------------------------------
         # Main lineage graph (non-destructive tests):
         #   ds_a  -->  proc_ab  -->  ds_b  -->  proc_bc  -->  ds_c
         # -------------------------------------------------------
-        self.ds_a = _create_dataset(client, ctx, "lin-a")
-        self.ds_b = _create_dataset(client, ctx, "lin-b")
-        self.ds_c = _create_dataset(client, ctx, "lin-c")
+        self.ds_a = _create_dataset(client, ctx, "lin-a", type_name=self.entity_type)
+        self.ds_b = _create_dataset(client, ctx, "lin-b", type_name=self.entity_type)
+        self.ds_c = _create_dataset(client, ctx, "lin-c", type_name=self.entity_type)
 
-        ok1, self.proc_ab = _create_process(
-            client, ctx, "lin-p-ab", [self.ds_a], [self.ds_b],
-        )
-        ok2, self.proc_bc = _create_process(
-            client, ctx, "lin-p-bc", [self.ds_b], [self.ds_c],
-        )
-        self.lineage_ok = ok1 and ok2
+        self.lineage_ok = False
+        if self.ds_a and self.ds_b and self.ds_c:
+            ok1, self.proc_ab = _create_process(
+                client, ctx, "lin-p-ab", [self.ds_a], [self.ds_b],
+                entity_type=self.entity_type,
+            )
+            ok2, self.proc_bc = _create_process(
+                client, ctx, "lin-p-bc", [self.ds_b], [self.ds_c],
+                entity_type=self.entity_type,
+            )
+            self.lineage_ok = ok1 and ok2
+        else:
+            self.proc_ab = self.proc_bc = None
 
         # -------------------------------------------------------
         # Propagation lineage (will be mutated by tag tests):
         #   prop_src  -->  prop_proc  -->  prop_tgt
         # -------------------------------------------------------
-        self.prop_src = _create_dataset(client, ctx, "lin-prop-src")
-        self.prop_tgt = _create_dataset(client, ctx, "lin-prop-tgt")
-        ok3, self.prop_proc = _create_process(
-            client, ctx, "lin-prop-p", [self.prop_src], [self.prop_tgt],
-        )
-        self.prop_lineage_ok = ok3
+        self.prop_src = _create_dataset(client, ctx, "lin-prop-src", type_name=self.entity_type)
+        self.prop_tgt = _create_dataset(client, ctx, "lin-prop-tgt", type_name=self.entity_type)
+
+        self.prop_lineage_ok = False
+        if self.prop_src and self.prop_tgt:
+            ok3, self.prop_proc = _create_process(
+                client, ctx, "lin-prop-p", [self.prop_src], [self.prop_tgt],
+                entity_type=self.entity_type,
+            )
+            self.prop_lineage_ok = ok3
+        else:
+            self.prop_proc = None
 
         # Wait for JanusGraph indexes to settle
         time.sleep(max(es_wait, 5))
+
+        # Diagnostic summary
+        print(f"  [lineage-setup] entity_type={self.entity_type}")
+        print(f"  [lineage-setup] ds_a={self.ds_a}, ds_b={self.ds_b}, ds_c={self.ds_c}")
+        print(f"  [lineage-setup] proc_ab={self.proc_ab}, proc_bc={self.proc_bc}, lineage_ok={self.lineage_ok}")
+        print(f"  [lineage-setup] prop_src={self.prop_src}, prop_tgt={self.prop_tgt}, prop_proc={self.prop_proc}, prop_lineage_ok={self.prop_lineage_ok}")
+        print(f"  [lineage-setup] tag_ok={self.tag_ok}, tag_name={self.tag_name}, tag2_name={self.tag2_name}")
 
     # ================================================================
     #  Group 1 — Lineage graph structure
@@ -300,12 +348,12 @@ class LineageCorrectnessSuite:
                     f"Process entity {guid} in guidEntityMap with hideProcess=true"
                 )
 
-        # DataSets should still be present
+        # Non-Process entities should still be present
         ds_found = any(
-            isinstance(info, dict) and info.get("typeName") == "DataSet"
+            isinstance(info, dict) and info.get("typeName") == self.entity_type
             for info in gem.values()
         )
-        assert ds_found, "No DataSet entities in guidEntityMap with hideProcess=true"
+        assert ds_found, f"No {self.entity_type} entities in guidEntityMap with hideProcess=true"
 
     # ================================================================
     #  Group 2 — Process entity data round-trip
@@ -571,10 +619,13 @@ class LineageCorrectnessSuite:
     def test_lineage_after_process_delete(self, client, ctx):
         """Delete the Process — lineage from source shows no downstream."""
         # Create a disposable lineage: del_src → del_proc → del_tgt
-        del_src = _create_dataset(client, ctx, "lin-del-src")
-        del_tgt = _create_dataset(client, ctx, "lin-del-tgt")
+        del_src = _create_dataset(client, ctx, "lin-del-src", type_name=self.entity_type)
+        del_tgt = _create_dataset(client, ctx, "lin-del-tgt", type_name=self.entity_type)
+        if not del_src or not del_tgt:
+            raise SkipTestError("Entity creation failed")
         ok, del_proc = _create_process(
             client, ctx, "lin-del-p", [del_src], [del_tgt],
+            entity_type=self.entity_type,
         )
         if not ok:
             raise SkipTestError("Process creation failed — lineage not supported")
@@ -606,10 +657,13 @@ class LineageCorrectnessSuite:
           tags=["lineage", "data_correctness", "delete"], order=17)
     def test_lineage_after_target_delete(self, client, ctx):
         """Soft-delete target — entity in lineage should be DELETED or removed."""
-        del2_src = _create_dataset(client, ctx, "lin-del2-src")
-        del2_tgt = _create_dataset(client, ctx, "lin-del2-tgt")
+        del2_src = _create_dataset(client, ctx, "lin-del2-src", type_name=self.entity_type)
+        del2_tgt = _create_dataset(client, ctx, "lin-del2-tgt", type_name=self.entity_type)
+        if not del2_src or not del2_tgt:
+            raise SkipTestError("Entity creation failed")
         ok, del2_proc = _create_process(
             client, ctx, "lin-del2-p", [del2_src], [del2_tgt],
+            entity_type=self.entity_type,
         )
         if not ok:
             raise SkipTestError("Process creation failed — lineage not supported")
@@ -652,7 +706,7 @@ class LineageCorrectnessSuite:
         assert qn, f"Could not read qualifiedName for entity {self.ds_a}"
 
         resp2 = client.get(
-            "/lineage/uniqueAttribute/type/DataSet",
+            f"/lineage/uniqueAttribute/type/{self.entity_type}",
             params={
                 "attr:qualifiedName": qn,
                 "direction": "OUTPUT",

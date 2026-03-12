@@ -20,7 +20,7 @@ from core.data_factory import (
 from core.audit_helpers import (
     search_audit_events, poll_audit_events, assert_audit_event_exists,
 )
-from core.typedef_helpers import create_typedef_verified
+from core.typedef_helpers import create_typedef_verified, ensure_classification_types
 
 
 @suite("audit_correctness", depends_on_suites=["entity_crud"],
@@ -60,13 +60,16 @@ class AuditCorrectnessSuite:
             return
         self.audit_available = total > 0
 
-        # Create classification typedef for later tests
-        self.tag_name = unique_type_name("AuditCorrTag")
-        payload = {"classificationDefs": [build_classification_def(name=self.tag_name)]}
-        self.tag_ok, _ = create_typedef_verified(client, payload, max_wait=45, interval=15)
-        ctx.register_cleanup(
-            lambda: client.delete(f"/types/typedef/name/{self.tag_name}")
+        # Get 1 usable classification type (create new or use existing)
+        requested = [unique_type_name("AuditCorrTag")]
+        names, self.created_tag, self.tag_ok = ensure_classification_types(
+            client, requested,
         )
+        self.tag_name = names[0]
+        if self.created_tag:
+            ctx.register_cleanup(
+                lambda: client.delete(f"/types/typedef/name/{self.tag_name}")
+            )
 
     @test("audit_create_event_fields", tags=["audit"], order=1)
     def test_audit_create_event_fields(self, client, ctx):

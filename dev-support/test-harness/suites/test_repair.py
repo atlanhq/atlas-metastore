@@ -22,6 +22,11 @@ class RepairSuite:
             "qualifiedName": qn,
         })
         assert_status_in(resp, [200, 204, 400, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            if isinstance(body, dict):
+                # Repair response may contain status or message
+                assert body, "Expected non-empty response from repair/single-index"
 
     @test("repair_composite_index", tags=["repair"], order=2)
     def test_repair_composite_index(self, client, ctx):
@@ -29,6 +34,10 @@ class RepairSuite:
             "propertyName": "qualifiedName",
         })
         assert_status_in(resp, [200, 204, 400, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            if isinstance(body, dict):
+                assert body, "Expected non-empty response from repair/composite-index"
 
     @test("repair_batch", tags=["repair"], order=3)
     def test_repair_batch(self, client, ctx):
@@ -38,6 +47,10 @@ class RepairSuite:
             "guids": [guid],
         }, params={"indexType": "SINGLE"})
         assert_status_in(resp, [200, 204, 400, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            if isinstance(body, dict):
+                assert body, "Expected non-empty response from repair/batch"
 
     @test("repair_single_by_guid", tags=["repair"], order=4)
     def test_repair_single_by_guid(self, client, ctx):
@@ -53,7 +66,6 @@ class RepairSuite:
         guid1 = ctx.get_entity_guid("ds1")
         guid2 = ctx.get_entity_guid("ds2")
         if not guid1 or not guid2:
-            from core.assertions import SkipTestError
             raise SkipTestError("ds1/ds2 GUIDs not available")
         resp = client.post("/repair/batch", json_data={
             "guids": [guid1, guid2],
@@ -74,11 +86,17 @@ class RepairSuite:
 
     @test("repair_nonexistent", tags=["repair", "negative"], order=8)
     def test_repair_nonexistent(self, client, ctx):
-        """Repair with nonexistent qualifiedName."""
+        """Repair with nonexistent qualifiedName — should not crash."""
         resp = client.post("/repair/single-index", params={
             "qualifiedName": "nonexistent/qn/that/does/not/exist/12345",
         })
         assert_status_in(resp, [200, 204, 400, 404])
+        if resp.status_code in [400, 404]:
+            body = resp.json()
+            if isinstance(body, dict):
+                assert any(k in body for k in ("errorMessage", "errorCode", "message", "error")), (
+                    f"Expected error details for nonexistent QN, got keys: {list(body.keys())}"
+                )
 
     @test("repair_composite_invalid", tags=["repair", "negative"], order=9)
     def test_repair_composite_invalid(self, client, ctx):
@@ -87,3 +105,9 @@ class RepairSuite:
             "propertyName": "nonExistentProperty_XYZ",
         })
         assert_status_in(resp, [200, 204, 400, 404])
+        if resp.status_code in [400, 404]:
+            body = resp.json()
+            if isinstance(body, dict):
+                assert any(k in body for k in ("errorMessage", "errorCode", "message", "error")), (
+                    f"Expected error details for invalid property, got keys: {list(body.keys())}"
+                )

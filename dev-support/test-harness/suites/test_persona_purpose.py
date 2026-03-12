@@ -26,13 +26,13 @@ class PersonaPurposeSuite:
     def test_create_persona(self, client, ctx):
         entity = build_persona_entity(name=self.persona_name)
         resp = client.post("/entity", json_data={"entity": entity})
-        # 400/403 = Keycloak unavailable, 500 = JanusGraph transient error
-        assert_status_in(resp, [200, 400, 403, 500])
+        # 400/403 = Keycloak unavailable or preprocessor not configured
+        assert_status_in(resp, [200, 400, 403])
         if resp.status_code != 200:
             ctx.set("persona_unavailable", True)
             raise SkipTestError(
                 f"Persona creation returned {resp.status_code} — "
-                f"Keycloak/preprocessor not configured or backend transient error"
+                f"Keycloak/preprocessor not configured"
             )
 
         body = resp.json()
@@ -42,7 +42,7 @@ class PersonaPurposeSuite:
         assert entities, "Persona creation returned 200 but no entities in mutatedEntities"
         guid = entities[0]["guid"]
         ctx.register_entity("persona1", guid, "Persona")
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+        ctx.register_entity_cleanup(guid)
 
         # Read back the auto-generated QN and verify field values
         resp2 = client.get(f"/entity/guid/{guid}")
@@ -86,8 +86,8 @@ class PersonaPurposeSuite:
                 },
             }
         })
-        # 400/500 can happen if Keycloak validates user/group existence
-        assert_status_in(resp, [200, 400, 500])
+        # 400 can happen if Keycloak validates user/group existence
+        assert_status_in(resp, [200, 400])
         if resp.status_code != 200:
             raise SkipTestError(
                 f"Keycloak rejected fake user/group assignment (status={resp.status_code})"
@@ -122,9 +122,7 @@ class PersonaPurposeSuite:
                 },
             }
         })
-        # 500 can happen due to NullPointerException in AccessControlUtils when
-        # required Persona attributes (e.g. isEnabled) are missing from the update
-        assert_status_in(resp, [200, 400, 500])
+        assert_status_in(resp, [200, 400])
         if resp.status_code != 200:
             raise SkipTestError(
                 f"Persona update returned {resp.status_code} — "
@@ -141,7 +139,7 @@ class PersonaPurposeSuite:
         entity = build_purpose_entity(name=self.purpose_name)
         resp = client.post("/entity", json_data={"entity": entity})
         # 400/403 if Keycloak unavailable — genuine environment limitation
-        assert_status_in(resp, [200, 400, 403, 500])
+        assert_status_in(resp, [200, 400, 403])
         if resp.status_code != 200:
             ctx.set("purpose_unavailable", True)
             raise SkipTestError(
@@ -156,7 +154,7 @@ class PersonaPurposeSuite:
         assert entities, "Purpose creation returned 200 but no entities in mutatedEntities"
         guid = entities[0]["guid"]
         ctx.register_entity("purpose1", guid, "Purpose")
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+        ctx.register_entity_cleanup(guid)
 
         resp2 = client.get(f"/entity/guid/{guid}")
         assert_status(resp2, 200)
@@ -214,7 +212,7 @@ class PersonaPurposeSuite:
         assert persona_guid, "persona1 GUID not found in context — create_persona must have failed"
         entity = build_auth_policy_entity(persona_guid, name=self.policy_name)
         resp = client.post("/entity", json_data={"entity": entity})
-        assert_status_in(resp, [200, 400, 403, 500])
+        assert_status_in(resp, [200, 400, 403])
         if resp.status_code != 200:
             raise SkipTestError(
                 f"AuthPolicy creation returned {resp.status_code} — Keycloak rejected"
@@ -229,7 +227,7 @@ class PersonaPurposeSuite:
         )
         guid = entities[0]["guid"]
         ctx.register_entity("auth_policy1", guid, "AuthPolicy")
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+        ctx.register_entity_cleanup(guid)
 
     @test("get_persona_with_policies", tags=["persona_purpose"], order=21, depends_on=["create_auth_policy"])
     def test_get_persona_with_policies(self, client, ctx):

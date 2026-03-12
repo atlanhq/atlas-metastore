@@ -15,7 +15,7 @@ from core.data_factory import (
     build_classification_def, build_dataset_entity, build_process_entity,
     unique_name, unique_qn, unique_type_name,
 )
-from core.typedef_helpers import create_typedef_verified
+from core.typedef_helpers import create_typedef_verified, ensure_classification_types
 
 
 def _index_search(client, dsl):
@@ -52,7 +52,7 @@ def _create_entity(client, ctx, suffix, classifications=None, max_retries=3):
     if not entities:
         raise SkipTestError(f"Entity creation for {suffix} returned empty mutatedEntities")
     guid = entities[0]["guid"]
-    ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+    ctx.register_entity_cleanup(guid)
     return guid
 
 
@@ -76,22 +76,20 @@ class ClassificationAdvancedSuite:
                 return False
             return False
 
-        # Create 3 classification typedefs with verify-after-500 + type cache wait
-        self.tag1 = unique_type_name("BatchTag1")
-        self.tag2 = unique_type_name("BatchTag2")
-        self.tag3 = unique_type_name("BatchTag3")
-        tag_defs = [
-            build_classification_def(name=self.tag1),
-            build_classification_def(name=self.tag2),
-            build_classification_def(name=self.tag3),
+        # Get 3 usable classification types (create new or use existing)
+        requested = [
+            unique_type_name("BatchTag1"),
+            unique_type_name("BatchTag2"),
+            unique_type_name("BatchTag3"),
         ]
-        self.tags_ok, _resp = create_typedef_verified(
-            client, {"classificationDefs": tag_defs},
-            max_wait=60, interval=15,
+        names, self.created_types, self.tags_ok = ensure_classification_types(
+            client, requested,
         )
-        ctx.register_cleanup(lambda: client.delete(f"/types/typedef/name/{self.tag1}"))
-        ctx.register_cleanup(lambda: client.delete(f"/types/typedef/name/{self.tag2}"))
-        ctx.register_cleanup(lambda: client.delete(f"/types/typedef/name/{self.tag3}"))
+        self.tag1, self.tag2, self.tag3 = names[0], names[1], names[2]
+        if self.created_types:
+            ctx.register_cleanup(lambda: client.delete(f"/types/typedef/name/{self.tag1}"))
+            ctx.register_cleanup(lambda: client.delete(f"/types/typedef/name/{self.tag2}"))
+            ctx.register_cleanup(lambda: client.delete(f"/types/typedef/name/{self.tag3}"))
 
         # Create 4 entities with varying classification combos:
         #   E1: tag1
@@ -534,7 +532,6 @@ class ClassificationAdvancedSuite:
         ok, resp = create_typedef_verified(
             client,
             {"classificationDefs": [build_classification_def(name=throwaway)]},
-            max_wait=45, interval=15,
         )
         if not ok:
             raise SkipTestError(
@@ -543,10 +540,9 @@ class ClassificationAdvancedSuite:
 
         # Delete — type is already queryable since create_typedef_verified confirmed it
         resp2 = client.delete(f"/types/typedef/name/{throwaway}")
-        if resp2.status_code in (404, 500):
+        if resp2.status_code == 404:
             raise SkipTestError(
-                f"Typedef deletion returned {resp2.status_code} — "
-                f"backend limitation"
+                f"Typedef deletion returned 404 — type cache never propagated"
             )
         assert_status_in(resp2, [200, 204])
 

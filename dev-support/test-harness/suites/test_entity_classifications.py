@@ -19,7 +19,7 @@ from core.data_factory import (
     build_classification_def, build_dataset_entity, build_process_entity,
     unique_name, unique_qn, unique_type_name,
 )
-from core.typedef_helpers import create_typedef_verified
+from core.typedef_helpers import create_typedef_verified, ensure_classification_types
 
 
 def _poll_entity_classifications(client, guid, expected_tag, max_wait=30,
@@ -90,7 +90,7 @@ def _create_entity_and_get_guid(client, ctx, suffix):
     entities = creates or updates
     assert entities, f"Expected entity in mutatedEntities for {suffix}"
     guid = entities[0]["guid"]
-    ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+    ctx.register_entity_cleanup(guid)
     return guid
 
 
@@ -124,24 +124,21 @@ def _search_entity_in_es(client, guid, es_sync_wait=5, max_retries=5,
 class EntityClassificationsSuite:
 
     def setup(self, client, ctx):
-        # Create classification typedefs with verify-after-500 + type cache wait
-        self.tag_name = unique_type_name("HarnessTag")
-        self.tag2_name = unique_type_name("HarnessTag2")
-        payload = {"classificationDefs": [
-            build_classification_def(name=self.tag_name),
-            build_classification_def(name=self.tag2_name),
-        ]}
-        self.tags_ok, _resp = create_typedef_verified(
-            client, payload, max_wait=60, interval=15,
+        # Get 2 usable classification types (create new or use existing)
+        requested = [unique_type_name("HarnessTag"), unique_type_name("HarnessTag2")]
+        names, self.created_types, self.tags_ok = ensure_classification_types(
+            client, requested,
         )
+        self.tag_name, self.tag2_name = names[0], names[1]
 
         ctx.set("harness_tag_name", self.tag_name)
-        ctx.register_cleanup(
-            lambda: client.delete(f"/types/typedef/name/{self.tag_name}")
-        )
-        ctx.register_cleanup(
-            lambda: client.delete(f"/types/typedef/name/{self.tag2_name}")
-        )
+        if self.created_types:
+            ctx.register_cleanup(
+                lambda: client.delete(f"/types/typedef/name/{self.tag_name}")
+            )
+            ctx.register_cleanup(
+                lambda: client.delete(f"/types/typedef/name/{self.tag2_name}")
+            )
 
         # Create a dedicated entity
         qn = unique_qn("tag-test")
@@ -154,8 +151,9 @@ class EntityClassificationsSuite:
         entities = creates or updates
         assert entities, "Entity creation returned empty mutatedEntities"
         self.entity_guid = entities[0]["guid"]
+        self.entity_qn = qn
         ctx.register_entity("tag_test_entity", self.entity_guid, "DataSet")
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{self.entity_guid}"))
+        ctx.register_entity_cleanup(self.entity_guid)
 
     # ================================================================
     #  CRUD lifecycle
@@ -179,7 +177,7 @@ class EntityClassificationsSuite:
         entities = creates or updates
         assert entities, "Expected at least one entity in mutatedEntities"
         guid = entities[0]["guid"]
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+        ctx.register_entity_cleanup(guid)
 
         # Verify classification is attached
         resp2 = client.get(f"/entity/guid/{guid}")
@@ -283,7 +281,7 @@ class EntityClassificationsSuite:
     def test_add_classification_audit(self, client, ctx):
         events, total = poll_audit_events(
             client, self.entity_guid, action_filter="CLASSIFICATION_ADD",
-            max_wait=60, interval=10,
+            qualifiedName=self.entity_qn, max_wait=60, interval=10,
         )
         if events is None:
             raise SkipTestError("Audit endpoint not available (404/405)")
@@ -362,7 +360,7 @@ class EntityClassificationsSuite:
                          resp_proc.json().get("mutatedEntities", {}).get("UPDATE", []))
         assert proc_entities, "Process entity creation returned empty mutatedEntities"
         proc_guid = proc_entities[0]["guid"]
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{proc_guid}"))
+        ctx.register_entity_cleanup(proc_guid)
         print(f"  [propagation] Process={proc_guid}")
 
         # Add classification to A with propagation enabled
@@ -434,7 +432,7 @@ class EntityClassificationsSuite:
                          resp_proc.json().get("mutatedEntities", {}).get("UPDATE", []))
         assert proc_entities, "Process entity creation returned empty mutatedEntities"
         proc_guid = proc_entities[0]["guid"]
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{proc_guid}"))
+        ctx.register_entity_cleanup(proc_guid)
 
         # Tag A with propagation enabled
         print(f"  [prop-delete] Adding {self.tag_name} to source with propagate=True")
@@ -516,7 +514,7 @@ class EntityClassificationsSuite:
                        resp_p1.json().get("mutatedEntities", {}).get("UPDATE", []))
         assert p1_creates, "Proc1 creation returned empty mutatedEntities"
         proc1_guid = p1_creates[0]["guid"]
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{proc1_guid}"))
+        ctx.register_entity_cleanup(proc1_guid)
         print(f"  [trans-del] Proc1={proc1_guid} (A->B)")
 
         # --- Create Proc2: B -> C ---
@@ -534,7 +532,7 @@ class EntityClassificationsSuite:
                        resp_p2.json().get("mutatedEntities", {}).get("UPDATE", []))
         assert p2_creates, "Proc2 creation returned empty mutatedEntities"
         proc2_guid = p2_creates[0]["guid"]
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{proc2_guid}"))
+        ctx.register_entity_cleanup(proc2_guid)
         print(f"  [trans-del] Proc2={proc2_guid} (B->C)")
 
         # --- Tag A with propagation enabled ---
@@ -752,7 +750,7 @@ class EntityClassificationsSuite:
                          resp_proc.json().get("mutatedEntities", {}).get("UPDATE", []))
         assert proc_entities, "Process entity creation returned empty mutatedEntities"
         proc_guid = proc_entities[0]["guid"]
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{proc_guid}"))
+        ctx.register_entity_cleanup(proc_guid)
 
         # Tag src with propagation enabled
         print(f"  [prop-search] Adding {self.tag_name} to source {guid_src} with propagate=True")

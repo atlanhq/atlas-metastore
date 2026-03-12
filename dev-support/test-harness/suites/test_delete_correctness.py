@@ -17,6 +17,7 @@ from core.data_factory import (
     build_dataset_entity, build_classification_def, build_process_entity,
     unique_name, unique_qn, unique_type_name, PREFIX,
 )
+from core.typedef_helpers import ensure_classification_types
 
 
 def _index_search(client, dsl, retries=2, interval=3):
@@ -46,7 +47,7 @@ def _create_entity(client, ctx, suffix):
     entities = creates or updates
     guid = entities[0]["guid"]
     # Register cleanup as safety net (tests will delete explicitly)
-    ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+    ctx.register_entity_cleanup(guid)
     return guid, qn
 
 
@@ -58,15 +59,15 @@ class DeleteCorrectnessSuite:
         es_wait = ctx.get("es_sync_wait", 5)
 
         # Create a classification for delete tests
-        self.tag_name = unique_type_name("DelTag")
-        payload = {"classificationDefs": [
-            build_classification_def(name=self.tag_name),
-        ]}
-        resp = client.post("/types/typedefs", json_data=payload)
-        time.sleep(10)  # Wait for type cache propagation
-        ctx.register_cleanup(
-            lambda: client.delete(f"/types/typedef/name/{self.tag_name}")
+        requested = [unique_type_name("DelTag")]
+        names, created_new, self.tag_ok = ensure_classification_types(
+            client, requested,
         )
+        self.tag_name = names[0]
+        if created_new:
+            ctx.register_cleanup(
+                lambda: client.delete(f"/types/typedef/name/{self.tag_name}")
+            )
 
         # Create src and tgt DataSet entities
         self.src_guid, self.src_qn = _create_entity(client, ctx, "del-src")
@@ -94,6 +95,9 @@ class DeleteCorrectnessSuite:
         })
 
         # Create Process linking src -> tgt (lineage)
+        # On Atlan, this fails with 400 because DataSet doesn't extend Catalog
+        # (process_catalog_outputs relationship requires Catalog).
+        # lineage_correctness suite creates Catalog entities for proper lineage testing.
         proc = build_process_entity(
             inputs=[{"guid": self.src_guid, "typeName": "DataSet"}],
             outputs=[{"guid": self.tgt_guid, "typeName": "DataSet"}],
@@ -106,7 +110,7 @@ class DeleteCorrectnessSuite:
                              resp.json().get("mutatedEntities", {}).get("UPDATE", []))
             if proc_entities:
                 self.proc_guid = proc_entities[0]["guid"]
-                ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{self.proc_guid}"))
+                ctx.register_entity_cleanup(self.proc_guid)
                 self.lineage_ok = True
 
         # Wait for ES sync

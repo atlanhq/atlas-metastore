@@ -35,19 +35,19 @@ class AtlasClient:
         self.latency_log: List[Dict] = []
         self.request_logger = request_logger
 
-    def get(self, path, params=None, admin=False, timeout=None) -> ApiResponse:
-        return self._do("GET", path, params=params, admin=admin, timeout=timeout)
+    def get(self, path, params=None, admin=False, timeout=None, retries=None) -> ApiResponse:
+        return self._do("GET", path, params=params, admin=admin, timeout=timeout, retries=retries)
 
-    def post(self, path, json_data=None, params=None, admin=False, timeout=None) -> ApiResponse:
-        return self._do("POST", path, json_data=json_data, params=params, admin=admin, timeout=timeout)
+    def post(self, path, json_data=None, params=None, admin=False, timeout=None, retries=None) -> ApiResponse:
+        return self._do("POST", path, json_data=json_data, params=params, admin=admin, timeout=timeout, retries=retries)
 
-    def put(self, path, json_data=None, params=None, admin=False, timeout=None) -> ApiResponse:
-        return self._do("PUT", path, json_data=json_data, params=params, admin=admin, timeout=timeout)
+    def put(self, path, json_data=None, params=None, admin=False, timeout=None, retries=None) -> ApiResponse:
+        return self._do("PUT", path, json_data=json_data, params=params, admin=admin, timeout=timeout, retries=retries)
 
-    def delete(self, path, json_data=None, params=None, admin=False, timeout=None) -> ApiResponse:
-        return self._do("DELETE", path, json_data=json_data, params=params, admin=admin, timeout=timeout)
+    def delete(self, path, json_data=None, params=None, admin=False, timeout=None, retries=None) -> ApiResponse:
+        return self._do("DELETE", path, json_data=json_data, params=params, admin=admin, timeout=timeout, retries=retries)
 
-    def _do(self, method, path, json_data=None, params=None, admin=False, timeout=None) -> ApiResponse:
+    def _do(self, method, path, json_data=None, params=None, admin=False, timeout=None, retries=None) -> ApiResponse:
         base = self.admin_base if admin else self.api_base
         url = f"{base}{path}"
         effective_timeout = timeout if timeout is not None else self.timeout
@@ -55,8 +55,11 @@ class AtlasClient:
         headers = self.auth.get_headers()
         auth_obj = self.auth.get_requests_auth()
 
-        # Retry config: POST/PUT/DELETE get 3 retries, GET gets 2 retries on transient errors
-        max_attempts = 3 if method in ("POST", "PUT", "DELETE") else (2 if method == "GET" else 1)
+        # Retry config: caller can override with retries=N (0 = no retries, 1 attempt only)
+        if retries is not None:
+            max_attempts = retries + 1  # retries=0 means 1 attempt, retries=2 means 3 attempts
+        else:
+            max_attempts = 3 if method in ("POST", "PUT", "DELETE") else (2 if method == "GET" else 1)
         last_api_resp = None
 
         for attempt in range(max_attempts):
@@ -89,11 +92,16 @@ class AtlasClient:
                 })
                 if self.request_logger:
                     self.request_logger.log(method, path, params, json_data, 408, last_api_resp.body, latency_ms)
-                if attempt < max_attempts - 1:
+                # Don't retry POST/PUT/DELETE on timeout — server may still
+                # be processing (non-idempotent). Only retry GET on timeout.
+                if method == "GET" and attempt < max_attempts - 1:
                     print(f"  [client] {method} {path} timed out ({attempt_timeout}s), "
                           f"retrying ({attempt+1}/{max_attempts})...")
                     time.sleep(2 * (attempt + 1))
                     continue
+                if method != "GET":
+                    print(f"  [client] {method} {path} timed out ({attempt_timeout}s), "
+                          f"not retrying (server may still be processing)")
                 return last_api_resp
 
             # 401 retry

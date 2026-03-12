@@ -62,11 +62,15 @@ class TypeDefSuite:
     @test("create_enum_def", tags=["typedef", "crud"], order=10)
     def test_create_enum_def(self, client, ctx):
         payload = {"enumDefs": [build_enum_def(name=self.enum_name)]}
-        ok, resp = create_typedef_verified(client, payload, max_wait=30, interval=10)
-        if not ok:
+        ok, resp = create_typedef_verified(client, payload)
+        if not ok and resp.status_code in (500, 502, 503):
             raise SkipTestError(
-                f"Enum typedef creation failed ({resp.status_code})"
+                f"Enum typedef POST returned {resp.status_code} and creation "
+                f"could not be confirmed — server-side gateway timeout"
             )
+        assert ok, (
+            f"Enum typedef creation failed: POST returned {resp.status_code}"
+        )
         ctx.set("test_enum_name", self.enum_name)
 
         if resp.status_code == 200:
@@ -85,11 +89,15 @@ class TypeDefSuite:
     @test("create_struct_def", tags=["typedef", "crud"], order=12)
     def test_create_struct_def(self, client, ctx):
         payload = {"structDefs": [build_struct_def(name=self.struct_name)]}
-        ok, resp = create_typedef_verified(client, payload, max_wait=30, interval=10)
-        if not ok:
+        ok, resp = create_typedef_verified(client, payload)
+        if not ok and resp.status_code in (500, 502, 503):
             raise SkipTestError(
-                f"Struct typedef creation failed ({resp.status_code})"
+                f"Struct typedef POST returned {resp.status_code} — "
+                f"server-side gateway timeout"
             )
+        assert ok, (
+            f"Struct typedef creation failed: POST returned {resp.status_code}"
+        )
         ctx.set("test_struct_name", self.struct_name)
 
     @test("get_struct_def_by_name", tags=["typedef"], order=13, depends_on=["create_struct_def"])
@@ -101,11 +109,15 @@ class TypeDefSuite:
     @test("create_classification_def", tags=["typedef", "crud"], order=14)
     def test_create_classification_def(self, client, ctx):
         payload = {"classificationDefs": [build_classification_def(name=self.classification_name)]}
-        ok, resp = create_typedef_verified(client, payload, max_wait=30, interval=10)
-        if not ok:
+        ok, resp = create_typedef_verified(client, payload)
+        if not ok and resp.status_code in (500, 502, 503):
             raise SkipTestError(
-                f"Classification typedef creation failed ({resp.status_code})"
+                f"Classification typedef POST returned {resp.status_code} — "
+                f"server-side gateway timeout"
             )
+        assert ok, (
+            f"Classification typedef creation failed: POST returned {resp.status_code}"
+        )
         ctx.set("test_classification_name", self.classification_name)
 
         if resp.status_code == 200:
@@ -124,11 +136,15 @@ class TypeDefSuite:
     @test("create_entity_def", tags=["typedef", "crud"], order=16)
     def test_create_entity_def(self, client, ctx):
         payload = {"entityDefs": [build_entity_def(name=self.entity_type_name)]}
-        ok, resp = create_typedef_verified(client, payload, max_wait=30, interval=10)
-        if not ok:
+        ok, resp = create_typedef_verified(client, payload)
+        if not ok and resp.status_code in (500, 502, 503):
             raise SkipTestError(
-                f"Entity typedef creation failed ({resp.status_code})"
+                f"Entity typedef POST returned {resp.status_code} — "
+                f"server-side gateway timeout"
             )
+        assert ok, (
+            f"Entity typedef creation failed: POST returned {resp.status_code}"
+        )
         ctx.set("test_entity_type_name", self.entity_type_name)
 
         if resp.status_code == 200:
@@ -146,11 +162,15 @@ class TypeDefSuite:
     @test("create_business_metadata_def", tags=["typedef", "crud"], order=18)
     def test_create_business_metadata_def(self, client, ctx):
         payload = {"businessMetadataDefs": [build_business_metadata_def(name=self.bm_name)]}
-        ok, resp = create_typedef_verified(client, payload, max_wait=30, interval=10)
-        if not ok:
+        ok, resp = create_typedef_verified(client, payload)
+        if not ok and resp.status_code in (500, 502, 503):
             raise SkipTestError(
-                f"BM typedef creation failed ({resp.status_code})"
+                f"BM typedef POST returned {resp.status_code} — "
+                f"server-side gateway timeout"
             )
+        assert ok, (
+            f"BM typedef creation failed: POST returned {resp.status_code}"
+        )
         ctx.set("test_bm_name", self.bm_name)
 
         if resp.status_code == 200:
@@ -228,7 +248,7 @@ class TypeDefSuite:
             if entities:
                 guid = entities[0]["guid"]
                 ctx.register_entity("custom_type_td_entity", guid, self.entity_type_name)
-                ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+                ctx.register_entity_cleanup(guid)
                 assert entities[0].get("typeName") == self.entity_type_name, (
                     f"Expected typeName={self.entity_type_name}, got {entities[0].get('typeName')}"
                 )
@@ -238,11 +258,15 @@ class TypeDefSuite:
     def test_create_relationship_def(self, client, ctx):
         self.rel_def_name = unique_type_name("TestRelDef")
         payload = {"relationshipDefs": [build_relationship_def(name=self.rel_def_name)]}
-        ok, resp = create_typedef_verified(client, payload, max_wait=30, interval=10)
-        if not ok:
+        ok, resp = create_typedef_verified(client, payload)
+        if not ok and resp.status_code in (500, 502, 503):
             raise SkipTestError(
-                f"Relationship typedef creation failed ({resp.status_code})"
+                f"Relationship typedef POST returned {resp.status_code} — "
+                f"server-side gateway timeout"
             )
+        assert ok, (
+            f"Relationship typedef creation failed: POST returned {resp.status_code}"
+        )
         ctx.set("test_rel_def_name", self.rel_def_name)
         ctx.register_cleanup(
             lambda: client.delete(f"/types/typedef/name/{self.rel_def_name}")
@@ -290,31 +314,25 @@ class TypeDefSuite:
     @test("delete_entity_def", tags=["typedef", "crud"], order=90, depends_on=["create_entity_def"])
     def test_delete_entity_def(self, client, ctx):
         resp = client.delete(f"/types/typedef/name/{self.entity_type_name}")
-        if resp.status_code == 500:
-            raise SkipTestError("Typedef deletion returned 500 — backend limitation")
         assert_status_in(resp, [200, 204, 409])
 
     @test("delete_classification_def", tags=["typedef", "crud"], order=91, depends_on=["create_classification_def"])
     def test_delete_classification_def(self, client, ctx):
         resp = client.delete(f"/types/typedef/name/{self.classification_name}")
-        if resp.status_code == 500:
-            raise SkipTestError("Typedef deletion returned 500 — backend limitation")
         # 404 if type cache never propagated the name
         assert_status_in(resp, [200, 204, 404])
 
     @test("delete_struct_def", tags=["typedef", "crud"], order=92, depends_on=["create_struct_def"])
     def test_delete_struct_def(self, client, ctx):
         resp = client.delete(f"/types/typedef/name/{self.struct_name}")
-        if resp.status_code in (404, 500):
-            raise SkipTestError(f"Typedef deletion returned {resp.status_code}")
-        assert_status_in(resp, [200, 204])
+        # 404 if type cache never propagated the name
+        assert_status_in(resp, [200, 204, 404])
 
     @test("delete_enum_def", tags=["typedef", "crud"], order=93, depends_on=["create_enum_def"])
     def test_delete_enum_def(self, client, ctx):
         resp = client.delete(f"/types/typedef/name/{self.enum_name}")
-        if resp.status_code in (404, 500):
-            raise SkipTestError(f"Typedef deletion returned {resp.status_code}")
-        assert_status_in(resp, [200, 204])
+        # 404 if type cache never propagated the name
+        assert_status_in(resp, [200, 204, 404])
 
     @test("delete_bm_def", tags=["typedef", "crud"], order=94, depends_on=["create_business_metadata_def"])
     def test_delete_bm_def(self, client, ctx):

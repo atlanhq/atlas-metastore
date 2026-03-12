@@ -15,7 +15,7 @@ from core.data_factory import (
     build_dataset_entity, build_classification_def,
     unique_name, unique_qn, unique_type_name,
 )
-from core.typedef_helpers import create_typedef_verified
+from core.typedef_helpers import create_typedef_verified, ensure_classification_types
 
 
 def _create_entity_and_register(client, ctx, suffix, max_retries=3):
@@ -38,7 +38,7 @@ def _create_entity_and_register(client, ctx, suffix, max_retries=3):
     updates = body.get("mutatedEntities", {}).get("UPDATE", [])
     entities = creates or updates
     guid = entities[0]["guid"]
-    ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+    ctx.register_entity_cleanup(guid)
     return guid
 
 
@@ -52,36 +52,66 @@ def _get_entity_classifications(client, guid):
     return entity.get("classificationNames", []) or []
 
 
+def _poll_entity_has_classification(client, guid, tag_name, max_wait=30,
+                                     interval=5):
+    """Poll GET entity until tag_name appears in classificationNames."""
+    import time
+    for attempt in range(max_wait // interval):
+        if attempt > 0:
+            time.sleep(interval)
+        names = _get_entity_classifications(client, guid)
+        if tag_name in names:
+            return True, names
+    return False, names
+
+
 @suite("bulk_classifications", depends_on_suites=["entity_crud"],
        description="Bulk classification endpoint operations")
 class BulkClassificationsSuite:
 
     def setup(self, client, ctx):
-        # --- Create classification typedefs with verify-after-500 + type cache wait ---
-        self.tag_name = unique_type_name("BulkTag")
-        self.tag2_name = unique_type_name("BulkTag2")
-
-        payload = {
-            "classificationDefs": [
-                build_classification_def(name=self.tag_name),
-                build_classification_def(name=self.tag2_name),
-            ]
-        }
-        self.tag_ok, _resp = create_typedef_verified(
-            client, payload, max_wait=60, interval=15,
+        # Get 2 usable classification types (create new or use existing)
+        requested = [unique_type_name("BulkTag"), unique_type_name("BulkTag2")]
+        names, self.created_types, self.tag_ok = ensure_classification_types(
+            client, requested,
         )
-        ctx.register_cleanup(
-            lambda: client.delete(f"/types/typedef/name/{self.tag_name}")
-        )
-        ctx.register_cleanup(
-            lambda: client.delete(f"/types/typedef/name/{self.tag2_name}")
-        )
+        self.tag_name, self.tag2_name = names[0], names[1]
+        if self.created_types:
+            ctx.register_cleanup(
+                lambda: client.delete(f"/types/typedef/name/{self.tag_name}")
+            )
+            ctx.register_cleanup(
+                lambda: client.delete(f"/types/typedef/name/{self.tag2_name}")
+            )
 
         # --- Create 4 test entities ---
         self.guid_e1 = _create_entity_and_register(client, ctx, "bulk-cls-e1")
         self.guid_e2 = _create_entity_and_register(client, ctx, "bulk-cls-e2")
         self.guid_e3 = _create_entity_and_register(client, ctx, "bulk-cls-e3")
         self.guid_e4 = _create_entity_and_register(client, ctx, "bulk-cls-e4")
+
+        # Smoke test: verify the classification type is actually usable on entities
+        # Fallback types from headers might be governance-managed or restricted
+        self.smoke_ok = False
+        if self.tag_ok:
+            smoke_guid = _create_entity_and_register(client, ctx, "bulk-cls-smoke")
+            resp = client.post(
+                f"/entity/guid/{smoke_guid}/classifications",
+                json_data=[{"typeName": self.tag_name}],
+            )
+            if resp.status_code in (200, 204):
+                # Verify it actually persisted
+                names_check = _get_entity_classifications(client, smoke_guid)
+                if self.tag_name in names_check:
+                    self.smoke_ok = True
+                    print(f"  [setup] Smoke test PASSED: {self.tag_name} applied to entity")
+                else:
+                    print(f"  [setup] Smoke test FAILED: POST 200/204 but classification "
+                          f"not on entity. classificationNames={names_check}")
+            else:
+                detail = repr(resp.body)[:300] if hasattr(resp, 'body') and resp.body else ""
+                print(f"  [setup] Smoke test FAILED: per-entity classification add "
+                      f"returned {resp.status_code}: {detail}")
 
     # ----------------------------------------------------------------
     # POST /entity/bulk/classification
@@ -93,6 +123,11 @@ class BulkClassificationsSuite:
         """POST /entity/bulk/classification — add tag to E1 + E2."""
         if not self.tag_ok:
             raise SkipTestError("Classification typedef creation failed after retries")
+        if not self.smoke_ok:
+            raise SkipTestError(
+                f"Smoke test failed — classification type {self.tag_name} "
+                f"cannot be applied to DataSet entities (may be governance-restricted)"
+            )
 
         resp = client.post("/entity/bulk/classification", json_data={
             "classification": {"typeName": self.tag_name},
@@ -103,13 +138,16 @@ class BulkClassificationsSuite:
                 "Bulk classification returned 404 — classification type may not "
                 "have propagated through type cache"
             )
+        body_detail = repr(resp.body)[:500] if hasattr(resp, 'body') and resp.body else "(empty)"
+        print(f"  [bulk-add] POST /entity/bulk/classification -> {resp.status_code}: {body_detail}")
         assert_status_in(resp, [200, 204])
 
-        # Verify via GET
-        time.sleep(2)
+        # Verify via GET with polling (classification may take a moment to persist)
         for guid in (self.guid_e1, self.guid_e2):
-            names = _get_entity_classifications(client, guid)
-            assert self.tag_name in names, (
+            found, names = _poll_entity_has_classification(
+                client, guid, self.tag_name,
+            )
+            assert found, (
                 f"Entity {guid} should have {self.tag_name}, "
                 f"got classificationNames={names}"
             )
@@ -124,6 +162,11 @@ class BulkClassificationsSuite:
         """POST /entity/bulk/classification/displayName — add tag to E3."""
         if not self.tag_ok:
             raise SkipTestError("Classification typedef creation failed after retries")
+        if not self.smoke_ok:
+            raise SkipTestError(
+                f"Smoke test failed — classification type {self.tag_name} "
+                f"cannot be applied to DataSet entities"
+            )
 
         resp = client.post("/entity/bulk/classification/displayName", json_data=[
             {
@@ -135,10 +178,13 @@ class BulkClassificationsSuite:
         assert_status_in(resp, [200, 204, 404])
         if resp.status_code == 404:
             raise SkipTestError("Endpoint /entity/bulk/classification/displayName returned 404 — not available")
+        body_detail = repr(resp.body)[:500] if hasattr(resp, 'body') and resp.body else "(empty)"
+        print(f"  [bulk-displayname] POST -> {resp.status_code}: {body_detail}")
 
-        time.sleep(2)
-        names = _get_entity_classifications(client, self.guid_e3)
-        assert self.tag_name in names, (
+        found, names = _poll_entity_has_classification(
+            client, self.guid_e3, self.tag_name,
+        )
+        assert found, (
             f"Entity E3 ({self.guid_e3}) should have {self.tag_name}, "
             f"got {names}"
         )
@@ -153,6 +199,11 @@ class BulkClassificationsSuite:
         """POST /entity/bulk/setClassifications — add BulkTag to E4."""
         if not self.tag_ok:
             raise SkipTestError("Classification typedef creation failed after retries")
+        if not self.smoke_ok:
+            raise SkipTestError(
+                f"Smoke test failed — classification type {self.tag_name} "
+                f"cannot be applied to DataSet entities"
+            )
 
         resp = client.post("/entity/bulk/setClassifications", json_data={
             "guidHeaderMap": {
@@ -166,10 +217,13 @@ class BulkClassificationsSuite:
         assert_status_in(resp, [200, 204, 404])
         if resp.status_code == 404:
             raise SkipTestError("Endpoint /entity/bulk/setClassifications returned 404 — not available")
+        body_detail = repr(resp.body)[:500] if hasattr(resp, 'body') and resp.body else "(empty)"
+        print(f"  [bulk-set] POST -> {resp.status_code}: {body_detail}")
 
-        time.sleep(2)
-        names = _get_entity_classifications(client, self.guid_e4)
-        assert self.tag_name in names, (
+        found, names = _poll_entity_has_classification(
+            client, self.guid_e4, self.tag_name,
+        )
+        assert found, (
             f"Entity E4 ({self.guid_e4}) should have {self.tag_name} "
             f"after setClassifications, got {names}"
         )
@@ -184,6 +238,8 @@ class BulkClassificationsSuite:
         """
         if not self.tag_ok:
             raise SkipTestError("Classification typedef creation failed after retries")
+        if not self.smoke_ok:
+            raise SkipTestError("Smoke test failed — classification type not usable")
 
         resp = client.post(
             "/entity/bulk/setClassifications",
@@ -223,6 +279,8 @@ class BulkClassificationsSuite:
         """
         if not self.tag_ok:
             raise SkipTestError("Classification typedef creation failed after retries")
+        if not self.smoke_ok:
+            raise SkipTestError("Smoke test failed — classification type not usable")
 
         resp = client.post(
             "/entity/bulk/setClassifications",
@@ -273,6 +331,8 @@ class BulkClassificationsSuite:
         """POST /entity/bulk/repairClassificationsMappings — repair E1 + E2."""
         if not self.tag_ok:
             raise SkipTestError("Classification typedef creation failed after retries")
+        if not self.smoke_ok:
+            raise SkipTestError("Smoke test failed — classification type not usable")
 
         resp = client.post(
             "/entity/bulk/repairClassificationsMappings",

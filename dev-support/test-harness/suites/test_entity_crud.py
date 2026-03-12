@@ -11,7 +11,11 @@ from core.assertions import (
 from core.audit_helpers import poll_audit_events
 from core.search_helpers import assert_entity_in_search
 from core.kafka_helpers import assert_entity_in_kafka
-from core.data_factory import build_dataset_entity, build_process_entity, unique_qn, unique_name
+from core.data_factory import (
+    build_dataset_entity, build_process_entity, build_entity_def,
+    unique_qn, unique_name, unique_type_name,
+)
+from core.typedef_helpers import create_typedef_verified
 
 
 @suite("entity_crud", description="Entity CRUD operations")
@@ -48,7 +52,7 @@ class EntityCrudSuite:
 
         guid = entities[0]["guid"]
         ctx.register_entity("ds1", guid, "DataSet", qualifiedName=self.ds1_qn)
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+        ctx.register_entity_cleanup(guid)
 
         # Read-after-write: verify persisted entity matches what was sent
         resp2 = client.get(f"/entity/guid/{guid}")
@@ -100,12 +104,27 @@ class EntityCrudSuite:
         if entity_id:
             assert entity_id == guid, f"Audit entityId mismatch: expected {guid}, got {entity_id}"
 
-    @test("create_entity_with_custom_type", tags=["crud"], order=7, depends_on=["create_entity"])
+    @test("create_entity_with_custom_type", tags=["crud"], order=30, depends_on=["create_entity"])
     def test_create_entity_with_custom_type(self, client, ctx):
-        # Use custom entity type created in typedefs suite
+        # Use custom entity type from typedefs suite, or create one inline
         custom_type = ctx.get("test_entity_type_name")
         if not custom_type:
-            raise SkipTestError("Custom type not available — typedefs suite may not have run")
+            # Create a lightweight entity type ourselves
+            custom_type = unique_type_name("CrudTestType")
+            payload = {"entityDefs": [build_entity_def(name=custom_type)]}
+            ok, resp = create_typedef_verified(
+                client, payload,
+            )
+            if not ok:
+                raise SkipTestError(
+                    f"Could not create custom entity type — "
+                    f"POST returned {resp.status_code if resp else 'N/A'}"
+                )
+            ctx.set("test_entity_type_name", custom_type)
+            ctx.register_cleanup(
+                lambda: client.delete(f"/types/typedef/name/{custom_type}")
+            )
+
         qn = unique_qn("custom-type")
         entity = build_dataset_entity(qn=qn, name=unique_name("custom"), type_name=custom_type)
         resp = client.post("/entity", json_data={"entity": entity})
@@ -118,7 +137,7 @@ class EntityCrudSuite:
             if entities:
                 guid = entities[0]["guid"]
                 ctx.register_entity("custom_type_entity", guid, custom_type, qualifiedName=qn)
-                ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+                ctx.register_entity_cleanup(guid)
                 assert entities[0].get("typeName") == custom_type, (
                     f"Expected typeName={custom_type}, got {entities[0].get('typeName')}"
                 )
@@ -145,7 +164,7 @@ class EntityCrudSuite:
         entities = creates or updates
         guid = entities[0]["guid"]
         ctx.register_entity("ds2", guid, "DataSet", qualifiedName=self.ds2_qn)
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+        ctx.register_entity_cleanup(guid)
 
         # Read-after-write: verify persisted entity matches what was sent
         resp2 = client.get(f"/entity/guid/{guid}")
@@ -165,7 +184,9 @@ class EntityCrudSuite:
             outputs=[{"guid": ds2_guid, "typeName": "DataSet"}],
         )
         resp = client.post("/entity", json_data={"entity": entity})
-        # Staging may reject Process if it requires connectionQualifiedName
+        # On Atlan, Process outputs must be Catalog type; ds1/ds2 are DataSet
+        # which doesn't extend Catalog, so this returns 400 on preprod/staging.
+        # That's expected — lineage_correctness suite uses Catalog entities instead.
         assert_status_in(resp, [200, 400])
 
         if resp.status_code == 200:
@@ -176,7 +197,7 @@ class EntityCrudSuite:
             if entities:
                 guid = entities[0]["guid"]
                 ctx.register_entity("process1", guid, "Process", qualifiedName=self.process_qn)
-                ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+                ctx.register_entity_cleanup(guid)
 
                 # Read-after-write: verify persisted process entity
                 resp2 = client.get(f"/entity/guid/{guid}")
@@ -248,7 +269,7 @@ class EntityCrudSuite:
 
         # Register cleanup for all created entities
         for g in guids:
-            ctx.register_cleanup(lambda guid=g: client.delete(f"/entity/guid/{guid}"))
+            ctx.register_entity_cleanup(g)
 
         assert len(guids) >= 10, f"Expected at least 10 entities created, got {len(guids)}"
 
@@ -504,25 +525,21 @@ class EntityCrudSuite:
         resp = client.post("/entity/bulk", json_data={"entities": entities})
         assert_status(resp, 200)
 
-        # Delete via /entity/bulk/uniqueAttribute/type/DataSet
-        # This endpoint accepts query params for each entity's unique attributes
+        # Delete via /entity/bulk/uniqueAttribute with JSON body of AtlasObjectId
         resp = client.delete(
-            "/entity/bulk/uniqueAttribute/type/DataSet",
-            params=[
-                ("attr:qualifiedName", qn1),
-                ("attr:qualifiedName", qn2),
+            "/entity/bulk/uniqueAttribute",
+            json_data=[
+                {"typeName": "DataSet", "uniqueAttributes": {"qualifiedName": qn1}},
+                {"typeName": "DataSet", "uniqueAttributes": {"qualifiedName": qn2}},
             ],
         )
-        # Endpoint may not exist or may error on all environments
-        assert_status_in(resp, [200, 204, 400, 404, 405, 500])
-        if resp.status_code in (200, 204):
-            # Verify at least one entity was deleted
-            if resp.status_code == 200:
-                body = resp.json()
-                deletes = body.get("mutatedEntities", {}).get("DELETE", [])
-                assert len(deletes) > 0, (
-                    "Expected non-empty mutatedEntities.DELETE from bulk unique attr delete"
-                )
+        assert_status_in(resp, [200, 204])
+        if resp.status_code == 200:
+            body = resp.json()
+            deletes = body.get("mutatedEntities", {}).get("DELETE", [])
+            assert len(deletes) > 0, (
+                "Expected non-empty mutatedEntities.DELETE from bulk unique attr delete"
+            )
 
     @test("restore_soft_deleted_entity", tags=["crud", "restore"], order=85)
     def test_restore_soft_deleted_entity(self, client, ctx):
@@ -536,7 +553,7 @@ class EntityCrudSuite:
         updates = body.get("mutatedEntities", {}).get("UPDATE", [])
         entities = creates or updates
         guid = entities[0]["guid"]
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+        ctx.register_entity_cleanup(guid)
 
         # Soft-delete
         resp = client.delete(f"/entity/guid/{guid}")

@@ -17,7 +17,10 @@ class ModelSearchSuite:
                 "query": {"match_all": {}},
             }
         })
-        assert_status_in(resp, [200, 400, 404, 500])
+        assert_status_in(resp, [200, 400, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            assert isinstance(body, dict), f"Expected dict response, got {type(body).__name__}"
 
     @test("model_search_with_namespace", tags=["search", "model_search"], order=2)
     def test_model_search_with_namespace(self, client, ctx):
@@ -28,7 +31,10 @@ class ModelSearchSuite:
                 "query": {"match_all": {}},
             }
         }, params={"namespace": "default"})
-        assert_status_in(resp, [200, 400, 404, 500])
+        assert_status_in(resp, [200, 400, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            assert isinstance(body, dict), f"Expected dict response, got {type(body).__name__}"
 
     @test("model_search_type_filter", tags=["search", "model_search"], order=3)
     def test_model_search_type_filter(self, client, ctx):
@@ -44,7 +50,10 @@ class ModelSearchSuite:
                 },
             }
         })
-        assert_status_in(resp, [200, 400, 404, 500])
+        assert_status_in(resp, [200, 400, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            assert isinstance(body, dict), f"Expected dict response, got {type(body).__name__}"
 
     @test("model_search_attributes", tags=["search", "model_search"], order=4)
     def test_model_search_attributes(self, client, ctx):
@@ -57,7 +66,10 @@ class ModelSearchSuite:
                 "_source": ["qualifiedName", "name", "__typeName"],
             }
         })
-        assert_status_in(resp, [200, 400, 404, 500])
+        assert_status_in(resp, [200, 400, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            assert isinstance(body, dict), f"Expected dict response, got {type(body).__name__}"
 
     @test("model_search_pagination", tags=["search", "model_search"], order=5)
     def test_model_search_pagination(self, client, ctx):
@@ -69,7 +81,14 @@ class ModelSearchSuite:
                 "query": {"match_all": {}},
             }
         })
-        assert_status_in(resp, [200, 400, 404, 500])
+        assert_status_in(resp, [200, 400, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            entities = body.get("entities", body.get("searchResults", []))
+            if isinstance(entities, list):
+                assert len(entities) <= 1, (
+                    f"Expected at most 1 result with size=1, got {len(entities)}"
+                )
 
     @test("model_search_with_sort", tags=["search", "model_search"], order=6)
     def test_model_search_with_sort(self, client, ctx):
@@ -82,7 +101,10 @@ class ModelSearchSuite:
                 "sort": [{"__timestamp": {"order": "desc"}}],
             }
         })
-        assert_status_in(resp, [200, 400, 404, 500])
+        assert_status_in(resp, [200, 400, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            assert isinstance(body, dict), f"Expected dict response, got {type(body).__name__}"
 
     @test("model_search_empty_result", tags=["search", "model_search"], order=7)
     def test_model_search_empty_result(self, client, ctx):
@@ -96,7 +118,15 @@ class ModelSearchSuite:
                 },
             }
         })
-        assert_status_in(resp, [200, 400, 404, 500])
+        assert_status_in(resp, [200, 400, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            count = body.get("approximateCount", body.get("count", -1))
+            entities = body.get("entities", body.get("searchResults", []))
+            if isinstance(entities, list):
+                assert len(entities) == 0, (
+                    f"Expected 0 results for nonexistent QN, got {len(entities)}"
+                )
 
     @test("model_search_date_range", tags=["search", "model_search"], order=8)
     def test_model_search_date_range(self, client, ctx):
@@ -117,4 +147,7 @@ class ModelSearchSuite:
                 },
             }
         })
-        assert_status_in(resp, [200, 400, 404, 500])
+        assert_status_in(resp, [200, 400, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            assert isinstance(body, dict), f"Expected dict response, got {type(body).__name__}"

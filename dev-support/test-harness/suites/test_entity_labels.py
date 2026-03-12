@@ -26,7 +26,7 @@ class EntityLabelsSuite:
         assert entities, "Entity creation returned empty mutatedEntities"
         self.entity_guid = entities[0]["guid"]
         ctx.register_entity("label_test_entity", self.entity_guid, "DataSet")
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{self.entity_guid}"))
+        ctx.register_entity_cleanup(self.entity_guid)
 
     @test("add_labels", tags=["labels"], order=1)
     def test_add_labels(self, client, ctx):
@@ -182,18 +182,27 @@ class EntityLabelsSuite:
 
     @test("add_labels_special_chars", tags=["labels"], order=5.5)
     def test_add_labels_special_chars(self, client, ctx):
-        """Add labels with hyphens, underscores, dots; verify round-trip."""
-        special_labels = ["label-with-hyphens", "label_with_underscores", "label.with.dots"]
+        """Add labels with hyphens, underscores; verify round-trip.
+        Atlas allows alphanumeric, _ and - only (dots are rejected with 400).
+        """
+        valid_labels = ["label-with-hyphens", "label_with_underscores", "MixedCase123"]
         resp = client.post(
             f"/entity/guid/{self.entity_guid}/labels",
-            json_data=special_labels,
+            json_data=valid_labels,
         )
         assert_status_in(resp, [200, 204])
         resp2 = client.get(f"/entity/guid/{self.entity_guid}")
         assert_status(resp2, 200)
         labels = resp2.json().get("entity", {}).get("labels", [])
-        for lbl in special_labels:
+        for lbl in valid_labels:
             assert lbl in labels, f"Expected '{lbl}' in labels, got {labels}"
+
+        # Dots should be rejected
+        resp3 = client.post(
+            f"/entity/guid/{self.entity_guid}/labels",
+            json_data=["label.with.dots"],
+        )
+        assert_status_in(resp3, [400])
 
     @test("labels_in_search", tags=["labels", "search"], order=6)
     def test_labels_in_search(self, client, ctx):
@@ -225,11 +234,16 @@ class EntityLabelsSuite:
 
     @test("add_empty_label_list", tags=["labels"], order=7)
     def test_add_empty_label_list(self, client, ctx):
-        """POST empty label array — should not error."""
-        # Get current labels first
+        """POST empty label array — Atlas uses SET semantics so this clears all labels."""
+        # Ensure at least one label exists first
+        client.post(
+            f"/entity/guid/{self.entity_guid}/labels",
+            json_data=["empty-test-label"],
+        )
         resp_before = client.get(f"/entity/guid/{self.entity_guid}")
         assert_status(resp_before, 200)
         labels_before = resp_before.json().get("entity", {}).get("labels", [])
+        assert len(labels_before) > 0, "Expected at least one label before empty POST test"
 
         resp = client.post(
             f"/entity/guid/{self.entity_guid}/labels",
@@ -237,12 +251,12 @@ class EntityLabelsSuite:
         )
         assert_status_in(resp, [200, 204])
 
-        # Existing labels should be unchanged
+        # Atlas POST labels has SET semantics — empty array clears all labels
         resp2 = client.get(f"/entity/guid/{self.entity_guid}")
         assert_status(resp2, 200)
         labels_after = resp2.json().get("entity", {}).get("labels", [])
-        assert set(labels_before).issubset(set(labels_after)), (
-            f"Empty label POST should not remove existing labels. "
+        assert len(labels_after) == 0, (
+            f"POST with empty [] should clear all labels (SET semantics). "
             f"Before: {labels_before}, After: {labels_after}"
         )
 
@@ -260,7 +274,7 @@ class EntityLabelsSuite:
         entities = creates or updates
         assert entities, "Second entity creation failed"
         guid2 = entities[0]["guid"]
-        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid2}"))
+        ctx.register_entity_cleanup(guid2)
 
         # Add different labels to each
         resp1 = client.post(
