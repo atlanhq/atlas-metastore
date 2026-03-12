@@ -45,6 +45,7 @@ on:
 permissions:
   id-token: write
   contents: write
+  security-events: write
 
 jobs:
   # Detect what changed to optimize workflow execution
