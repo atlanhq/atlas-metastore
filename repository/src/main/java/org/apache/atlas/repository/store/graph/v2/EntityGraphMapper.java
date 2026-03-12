@@ -5107,6 +5107,7 @@ public class EntityGraphMapper {
                 updatedTagPropagation = null;
             }
 
+            // This will never get executed since background tasks fetaure is alwsays enabled
             // compute propagatedEntityVertices once and use it for subsequent iterations and notifications
             if (updatedTagPropagation != null && (currentTagPropagation != updatedTagPropagation || currentRestrictPropagationThroughLineage != updatedRestrictPropagationThroughLineage || currentRestrictPropagationThroughHierarchy != updatedRestrictPropagationThroughHierarchy)) {
                 if (updatedTagPropagation) {
