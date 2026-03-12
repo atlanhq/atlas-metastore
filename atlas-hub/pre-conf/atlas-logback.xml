@@ -159,7 +159,6 @@
 
     <logger name="AUTH_AUDIT" additivity="false" level="info">
         <appender-ref ref="consoleAuthAudit"/>
-        <appender-ref ref="OpenTelemetry"/>
     </logger>
 
     <!-- Authz loggers End -->
