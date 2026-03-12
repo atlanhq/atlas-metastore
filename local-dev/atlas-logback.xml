@@ -43,20 +43,6 @@
         </filter>
     </appender>
 
-    <appender name="consoleAuthAudit" class="ch.qos.logback.core.ConsoleAppender">
-        <filter class="org.apache.atlas.web.filters.MDCFilter">
-            <mdcKey>filter</mdcKey>
-            <mdcValue>atlas-auth-audit</mdcValue>
-        </filter>
-        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
-            <!-- Enhanced pattern with better readability -->
-            <pattern>%n%d{yyyy-MM-dd HH:mm:ss.SSS} | %-5p | [%t:%X{context-key}] | filter: atlas-auth-audit | X-Atlan-Request-Id:[%X{X-Atlan-Request-Id}] | traceId:[%X{trace_id}] | %msg %n    at \(%C{1}.java:%L\)%n</pattern>
-        </encoder>
-        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
-            <level>INFO</level>
-        </filter>
-    </appender>
-
     <appender name="consoleAtlas" class="ch.qos.logback.core.ConsoleAppender">
         <filter class="org.apache.atlas.web.filters.MDCFilter">
             <mdcKey>filter</mdcKey>
@@ -129,10 +115,6 @@
 
     <logger name="org.apache.atlas.auth.perf" additivity="false" level="OFF">
         <appender-ref ref="console"/>
-    </logger>
-
-    <logger name="AUTH_AUDIT" additivity="false" level="info">
-        <appender-ref ref="consoleAuthAudit"/>
     </logger>
 
     <!-- Authz loggers End -->

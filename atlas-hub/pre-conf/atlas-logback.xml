@@ -55,22 +55,6 @@
         </filter>
     </appender>
 
-    <appender name="consoleAuthAudit" class="ch.qos.logback.core.ConsoleAppender">
-        <param name="Target" value="System.out"/>
-        <filter class="org.apache.atlas.web.filters.MDCFilter">
-            <mdcKey>filter</mdcKey>
-            <mdcValue>atlas-auth-audit</mdcValue>
-        </filter>
-        <encoder>
-            <pattern>
-                logback: %d %-5p - [%t:%X{context-key}] - X-Atlan-Request-Id:[%X{X-Atlan-Request-Id}] - traceId:[%X{trace_id}]  ~ %m (%C{1}:%L)%n
-            </pattern>
-        </encoder>
-        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
-            <level>INFO</level>
-        </filter>
-    </appender>
-
     <appender name="consoleAtlas" class="ch.qos.logback.core.ConsoleAppender">
         <param name="Target" value="System.out"/>
         <filter class="org.apache.atlas.web.filters.MDCFilter">
@@ -156,10 +140,6 @@
         <appender-ref ref="OpenTelemetry"/>
     </logger>
 
-
-    <logger name="AUTH_AUDIT" additivity="false" level="info">
-        <appender-ref ref="consoleAuthAudit"/>
-    </logger>
 
     <!-- Authz loggers End -->
 
