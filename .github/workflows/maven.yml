@@ -29,10 +29,7 @@ on:
       - ring-*
       - ms-635
       - sgp-consistency-improvements
-      - lg-async-producer
-      - ms-428-delete-by-conn
-      - ms-664-fix-audit-search
-      - faster_index_search
+      - switchable_graph_bug_fixes
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
