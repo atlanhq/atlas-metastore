@@ -218,9 +218,7 @@ public class AtlasAuthorizationUtils {
                 request.setClientIPAddress(RequestContext.get().getClientIPAddress());
                 request.setForwardedAddresses(RequestContext.get().getForwardedAddresses());
                 request.setRemoteIPAddress(RequestContext.get().getClientIPAddress());
-                // Suppress ranger audit when ABAC is enabled — we'll log a single consolidated entry
-                boolean rangerAuditEnabled = isAuditLogEnabled && !isABACAuthorizerEnabled();
-                AtlasAccessResult atlasPoliciesResult =  authorizer.isAccessAllowed(request, rangerAuditEnabled);
+                AtlasAccessResult atlasPoliciesResult =  authorizer.isAccessAllowed(request, isAuditLogEnabled);
 
                 RequestContext.get().endMetricRecord(metric);
                 if (!isABACAuthorizerEnabled()) {
@@ -284,10 +282,10 @@ public class AtlasAuthorizationUtils {
 
                     return finalResult.isAllowed();
                 } finally {
-                    // Log single consolidated audit entry with both enforcer results
                     NewAtlasAuditHandler auditHandler = new NewAtlasAuditHandler(request, SERVICE_DEF_ATLAS);
                     try {
-                        auditHandler.processConsolidatedResult(finalResult, atlasPoliciesResult, abacPoliciesResult, request);
+                        finalResult.setEnforcer(buildMergedEnforcer(atlasPoliciesResult, abacPoliciesResult));
+                        auditHandler.processResult(finalResult, request);
                     } finally {
                         auditHandler.flushAudit();
                     }
@@ -348,9 +346,7 @@ public class AtlasAuthorizationUtils {
                 request.setClientIPAddress(RequestContext.get().getClientIPAddress());
                 request.setForwardedAddresses(RequestContext.get().getForwardedAddresses());
                 request.setRemoteIPAddress(RequestContext.get().getClientIPAddress());
-                // Suppress ranger audit when ABAC is enabled — we'll log a single consolidated entry
-                boolean rangerAuditEnabled = !isABACAuthorizerEnabled();
-                AtlasAccessResult atlasPoliciesResult = authorizer.isAccessAllowed(request, rangerAuditEnabled);
+                AtlasAccessResult atlasPoliciesResult = authorizer.isAccessAllowed(request);
 
                 RequestContext.get().endMetricRecord(metric);
                 if (!isABACAuthorizerEnabled()) {
@@ -399,10 +395,10 @@ public class AtlasAuthorizationUtils {
                     return finalResult.isAllowed();
 
                 } finally {
-                    // Log single consolidated audit entry with both enforcer results
                     NewAtlasAuditHandler auditHandler = new NewAtlasAuditHandler(request, SERVICE_DEF_ATLAS);
                     try {
-                        auditHandler.processConsolidatedResult(finalResult, atlasPoliciesResult, abacPoliciesResult, request);
+                        finalResult.setEnforcer(buildMergedEnforcer(atlasPoliciesResult, abacPoliciesResult));
+                        auditHandler.processResult(finalResult, request);
                     } finally {
                         auditHandler.flushAudit();
                     }
@@ -559,6 +555,16 @@ public class AtlasAuthorizationUtils {
         }
 
         return ret;
+    }
+
+    private static String buildMergedEnforcer(AtlasAccessResult rangerResult, AtlasAccessResult abacResult) {
+        String rangerInfo = rangerResult != null
+                ? String.format("ranger:%s:%s", rangerResult.isAllowed() ? "ALLOW" : "DENY", rangerResult.getPolicyId())
+                : "ranger:N/A";
+        String abacInfo = abacResult != null
+                ? String.format("abac:%s:%s", abacResult.isAllowed() ? "ALLOW" : "DENY", abacResult.getPolicyId())
+                : "abac:N/A";
+        return String.format("merged|%s|%s", rangerInfo, abacInfo);
     }
 
     private static void setAuthInfo(AtlasAccessRequest request) {

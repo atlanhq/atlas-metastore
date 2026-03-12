@@ -121,39 +121,6 @@ class NewAtlasAuditHandler {
         }
     }
 
-    public void processConsolidatedResult(AtlasAccessResult finalResult, AtlasAccessResult rangerResult,
-                                          AtlasAccessResult abacResult, AtlasAccessRequest request) {
-        finalResult.setEnforcer(buildConsolidatedEnforcer(rangerResult, abacResult));
-
-        AuthzAuditEvent auditEvent = getAuthzEvents(finalResult, request);
-
-        if (auditEvent != null) {
-            if (resourcePath != null) {
-                auditEvent.setResourcePath(resourcePath);
-            }
-
-            if (resourceType != null) {
-                auditEvent.setResourceType(resourceType);
-            }
-
-            if (StringUtils.isNotEmpty(finalResult.getPolicyId())) {
-                auditEvent.setPolicyId(finalResult.getPolicyId());
-            }
-
-            auditEvents.put(auditEvent.getPolicyId() + auditEvent.getAccessType(), auditEvent);
-        }
-    }
-
-    private static String buildConsolidatedEnforcer(AtlasAccessResult rangerResult, AtlasAccessResult abacResult) {
-        String rangerInfo = rangerResult != null
-                ? String.format("ranger:%s:%s", rangerResult.isAllowed() ? "ALLOW" : "DENY", rangerResult.getPolicyId())
-                : "ranger:N/A";
-        String abacInfo = abacResult != null
-                ? String.format("abac:%s:%s", abacResult.isAllowed() ? "ALLOW" : "DENY", abacResult.getPolicyId())
-                : "abac:N/A";
-        return String.format("merged|%s|%s", rangerInfo, abacInfo);
-    }
-
     public void flushAudit() {
         if (auditEvents != null) {
             for (AuthzAuditEvent auditEvent : auditEvents.values()) {
