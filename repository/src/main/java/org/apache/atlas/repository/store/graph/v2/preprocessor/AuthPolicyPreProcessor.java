@@ -59,6 +59,7 @@ import static org.apache.atlas.repository.Constants.ATTR_ADMIN_ROLES;
 import static org.apache.atlas.repository.Constants.KEYCLOAK_ROLE_ADMIN;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 import static org.apache.atlas.repository.Constants.STAKEHOLDER_ENTITY_TYPE;
+import static org.apache.atlas.repository.Constants.NAME;
 import static org.apache.atlas.repository.util.AccessControlUtils.*;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPolicySubCategory;
 
@@ -129,7 +130,10 @@ public class AuthPolicyPreProcessor implements PreProcessor {
                 validateAndReduce(policy);
             }
 
-            policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", getEntityQualifiedName(parentEntity), getUUID()));
+            String parentQN = getEntityQualifiedName(parentEntity);
+            validatePolicyUniquenessbyNameForParent(graph, getEntityName(policy), parentQN);
+
+            policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", parentQN, getUUID()));
 
             //extract role
             String roleName = getPersonaRoleName(parentEntity);
@@ -147,7 +151,10 @@ public class AuthPolicyPreProcessor implements PreProcessor {
             aliasStore.updateAlias(parent, policy);
 
         } else if (POLICY_CATEGORY_PURPOSE.equals(policyCategory)) {
-            policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", getEntityQualifiedName(parentEntity), getUUID()));
+            String parentQN = getEntityQualifiedName(parentEntity);
+            validatePolicyUniquenessbyNameForParent(graph, getEntityName(policy), parentQN);
+
+            policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", parentQN, getUUID()));
 
             validator.validate(policy, null, parentEntity, CREATE);
 
@@ -194,6 +201,9 @@ public class AuthPolicyPreProcessor implements PreProcessor {
 
         String policyCategory = policy.hasAttribute(ATTR_POLICY_CATEGORY) ? getPolicyCategory(policy) : getPolicyCategory(existingPolicy);
 
+        String currentName = vertex.getProperty(NAME, String.class);
+        String newName = getEntityName(policy);
+
         AuthPolicyValidator validator = new AuthPolicyValidator(entityRetriever);
         if (POLICY_CATEGORY_PERSONA.equals(policyCategory)) {
             AtlasEntityWithExtInfo parent = getAccessControlEntity(policy);
@@ -210,6 +220,10 @@ public class AuthPolicyPreProcessor implements PreProcessor {
 
             String qName = getEntityQualifiedName(existingPolicy);
             policy.setAttribute(QUALIFIED_NAME, qName);
+
+            if (newName != null && !newName.equals(currentName)) {
+                validatePolicyUniquenessbyNameForParent(graph, newName, getEntityQualifiedName(parentEntity));
+            }
 
             //extract role
             String roleName = getPersonaRoleName(parentEntity);
@@ -234,6 +248,10 @@ public class AuthPolicyPreProcessor implements PreProcessor {
 
             String qName = getEntityQualifiedName(existingPolicy);
             policy.setAttribute(QUALIFIED_NAME, qName);
+
+            if (newName != null && !newName.equals(currentName)) {
+                validatePolicyUniquenessbyNameForParent(graph, newName, getEntityQualifiedName(parentEntity));
+            }
 
             //extract tags
             List<String> purposeTags = getPurposeTags(parentEntity);
