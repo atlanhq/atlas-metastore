@@ -273,18 +273,14 @@ public class AuthPolicyPreProcessor implements PreProcessor {
 
         String parentQN = getEntityQualifiedName(parentEntity);
 
-        // Build Elasticsearch query to find active policies with same name under this parent
-        // Policy QN pattern: {parentQN}/{nanoId}, so we use prefix to filter by parent
         IndexSearchParams indexSearchParams = new IndexSearchParams();
 
-        // Build the filter clauses list
         List filterClauseList = new ArrayList();
         filterClauseList.add(mapOf("term", mapOf("__state", "ACTIVE")));
         filterClauseList.add(mapOf("term", mapOf("__typeName.keyword", POLICY_ENTITY_TYPE)));
         filterClauseList.add(mapOf("term", mapOf("name.keyword", policyName)));
         filterClauseList.add(mapOf("prefix", mapOf(QUALIFIED_NAME, parentQN)));
 
-        // Build the complete query structure: query -> bool -> filter (as array)
         Map<String, Object> dsl = new HashMap<>();
         dsl.put("size", 1);
         dsl.put("query", mapOf("bool", mapOf("filter", filterClauseList)));
@@ -296,7 +292,6 @@ public class AuthPolicyPreProcessor implements PreProcessor {
                 dsl, policyName, parentQN);
         }
 
-        // Use directVerticesIndexSearch instead of raw ES query
         List<AtlasVertex> results = discovery.directVerticesIndexSearch(indexSearchParams);
 
         if (CollectionUtils.isNotEmpty(results)) {
