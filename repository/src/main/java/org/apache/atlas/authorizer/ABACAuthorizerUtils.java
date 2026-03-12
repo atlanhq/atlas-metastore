@@ -86,44 +86,24 @@ public class ABACAuthorizerUtils {
     private static AtlasAccessResult verifyAccess(AtlasEntityHeader entity, AtlasPrivilege action) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("verifyEntityAccess");
 
-        AtlasAccessResult result = null;
-
-        AtlasEntityAccessRequest request = new AtlasEntityAccessRequest(typeRegistry, action, entity);
-        NewAtlasAuditHandler auditHandler = new NewAtlasAuditHandler(request, SERVICE_DEF_ATLAS);
-
         try {
-            result = EntityAuthorizer.isAccessAllowedInMemory(entity, action.getType());
-            auditHandler.processResult(result, request);
+            return EntityAuthorizer.isAccessAllowedInMemory(entity, action.getType());
         } finally {
-            auditHandler.flushAudit();
             RequestContext.get().endMetricRecord(recorder);
         }
-
-        return result;
     }
 
     private static AtlasAccessResult verifyAccess(String relationshipType, AtlasEntityHeader endOneEntity, AtlasEntityHeader endTwoEntity, AtlasPrivilege action) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("verifyRelationshipTypeAccess");
-        AtlasAccessResult result = new AtlasAccessResult(false);
-
-        AtlasRelationshipAccessRequest request = new AtlasRelationshipAccessRequest(typeRegistry,
-                action,
-                relationshipType,
-                endOneEntity,
-                endTwoEntity);
-        NewAtlasAuditHandler auditHandler = new NewAtlasAuditHandler(request, SERVICE_DEF_ATLAS);
 
         try {
-            result = RelationshipAuthorizer.isAccessAllowedInMemory(action.getType(), relationshipType, endOneEntity, endTwoEntity);
-            auditHandler.processResult(result, request);
+            return RelationshipAuthorizer.isAccessAllowedInMemory(action.getType(), relationshipType, endOneEntity, endTwoEntity);
         } catch (AtlasBaseException e) {
             LOG.error(e.getMessage());
+            return new AtlasAccessResult(false);
         } finally {
-            auditHandler.flushAudit();
             RequestContext.get().endMetricRecord(recorder);
         }
-
-        return result;
     }
 
     public static AtlasAccessorResponse getAccessors(AtlasAccessRequest request) {
