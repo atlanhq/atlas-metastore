@@ -81,6 +81,11 @@ public interface AtlasAuthorizer {
      */
     default
     AtlasAccessResult isAccessAllowed(AtlasRelationshipAccessRequest request) throws AtlasAuthorizationException {
+        return isAccessAllowed(request, true);
+    }
+
+    default
+    AtlasAccessResult isAccessAllowed(AtlasRelationshipAccessRequest request, boolean isAuditEnabled) throws AtlasAuthorizationException {
         AtlasAccessResult result = new AtlasAccessResult(true);
         return result;
     }
