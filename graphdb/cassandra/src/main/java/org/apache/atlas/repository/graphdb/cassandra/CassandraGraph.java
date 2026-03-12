@@ -1,5 +1,6 @@
 package org.apache.atlas.repository.graphdb.cassandra;
 
+// CassandraGraph: direct Cassandra + ES graph backend implementation
 import com.datastax.oss.driver.api.core.CqlSession;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.AtlasException;
