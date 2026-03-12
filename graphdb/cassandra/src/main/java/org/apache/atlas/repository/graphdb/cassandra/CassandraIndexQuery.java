@@ -249,7 +249,7 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
 
             String esQuery = String.format(
                 "{\"query\":{\"query_string\":{\"query\":\"%s\"}},\"from\":%d,\"size\":%d,\"_source\":false}",
-                cleanedQueryString.replace("\"", "\\\""), offset, limit);
+                cleanedQueryString.replace("\\", "\\\\").replace("\"", "\\\""), offset, limit);
 
             LOG.info("runQueryStringSearch: index='{}', queryString='{}', cleaned='{}', offset={}, limit={}",
                     index, queryString, cleanedQueryString, offset, limit);

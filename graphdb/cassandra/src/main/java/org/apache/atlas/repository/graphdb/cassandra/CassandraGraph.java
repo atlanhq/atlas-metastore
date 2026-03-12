@@ -43,7 +43,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
      * transaction can contain 900+ TypeDef vertices — without chunking, the batch
      * exceeds 50KB and Cassandra rejects it.
      *
-     * Each vertex generates ~4 statements (1 INSERT + 2-3 index inserts).
+     * Each vertex generates ~4 statements  (1 INSERT + 2-3 index inserts).
      * Normal entity vertices are 1-2KB each, so 20 per batch (~40KB) fits
      * comfortably within the limit and matches typical entity bulk size.
      * TypeDef bootstrap mixes large entity defs (30-60KB) with small enums/structs,
