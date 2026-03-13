@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "atlas-mcp": {
+      "command": "atlas-observability-proxy",
+      "env": {
+        "ATLAS_OBSERVABILITY_URL": "https://atlas-mcp.atlan.com"
+      }
+    },
+    "grafana-mcp": {
+      "command": "/Users/hitesh.khandelwal/Desktop/atlan/atlan-internal-mcps/grafana_clickhouse_mcp/proxy/.venv/bin/python",
+      "args": [
+        "/Users/hitesh.khandelwal/Desktop/atlan/atlan-internal-mcps/grafana_clickhouse_mcp/proxy/grafana_mcp_proxy.py"
+      ],
+      "env": {
+        "GRAFANA_MCP_URL": "https://grafana-clickhouse-mcp.atlan.com"
+      }
+    }
+  }
+}
