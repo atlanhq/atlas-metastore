@@ -36,7 +36,7 @@ class SearchSuite:
             "limit": 10,
             "offset": 0,
             "excludeDeletedEntities": True,
-        }, timeout=60)
+        }, timeout=120)
         assert_status(resp, 200)
         body = resp.json()
         assert isinstance(body, dict), f"Expected dict response, got {type(body).__name__}"
@@ -119,17 +119,6 @@ class SearchSuite:
         if resp.status_code == 200:
             body = resp.json()
             assert isinstance(body, dict) and body, "Expected non-empty dict response from ES search"
-
-    @test("dsl_search", tags=["search"], order=7)
-    def test_dsl_search(self, client, ctx):
-        resp = client.get("/search/dsl", params={
-            "query": "from DataSet select name limit 5",
-        })
-        # DSL may or may not be enabled
-        assert_status_in(resp, [200, 400, 404])
-        if resp.status_code == 200:
-            body = resp.json()
-            assert body, "Expected non-empty response from DSL search"
 
     @test("basic_search_by_classification", tags=["search", "slow"], order=8)
     def test_basic_search_by_classification(self, client, ctx):

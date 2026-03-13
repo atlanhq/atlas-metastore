@@ -80,7 +80,8 @@ class EntityCrudSuite:
             },
         }
         # Atlas returns 404 with ATLAS-404-00-007 for missing mandatory attributes
-        resp = client.post("/entity", json_data={"entity": entity})
+        # Longer timeout: preprod gateway can be slow even for error responses
+        resp = client.post("/entity", json_data={"entity": entity}, timeout=120)
         assert_status_in(resp, [400, 404, 422])
         body = resp.json()
         if isinstance(body, dict):
