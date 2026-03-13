@@ -1,5 +1,13 @@
 # API Documentation — Local Development
 
+## Live Site
+
+API docs are published to Kryptonite on push to `master`, `beta`, and `staging`:
+
+- https://k.atlan.dev/atlas-metastore/master
+- https://k.atlan.dev/atlas-metastore/beta
+- https://k.atlan.dev/atlas-metastore/staging
+
 ## Prerequisites
 
 - Python 3.10+
@@ -30,10 +38,10 @@ Output is written to `site/` (gitignored).
 
 ## Deployment
 
-The site auto-deploys to GitHub Pages via `.github/workflows/docs.yml` on push to `master` when files under `docs/` or `mkdocs.yml` change. You can also trigger it manually from the Actions tab.
+The site auto-deploys to Kryptonite (S3) via `.github/workflows/docs.yml` on push to `master`/`beta`/`staging` when files under `docs/` or `mkdocs.yml` change. You can also trigger it manually from the Actions tab.
 
 ## Adding New API Docs
 
 1. Create a new markdown file under `docs/api/` (e.g. `docs/api/entity-guid.md`)
 2. Add it to the `nav` section in `mkdocs.yml`
-3. Preview locally, then push to `master`
+3. Preview locally, then push

@@ -1,28 +1,51 @@
-name: Deploy API Docs
+name: Build Docs and Push to Kryptonite
 
 on:
   push:
-    branches: [master]
+    branches:
+      - master
+      - beta
+      - staging
     paths:
       - 'docs/**'
       - 'mkdocs.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  id-token: write
+  contents: read
 
 jobs:
-  deploy:
+  docs:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+    steps:
+      - name: Git Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get branch name
+        run: echo "branch=$(echo ${GITHUB_REF#refs/heads/})" >> $GITHUB_OUTPUT
+        id: get_branch
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
       - name: Install dependencies
         run: pip install mkdocs-material
 
-      - name: Deploy to GitHub Pages
-        run: mkdocs gh-deploy --force
+      - name: Build docs
+        run: mkdocs build
+
+      - name: Setup AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ap-south-1
+          role-to-assume: arn:aws:iam::733936409301:role/kryptonite-store_FullAccess
+
+      - name: Upload Docs to Kryptonite
+        run: |
+          aws s3 sync ./site s3://kryptonite-store/atlas-metastore/${{ steps.get_branch.outputs.branch }} --delete
