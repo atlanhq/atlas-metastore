@@ -529,7 +529,7 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
                     } else if(StringUtils.isNotBlank(httpRequest.getRemoteUser()) && atlasProxyUsers.contains(httpRequest.getRemoteUser())){
                         LOG.info("Ignoring kerberos login from proxy user "+ httpRequest.getRemoteUser());
 
-                        httpResponse.setHeader(KerberosAuthenticator.WWW_AUTHENTICATE, "");
+                        httpResponse.setHeader(KerberosAuthenticator.WWW_AUTHENTICATE, "Basic realm=\"Atlas\"");
                         httpResponse.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                         filterChain.doFilter(request, response);
 
@@ -559,10 +559,14 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
             if (!httpResponse.isCommitted()) {
                 createAtlasAuthCookie(httpResponse, "", getCookieDomain(), getCookiePath(), 0, isHttps);
 
-                // If response code is 401. Then WWW-Authenticate Header should be
-                // present.. reset to 403 if not found..
+                // Ensure WWW-Authenticate header is set for 401 responses
                 if (errCode == HttpServletResponse.SC_UNAUTHORIZED && !httpResponse.containsHeader(KerberosAuthenticator.WWW_AUTHENTICATE)) {
-                    errCode = HttpServletResponse.SC_FORBIDDEN;
+                    // Set appropriate authentication challenge based on auth method
+                    if (isKerberos) {
+                        httpResponse.setHeader(KerberosAuthenticator.WWW_AUTHENTICATE, "Negotiate");
+                    } else {
+                        httpResponse.setHeader(KerberosAuthenticator.WWW_AUTHENTICATE, "Basic realm=\"Atlas\"");
+                    }
                 }
 
                 boolean isKerberosOnBrowser = supportKeyTabBrowserLogin || doAsUser != null;
