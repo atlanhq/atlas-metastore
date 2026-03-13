@@ -154,12 +154,8 @@ class LineageCorrectnessSuite:
         )
         self.tag_name, self.tag2_name = names[0], names[1]
         if created_new:
-            ctx.register_cleanup(
-                lambda: client.delete(f"/types/typedef/name/{self.tag_name}")
-            )
-            ctx.register_cleanup(
-                lambda: client.delete(f"/types/typedef/name/{self.tag2_name}")
-            )
+            ctx.register_typedef_cleanup(client, self.tag_name)
+            ctx.register_typedef_cleanup(client, self.tag2_name)
 
         # Detect which entity type to use for lineage (Catalog on Atlan, DataSet on local)
         self.entity_type = _detect_lineage_entity_type(client)

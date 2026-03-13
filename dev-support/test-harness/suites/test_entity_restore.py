@@ -139,7 +139,7 @@ class EntityRestoreSuite:
             raise SkipTestError("Classification type not available")
         tag_name = names[0]
         if created_new:
-            ctx.register_cleanup(lambda: client.delete(f"/types/typedef/name/{tag_name}"))
+            ctx.register_typedef_cleanup(client, tag_name)
 
         qn = unique_qn("restore-cls")
         entity = build_dataset_entity(qn=qn, name=unique_name("restore-cls"))

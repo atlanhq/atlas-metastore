@@ -10,7 +10,7 @@ from core.data_factory import (
     build_business_metadata_def, build_multi_attr_business_metadata_def,
     build_dataset_entity, unique_name, unique_qn, unique_type_name,
 )
-from core.typedef_helpers import create_typedef_verified
+from core.typedef_helpers import create_typedef_verified, extract_bm_names_from_response, ensure_bm_types
 
 
 @suite("entity_businessmeta", depends_on_suites=["entity_crud"],
@@ -18,18 +18,26 @@ from core.typedef_helpers import create_typedef_verified
 class EntityBusinessMetaSuite:
 
     def setup(self, client, ctx):
-        # Create BM typedef with verify-after-500 + type cache wait
-        self.bm_name = unique_type_name("HarnessBM")
-        payload = {"businessMetadataDefs": [build_business_metadata_def(name=self.bm_name)]}
-        self.bm_ok, _resp = create_typedef_verified(
-            client, payload,
+        # Create BM typedef with fallback to existing types
+        self.bm_display_name = unique_type_name("HarnessBM")
+        bm_info, self.created_bm, self.bm_ok = ensure_bm_types(
+            client, self.bm_display_name,
         )
+
+        self.bm_internal_name = None
+        self.bm_attr_map = {}  # {displayName: internalName}
+        self.bm_field_display = "bmField1"  # default, overridden if bm_info available
+        if bm_info:
+            self.bm_internal_name = bm_info["internal_name"]
+            self.bm_display_name = bm_info["display_name"]
+            self.bm_attr_map = bm_info["attr_map"]
+            self.bm_field_display = bm_info["first_attr_display"]
+        # Only register typedef cleanup when WE created it
+        if self.bm_ok and self.created_bm:
+            cleanup_name = self.bm_internal_name or self.bm_display_name
+            ctx.register_typedef_cleanup(client, cleanup_name)
         if not self.bm_ok:
             print(f"  [bm-setup] BM typedef creation failed — tests will SKIP")
-        if self.bm_ok:
-            ctx.register_cleanup(
-                lambda: client.delete(f"/types/typedef/name/{self.bm_name}")
-            )
 
         # Create entity
         qn = unique_qn("bm-test")
@@ -49,59 +57,91 @@ class EntityBusinessMetaSuite:
     def test_add_business_metadata(self, client, ctx):
         if not self.bm_ok:
             raise SkipTestError("BM typedef creation failed (500/503)")
-        payload = {self.bm_name: {"bmField1": "test-value"}}
-        # Retry on 404 (type cache lag) up to 2 times with 15s backoff
-        for attempt in range(3):
+        # Use /businessmetadata/displayName endpoint — accepts human-readable names
+        payload = {self.bm_display_name: {self.bm_field_display: "test-value"}}
+        for attempt in range(6):
+            if attempt > 0:
+                time.sleep(10)
             resp = client.post(
-                f"/entity/guid/{self.entity_guid}/businessmetadata",
+                f"/entity/guid/{self.entity_guid}/businessmetadata/displayName",
                 json_data=payload,
             )
             if resp.status_code in (200, 204):
                 break
-            if resp.status_code == 404 and attempt < 2:
-                time.sleep(15)
-                continue
-            break
+            if resp.status_code != 404:
+                break
+            elapsed = (attempt + 1) * 10 if attempt > 0 else 0
+            print(f"  [bm] Type cache lag — 404 on attempt {attempt + 1}/6 ({elapsed}s)")
         if resp.status_code == 404:
             raise SkipTestError(
-                f"BM type {self.bm_name} not recognized by entity endpoint — "
+                f"BM type {self.bm_display_name} not recognized by entity endpoint after 50s — "
                 f"cross-pod type cache issue (type created but not propagated)"
             )
         assert_status_in(resp, [200, 204])
 
     @test("add_multi_attr_business_metadata", tags=["businessmeta"], order=1.5)
     def test_add_multi_attr_business_metadata(self, client, ctx):
-        self.multi_bm_name = unique_type_name("HarnessMultiBM")
-        payload = {"businessMetadataDefs": [build_multi_attr_business_metadata_def(name=self.multi_bm_name)]}
-        ok, resp = create_typedef_verified(client, payload)
-        if not ok:
-            raise SkipTestError(f"Multi-attr BM typedef creation failed ({resp.status_code})")
-        if ok:
-            ctx.register_cleanup(
-                lambda: client.delete(f"/types/typedef/name/{self.multi_bm_name}")
+        multi_display = unique_type_name("HarnessMultiBM")
+        multi_def = build_multi_attr_business_metadata_def(display_name=multi_display)
+        multi_info, created_multi, multi_ok = ensure_bm_types(
+            client, multi_display,
+            attr_defs=multi_def["attributeDefs"],
+            min_str_attrs=3,
+        )
+        if not multi_ok:
+            raise SkipTestError(
+                "Multi-attr BM type not available (creation failed, "
+                "no existing type with 3+ string attrs)"
             )
 
-        # Add multi-attr BM to entity
-        bm_payload = {self.multi_bm_name: {
-            "bmStrField": "hello",
-            "bmIntField": 42,
-            "bmBoolField": True,
-        }}
+        self.multi_bm_display = multi_info["display_name"]
+        self.multi_bm_internal = multi_info["internal_name"]
+        self.multi_bm_attr_map = multi_info["attr_map"]
+        if created_multi:
+            ctx.register_typedef_cleanup(client, self.multi_bm_internal)
+
+        # Build payload: typed values if we created, string values if borrowed
+        attr_names = list(multi_info["attr_map"].keys())[:3]
+        if created_multi:
+            bm_payload = {self.multi_bm_display: {
+                "bmStrField": "hello",
+                "bmIntField": 42,
+                "bmBoolField": True,
+            }}
+            expected = [
+                ("bmStrField", "hello"),
+                ("bmIntField", 42),
+                ("bmBoolField", True),
+            ]
+        else:
+            bm_payload = {self.multi_bm_display: {
+                attr_names[0]: "hello",
+                attr_names[1]: "world",
+                attr_names[2]: "test-val",
+            }}
+            expected = [
+                (attr_names[0], "hello"),
+                (attr_names[1], "world"),
+                (attr_names[2], "test-val"),
+            ]
+
         resp = client.post(
-            f"/entity/guid/{self.entity_guid}/businessmetadata",
+            f"/entity/guid/{self.entity_guid}/businessmetadata/displayName",
             json_data=bm_payload,
         )
         assert_status_in(resp, [200, 204, 404])
         if resp.status_code in [200, 204]:
-            # Verify all 3 field types persisted
             resp2 = client.get(f"/entity/guid/{self.entity_guid}")
             assert_status(resp2, 200)
             entity = resp2.json().get("entity", {})
-            bm = entity.get("businessAttributes", {}).get(self.multi_bm_name, {})
-            assert bm.get("bmStrField") == "hello", f"Expected bmStrField='hello', got {bm}"
-            assert bm.get("bmIntField") == 42, f"Expected bmIntField=42, got {bm}"
-            assert bm.get("bmBoolField") is True, f"Expected bmBoolField=True, got {bm}"
-            ctx.set("multi_bm_name", self.multi_bm_name)
+            bm_key = self.multi_bm_internal or self.multi_bm_display
+            bm = entity.get("businessAttributes", {}).get(bm_key, {})
+            for display_name, expected_val in expected:
+                internal_key = self.multi_bm_attr_map.get(display_name, display_name)
+                assert bm.get(internal_key) == expected_val, (
+                    f"Expected {internal_key}={expected_val!r}, got {bm}"
+                )
+            ctx.set("multi_bm_display", self.multi_bm_display)
 
     @test("verify_business_metadata", tags=["businessmeta"], order=2, depends_on=["add_business_metadata"])
     def test_verify_business_metadata(self, client, ctx):
@@ -110,36 +150,44 @@ class EntityBusinessMetaSuite:
         resp = client.get(f"/entity/guid/{self.entity_guid}")
         assert_status(resp, 200)
         entity = resp.json().get("entity", {})
-        bm = entity.get("businessAttributes", {}).get(self.bm_name, {})
-        assert bm.get("bmField1") == "test-value", f"Expected bmField1='test-value', got {bm}"
+        # Entity response uses server-generated internal names
+        bm_key = self.bm_internal_name or self.bm_display_name
+        bm = entity.get("businessAttributes", {}).get(bm_key, {})
+        attr_key = self.bm_attr_map.get(self.bm_field_display, self.bm_field_display)
+        assert bm.get(attr_key) == "test-value", (
+            f"Expected {attr_key}='test-value', got {bm} "
+            f"(bm_key={bm_key}, all BAs={entity.get('businessAttributes', {})})"
+        )
 
     @test("overwrite_business_metadata", tags=["businessmeta"], order=2.3, depends_on=["add_business_metadata"])
     def test_overwrite_business_metadata(self, client, ctx):
         if not self.bm_ok:
             raise SkipTestError("BM typedef not available")
-        payload = {self.bm_name: {"bmField1": "overwritten-value"}}
+        payload = {self.bm_display_name: {self.bm_field_display: "overwritten-value"}}
         resp = client.post(
-            f"/entity/guid/{self.entity_guid}/businessmetadata",
+            f"/entity/guid/{self.entity_guid}/businessmetadata/displayName",
             json_data=payload,
         )
         assert_status_in(resp, [200, 204])
 
-        # Verify overwrite
+        # Verify overwrite (entity uses internal names)
         resp2 = client.get(f"/entity/guid/{self.entity_guid}")
         assert_status(resp2, 200)
         entity = resp2.json().get("entity", {})
-        bm = entity.get("businessAttributes", {}).get(self.bm_name, {})
-        assert bm.get("bmField1") == "overwritten-value", (
-            f"Expected bmField1='overwritten-value', got {bm}"
+        bm_key = self.bm_internal_name or self.bm_display_name
+        bm = entity.get("businessAttributes", {}).get(bm_key, {})
+        attr_key = self.bm_attr_map.get(self.bm_field_display, self.bm_field_display)
+        assert bm.get(attr_key) == "overwritten-value", (
+            f"Expected {attr_key}='overwritten-value', got {bm}"
         )
 
     @test("partial_update_business_metadata", tags=["businessmeta"], order=2.5, depends_on=["add_business_metadata"])
     def test_partial_update_business_metadata(self, client, ctx):
         if not self.bm_ok:
             raise SkipTestError("BM typedef not available")
-        payload = {self.bm_name: {"bmField1": "partial-updated"}}
+        payload = {self.bm_display_name: {self.bm_field_display: "partial-updated"}}
         resp = client.post(
-            f"/entity/guid/{self.entity_guid}/businessmetadata",
+            f"/entity/guid/{self.entity_guid}/businessmetadata/displayName",
             json_data=payload,
         )
         assert_status_in(resp, [200, 204])
@@ -147,17 +195,21 @@ class EntityBusinessMetaSuite:
         resp2 = client.get(f"/entity/guid/{self.entity_guid}")
         assert_status(resp2, 200)
         entity = resp2.json().get("entity", {})
-        bm = entity.get("businessAttributes", {}).get(self.bm_name, {})
-        assert bm.get("bmField1") == "partial-updated", (
-            f"Expected bmField1='partial-updated', got {bm}"
+        bm_key = self.bm_internal_name or self.bm_display_name
+        bm = entity.get("businessAttributes", {}).get(bm_key, {})
+        attr_key = self.bm_attr_map.get(self.bm_field_display, self.bm_field_display)
+        assert bm.get(attr_key) == "partial-updated", (
+            f"Expected {attr_key}='partial-updated', got {bm}"
         )
 
     @test("delete_business_metadata", tags=["businessmeta"], order=3, depends_on=["add_business_metadata"])
     def test_delete_business_metadata(self, client, ctx):
         if not self.bm_ok:
             raise SkipTestError("BM typedef not available")
+        # DELETE requires the server-generated internal name in the path
+        bm_key = self.bm_internal_name or self.bm_display_name
         resp = client.delete(
-            f"/entity/guid/{self.entity_guid}/businessmetadata/{self.bm_name}",
+            f"/entity/guid/{self.entity_guid}/businessmetadata/{bm_key}",
         )
         assert_status_in(resp, [200, 204])
 
@@ -165,12 +217,12 @@ class EntityBusinessMetaSuite:
         resp2 = client.get(f"/entity/guid/{self.entity_guid}")
         assert_status(resp2, 200)
         entity = resp2.json().get("entity", {})
-        bm = entity.get("businessAttributes", {}).get(self.bm_name, {})
+        bm = entity.get("businessAttributes", {}).get(bm_key, {})
         # After delete, BM should be empty or absent
         if bm:
-            # Check that the field value is cleared (null or missing)
-            val = bm.get("bmField1")
-            assert val is None, f"Expected bmField1 cleared after delete, got {val}"
+            attr_key = self.bm_attr_map.get(self.bm_field_display, self.bm_field_display)
+            val = bm.get(attr_key)
+            assert val is None, f"Expected {attr_key} cleared after delete, got {val}"
 
     @test("add_bm_audit", tags=["businessmeta", "audit"], order=4, depends_on=["add_business_metadata"])
     def test_add_bm_audit(self, client, ctx):
@@ -196,56 +248,54 @@ class EntityBusinessMetaSuite:
     @test("search_by_bm_attribute", tags=["businessmeta", "search"], order=4.7,
           depends_on=["add_business_metadata"])
     def test_search_by_bm_attribute(self, client, ctx):
-        """CM-04: Search for entity by business metadata attribute in ES."""
+        """CM-04: Verify BM attribute value is indexed in ES via DSL filter.
+
+        AtlasEntityHeader (search result) has NO businessAttributes field.
+        BM attr values are indexed as flat ES fields keyed by the attr's
+        internal name — same pattern the UI uses for BM search.
+        """
         if not self.bm_ok:
             raise SkipTestError("BM typedef not available")
-        # Poll ES until entity appears with BM attributes
-        print(f"  [bm-search] Polling ES for entity {self.entity_guid} with BM...")
-        found_entity = None
+        # Get internal attr name — used as flat ES field name for BM attr values
+        attr_internal = self.bm_attr_map.get(
+            self.bm_field_display, self.bm_field_display,
+        )
+        print(f"  [bm-search] Polling ES for BM attr {attr_internal}=test-value "
+              f"on entity {self.entity_guid}...")
+
+        found = False
         for i in range(6):
             time.sleep(5)
             resp = client.post("/search/indexsearch", json_data={
                 "dsl": {
                     "from": 0, "size": 1,
                     "query": {"bool": {"must": [
+                        {"term": {attr_internal: "test-value"}},
                         {"term": {"__guid": self.entity_guid}},
                         {"term": {"__state": "ACTIVE"}},
                     ]}}
                 }
             })
-            if resp.status_code != 200:
-                print(f"  [bm-search] Search returned {resp.status_code} ({(i+1)*5}s/30s)")
-                continue
-            entities = resp.json().get("entities", [])
-            if entities:
-                found_entity = entities[0]
-                bm = found_entity.get("businessAttributes", {}).get(self.bm_name, {})
-                if bm:
-                    print(f"  [bm-search] BM found in search after {(i+1)*5}s: {bm}")
+            if resp.status_code == 200:
+                count = resp.json().get("approximateCount", 0)
+                if count > 0:
+                    found = True
+                    print(f"  [bm-search] BM found in ES after {(i+1)*5}s")
                     break
-                print(f"  [bm-search] Entity found but no BM yet ({(i+1)*5}s/30s)")
-            else:
-                print(f"  [bm-search] Entity not in ES yet ({(i+1)*5}s/30s)")
+            print(f"  [bm-search] BM not in ES yet ({(i+1)*5}s/30s)")
 
-        assert found_entity is not None, (
-            f"Entity {self.entity_guid} not found in ES after 30s polling"
-        )
-        assert found_entity.get("guid") == self.entity_guid, (
-            f"Expected guid={self.entity_guid}, got {found_entity.get('guid')}"
-        )
-        bm = found_entity.get("businessAttributes", {}).get(self.bm_name, {})
-        assert bm, (
-            f"Expected BM {self.bm_name} in search result for {self.entity_guid}, "
-            f"got businessAttributes={found_entity.get('businessAttributes', {})}"
+        assert found, (
+            f"BM attr {attr_internal}=test-value not indexed for entity "
+            f"{self.entity_guid} after 30s"
         )
 
     @test("add_bm_nonexistent_entity", tags=["businessmeta"], order=5)
     def test_add_bm_nonexistent_entity(self, client, ctx):
         if not self.bm_ok:
             raise SkipTestError("BM typedef not available")
-        payload = {self.bm_name: {"bmField1": "test"}}
+        payload = {self.bm_display_name: {self.bm_field_display: "test"}}
         resp = client.post(
-            "/entity/guid/00000000-0000-0000-0000-000000000000/businessmetadata",
+            "/entity/guid/00000000-0000-0000-0000-000000000000/businessmetadata/displayName",
             json_data=payload,
         )
         assert_status_in(resp, [404, 400])
@@ -261,19 +311,25 @@ class EntityBusinessMetaSuite:
         """CM-05: Delete a BM typedef and verify it's gone."""
         if not self.bm_ok:
             raise SkipTestError("BM typedef not available — cannot test typedef deletion")
+        if not self.created_bm:
+            raise SkipTestError("Using borrowed BM type — skipping typedef deletion test")
         # Create a throwaway BM typedef (not the main one used by other tests)
-        throwaway_bm = unique_type_name("ThrowawayBM")
-        payload = {"businessMetadataDefs": [build_business_metadata_def(name=throwaway_bm)]}
-        ok, resp = create_typedef_verified(client, payload)
+        throwaway_display = unique_type_name("ThrowawayBM")
+        payload = {"businessMetadataDefs": [build_business_metadata_def(display_name=throwaway_display)]}
+        ok, resp = create_typedef_verified(client, payload, max_wait=30)
         if not ok:
             raise SkipTestError(
                 f"Throwaway BM typedef creation failed ({resp.status_code})"
             )
 
-        # Delete the throwaway BM typedef
-        resp = client.delete(f"/types/typedef/name/{throwaway_bm}")
+        # Extract server-generated internal name for deletion
+        throwaway_internal, _ = extract_bm_names_from_response(resp, throwaway_display)
+        delete_name = throwaway_internal or throwaway_display
+
+        # Delete the throwaway BM typedef using internal name
+        resp = client.delete(f"/types/typedef/name/{delete_name}")
         assert_status_in(resp, [200, 204])
 
         # Verify it's gone — GET should return 404
-        resp2 = client.get(f"/types/typedef/name/{throwaway_bm}")
+        resp2 = client.get(f"/types/typedef/name/{delete_name}")
         assert_status_in(resp2, [404, 400])

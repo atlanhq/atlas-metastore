@@ -87,9 +87,9 @@ class ClassificationAdvancedSuite:
         )
         self.tag1, self.tag2, self.tag3 = names[0], names[1], names[2]
         if self.created_types:
-            ctx.register_cleanup(lambda: client.delete(f"/types/typedef/name/{self.tag1}"))
-            ctx.register_cleanup(lambda: client.delete(f"/types/typedef/name/{self.tag2}"))
-            ctx.register_cleanup(lambda: client.delete(f"/types/typedef/name/{self.tag3}"))
+            ctx.register_typedef_cleanup(client, self.tag1)
+            ctx.register_typedef_cleanup(client, self.tag2)
+            ctx.register_typedef_cleanup(client, self.tag3)
 
         # Create 4 entities with varying classification combos:
         #   E1: tag1
@@ -532,6 +532,7 @@ class ClassificationAdvancedSuite:
         ok, resp = create_typedef_verified(
             client,
             {"classificationDefs": [build_classification_def(name=throwaway)]},
+            max_wait=30,
         )
         if not ok:
             raise SkipTestError(

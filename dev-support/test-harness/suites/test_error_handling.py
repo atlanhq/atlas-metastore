@@ -23,8 +23,7 @@ class ErrorHandlingSuite:
     def test_entity_create_empty_body(self, client, ctx):
         """POST /entity with empty JSON body — expect 400."""
         resp = client.post("/entity", json_data={})
-        # 408 = staging can timeout even on invalid requests
-        assert_status_in(resp, [400, 404, 408])
+        assert_status_in(resp, [400, 404])
 
     @test("entity_create_invalid_type", tags=["error", "negative"], order=2)
     def test_entity_create_invalid_type(self, client, ctx):
@@ -37,8 +36,7 @@ class ErrorHandlingSuite:
             },
         }
         resp = client.post("/entity", json_data={"entity": entity})
-        # 408 = staging can timeout even on invalid requests
-        assert_status_in(resp, [400, 404, 408])
+        assert_status_in(resp, [400, 404])
 
     @test("entity_create_missing_qn", tags=["error", "negative"], order=3)
     def test_entity_create_missing_qn(self, client, ctx):
@@ -50,8 +48,7 @@ class ErrorHandlingSuite:
             },
         }
         resp = client.post("/entity", json_data={"entity": entity})
-        # 408 = staging can timeout on entity validation
-        assert_status_in(resp, [400, 404, 408])
+        assert_status_in(resp, [400, 404])
 
     @test("entity_create_duplicate_qn", tags=["error"], order=4)
     def test_entity_create_duplicate_qn(self, client, ctx):
@@ -96,8 +93,7 @@ class ErrorHandlingSuite:
                 "query": {"match_all": {}},
             }
         })
-        # 408 = query too expensive, timed out
-        assert_status_in(resp, [200, 400, 408])
+        assert_status_in(resp, [200, 400])
         if resp.status_code == 200:
             body = resp.json()
             entities = body.get("entities", [])
@@ -124,9 +120,7 @@ class ErrorHandlingSuite:
         resp1 = client.post("/types/typedefs", json_data=payload)
         assert_status(resp1, 200)
         if resp1.status_code == 200:
-            ctx.register_cleanup(
-                lambda: client.delete(f"/types/typedef/name/{name}")
-            )
+            ctx.register_typedef_cleanup(client, name)
             # Create again
             resp2 = client.post("/types/typedefs", json_data=payload)
             assert_status_in(resp2, [200, 409])

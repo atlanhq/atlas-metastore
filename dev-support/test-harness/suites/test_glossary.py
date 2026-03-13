@@ -631,7 +631,7 @@ class GlossarySuite:
             if resp2.status_code == 200:
                 assert_field_equals(resp2, "shortDescription", "Updated category")
 
-    # ---- Delete (reverse order: categories, terms, then glossary via cleanup) ----
+    # ---- Term assignment & disassociation search verification ----
 
     @test("term_assignment_in_search", tags=["glossary", "search"], order=31,
           depends_on=["assign_term_to_entity"])
@@ -696,36 +696,99 @@ class GlossarySuite:
                 f"Expected termGuid {term_guid} in meanings, got {term_guids}"
             )
 
-    @test("delete_glossary_not_empty", tags=["glossary"], order=79, depends_on=["create_glossary"])
-    def test_delete_glossary_not_empty(self, client, ctx):
-        guid = ctx.get_entity_guid("glossary")
-        assert guid, "Glossary GUID not found in context"
-        resp = client.delete(f"/glossary/{guid}")
-        # May return 409 (conflict) if cascade not supported, or 200 if cascade delete
-        assert_status_in(resp, [200, 204, 409])
-        if resp.status_code == 409:
-            body = resp.json()
-            assert "errorMessage" in body or "message" in body, (
-                "Expected error message in 409 response"
-            )
-        elif resp.status_code in (200, 204):
-            # Cascade deleted everything — mark so downstream deletes skip gracefully
-            ctx.set("glossary_cascade_deleted", True)
+    @test("verify_disassociation_in_search", tags=["glossary", "search"], order=34,
+          depends_on=["disassociate_term_from_entity"])
+    def test_verify_disassociation_in_search(self, client, ctx):
+        """After disassociating term from entity, verify meanings is cleared in ES."""
+        entity_guid = ctx.get_entity_guid("term_assign_entity")
+        assert entity_guid, "term_assign_entity GUID not found in context"
 
-    @test("delete_category", tags=["glossary", "crud"], order=80, depends_on=["create_category"])
+        print(f"  [glossary-search] Polling ES for entity {entity_guid} — "
+              f"expecting meanings cleared after disassociation...")
+        max_wait = 60
+        poll_interval = 5
+        meanings_cleared = False
+        for i in range(max_wait // poll_interval):
+            time.sleep(poll_interval)
+            elapsed = (i + 1) * poll_interval
+            resp = client.post("/search/indexsearch", json_data={
+                "dsl": {
+                    "from": 0, "size": 1,
+                    "query": {"bool": {"must": [
+                        {"term": {"__guid": entity_guid}},
+                        {"term": {"__state": "ACTIVE"}},
+                    ]}}
+                }
+            })
+            if resp.status_code != 200:
+                print(f"  [glossary-search] Search returned {resp.status_code} ({elapsed}s/{max_wait}s)")
+                continue
+            entities = resp.json().get("entities", [])
+            if not entities:
+                print(f"  [glossary-search] Entity not in ES ({elapsed}s/{max_wait}s)")
+                continue
+            entity = entities[0]
+            meanings = entity.get("meanings", [])
+            meanings_raw = entity.get("__meanings", [])
+            has_meanings = (meanings and len(meanings) > 0) or \
+                           (meanings_raw and len(meanings_raw) > 0)
+            if not has_meanings:
+                meanings_cleared = True
+                print(f"  [glossary-search] Meanings cleared after {elapsed}s")
+                break
+            print(f"  [glossary-search] Meanings still present ({elapsed}s/{max_wait}s): "
+                  f"meanings={meanings}, __meanings={meanings_raw}")
+
+        assert meanings_cleared, (
+            f"Expected meanings to be cleared on entity {entity_guid} after disassociation, "
+            f"but meanings still present after {max_wait}s polling"
+        )
+
+    # ---- Delete (reverse dependency order: child categories, categories, terms, glossary) ----
+
+    @test("delete_child_category", tags=["glossary", "crud"], order=79,
+          depends_on=["create_category_hierarchy"])
+    def test_delete_child_category(self, client, ctx):
+        guid = ctx.get_entity_guid("child_category")
+        if not guid:
+            raise SkipTestError("child_category was not created")
+        resp = client.delete(f"/glossary/category/{guid}")
+        assert_status_in(resp, [200, 204])
+
+        # Verify deletion — GET should return 404
+        resp2 = client.get(f"/glossary/category/{guid}")
+        assert_status(resp2, 404)
+
+    @test("delete_category", tags=["glossary", "crud"], order=80,
+          depends_on=["create_category", "delete_child_category"])
     def test_delete_category(self, client, ctx):
-        if ctx.get("glossary_cascade_deleted"):
-            raise SkipTestError("Glossary was cascade-deleted — category already gone")
         guid = ctx.get_entity_guid("category1")
         assert guid, "category1 GUID not found in context"
         resp = client.delete(f"/glossary/category/{guid}")
         assert_status_in(resp, [200, 204])
 
+        # Verify deletion — GET should return 404
+        resp2 = client.get(f"/glossary/category/{guid}")
+        assert_status(resp2, 404)
+
     @test("delete_term", tags=["glossary", "crud"], order=81, depends_on=["create_term"])
     def test_delete_term(self, client, ctx):
-        if ctx.get("glossary_cascade_deleted"):
-            raise SkipTestError("Glossary was cascade-deleted — term already gone")
         guid = ctx.get_entity_guid("term1")
         assert guid, "term1 GUID not found in context"
         resp = client.delete(f"/glossary/term/{guid}")
         assert_status_in(resp, [200, 204])
+
+        # Verify deletion — GET should return 404
+        resp2 = client.get(f"/glossary/term/{guid}")
+        assert_status(resp2, 404)
+
+    @test("delete_glossary", tags=["glossary", "crud"], order=82, depends_on=["create_glossary"])
+    def test_delete_glossary(self, client, ctx):
+        guid = ctx.get_entity_guid("glossary")
+        assert guid, "Glossary GUID not found in context"
+        resp = client.delete(f"/glossary/{guid}")
+        assert_status_in(resp, [200, 204])
+
+        # Verify deletion — GET should return 404
+        resp2 = client.get(f"/glossary/{guid}")
+        assert_status(resp2, 404)

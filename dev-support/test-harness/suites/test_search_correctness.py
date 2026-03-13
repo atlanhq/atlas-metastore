@@ -14,6 +14,7 @@ from core.assertions import (
 from core.data_factory import (
     build_dataset_entity, build_classification_def, build_process_entity,
     unique_name, unique_qn, unique_type_name, PREFIX,
+    detect_process_io_type, create_process_with_io,
 )
 from core.typedef_helpers import create_typedef_verified, ensure_classification_types
 
@@ -48,10 +49,10 @@ def _search_by_guid(client, guid):
 QN_FIELDS = ("qualifiedName.keyword", "qualifiedName", "__qualifiedName")
 
 
-def _create_entity_and_register(client, ctx, suffix, cleanup=True):
-    """Helper: create a DataSet, register cleanup, return guid."""
+def _create_entity_and_register(client, ctx, suffix, cleanup=True, type_name="DataSet"):
+    """Helper: create an entity, register cleanup, return (guid, qn)."""
     qn = unique_qn(suffix)
-    entity = build_dataset_entity(qn=qn, name=unique_name(suffix))
+    entity = build_dataset_entity(qn=qn, name=unique_name(suffix), type_name=type_name)
     resp = client.post("/entity", json_data={"entity": entity})
     assert_status(resp, 200)
     body = resp.json()
@@ -96,7 +97,7 @@ def _poll_index_search(client, dsl, max_wait=30, interval=5, label="search"):
     return True, last_body
 
 
-@suite("search_correctness", depends_on_suites=["entity_crud"],
+@suite("search_correctness", depends_on_suites=["entity_crud", "glossary"],
        description="Search field-level correctness validation")
 class SearchCorrectnessSuite:
 
@@ -110,12 +111,8 @@ class SearchCorrectnessSuite:
         )
         self.tag_name, self.tag2_name = names[0], names[1]
         if self.created_types:
-            ctx.register_cleanup(
-                lambda: client.delete(f"/types/typedef/name/{self.tag_name}")
-            )
-            ctx.register_cleanup(
-                lambda: client.delete(f"/types/typedef/name/{self.tag2_name}")
-            )
+            ctx.register_typedef_cleanup(client, self.tag_name)
+            ctx.register_typedef_cleanup(client, self.tag2_name)
 
         # Entity A: has classification (retry on type cache lag)
         self.guid_a, self.qn_a = _create_entity_and_register(client, ctx, "search-a")
@@ -494,25 +491,20 @@ class SearchCorrectnessSuite:
     def test_search_propagated_classification(self, client, ctx):
         if not self.tag_add_ok:
             raise SkipTestError("Classification not added in setup — type cache propagation failed")
-        # Create lineage: src -> process -> tgt, tag src, check tgt
-        src_guid, src_qn = _create_entity_and_register(client, ctx, "prop-search-src")
-        tgt_guid, tgt_qn = _create_entity_and_register(client, ctx, "prop-search-tgt")
 
-        proc = build_process_entity(
-            inputs=[{"guid": src_guid, "typeName": "DataSet"}],
-            outputs=[{"guid": tgt_guid, "typeName": "DataSet"}],
+        # Detect correct entity type for process I/O
+        io_type = ctx.get("process_io_type") or detect_process_io_type(client)
+
+        # Create lineage: src -> process -> tgt, tag src, check tgt
+        src_guid, src_qn = _create_entity_and_register(client, ctx, "prop-search-src", type_name=io_type)
+        tgt_guid, tgt_qn = _create_entity_and_register(client, ctx, "prop-search-tgt", type_name=io_type)
+
+        ok, proc_guid = create_process_with_io(
+            client, ctx, "prop-search-proc",
+            [src_guid], [tgt_guid], entity_type=io_type,
         )
-        resp = client.post("/entity", json_data={"entity": proc})
-        if resp.status_code != 200:
-            raise SkipTestError(
-                f"Process entity creation returned {resp.status_code} — "
-                f"lineage not supported or validation error"
-            )
-        proc_entities = (resp.json().get("mutatedEntities", {}).get("CREATE", []) or
-                         resp.json().get("mutatedEntities", {}).get("UPDATE", []))
-        assert proc_entities, "Process creation returned no entities in mutatedEntities"
-        proc_guid = proc_entities[0]["guid"]
-        ctx.register_entity_cleanup(proc_guid)
+        if not ok:
+            raise SkipTestError("Process creation failed — lineage not supported in this env")
 
         # Add propagating classification to src
         resp = client.post(f"/entity/guid/{src_guid}/classifications", json_data=[{

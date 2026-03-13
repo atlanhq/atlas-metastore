@@ -18,6 +18,7 @@ from core.kafka_helpers import assert_entity_in_kafka
 from core.data_factory import (
     build_classification_def, build_dataset_entity, build_process_entity,
     unique_name, unique_qn, unique_type_name,
+    detect_process_io_type, create_process_with_io,
 )
 from core.typedef_helpers import create_typedef_verified, ensure_classification_types
 
@@ -78,10 +79,10 @@ def _poll_tag_removed(client, guid, tag_name, max_wait=30, interval=5, label="")
     return False, names
 
 
-def _create_entity_and_get_guid(client, ctx, suffix):
-    """Create a DataSet entity, register cleanup, return GUID. Raises on failure."""
+def _create_entity_and_get_guid(client, ctx, suffix, type_name="DataSet"):
+    """Create an entity, register cleanup, return GUID. Raises on failure."""
     qn = unique_qn(suffix)
-    entity = build_dataset_entity(qn=qn, name=unique_name(suffix))
+    entity = build_dataset_entity(qn=qn, name=unique_name(suffix), type_name=type_name)
     resp = client.post("/entity", json_data={"entity": entity})
     assert_status(resp, 200)
     body = resp.json()
@@ -124,6 +125,9 @@ def _search_entity_in_es(client, guid, es_sync_wait=5, max_retries=5,
 class EntityClassificationsSuite:
 
     def setup(self, client, ctx):
+        # Detect entity type for Process I/O (Catalog on staging, DataSet on local)
+        self.io_type = ctx.get("process_io_type") or detect_process_io_type(client)
+
         # Get 2 usable classification types (create new or use existing)
         requested = [unique_type_name("HarnessTag"), unique_type_name("HarnessTag2")]
         names, self.created_types, self.tags_ok = ensure_classification_types(
@@ -133,12 +137,8 @@ class EntityClassificationsSuite:
 
         ctx.set("harness_tag_name", self.tag_name)
         if self.created_types:
-            ctx.register_cleanup(
-                lambda: client.delete(f"/types/typedef/name/{self.tag_name}")
-            )
-            ctx.register_cleanup(
-                lambda: client.delete(f"/types/typedef/name/{self.tag2_name}")
-            )
+            ctx.register_typedef_cleanup(client, self.tag_name)
+            ctx.register_typedef_cleanup(client, self.tag2_name)
 
         # Create a dedicated entity
         qn = unique_qn("tag-test")
@@ -338,29 +338,20 @@ class EntityClassificationsSuite:
         if not self.tags_ok:
             raise SkipTestError("Classification typedef not queryable")
 
-        print("  [propagation] Creating lineage: DataSet A -> Process -> DataSet B")
+        io = self.io_type
+        print(f"  [propagation] Creating lineage: {io} A -> Process -> {io} B")
 
-        # Create DataSet A, DataSet B, Process(inputs=[A], outputs=[B])
-        guid_a = _create_entity_and_get_guid(client, ctx, "prop-src")
-        guid_b = _create_entity_and_get_guid(client, ctx, "prop-tgt")
+        # Create entities with correct type for Process I/O
+        guid_a = _create_entity_and_get_guid(client, ctx, "prop-src", type_name=io)
+        guid_b = _create_entity_and_get_guid(client, ctx, "prop-tgt", type_name=io)
         print(f"  [propagation] Source={guid_a}, Target={guid_b}")
 
-        # Create Process linking A -> B
-        proc = build_process_entity(
-            inputs=[{"guid": guid_a, "typeName": "DataSet"}],
-            outputs=[{"guid": guid_b, "typeName": "DataSet"}],
+        # Create Process linking A -> B (120s timeout for staging)
+        ok, proc_guid = create_process_with_io(
+            client, ctx, "prop-proc", [guid_a], [guid_b], entity_type=io,
         )
-        resp_proc = client.post("/entity", json_data={"entity": proc})
-        if resp_proc.status_code != 200:
-            raise SkipTestError(
-                f"Process entity creation returned {resp_proc.status_code} — "
-                f"lineage not supported in this env"
-            )
-        proc_entities = (resp_proc.json().get("mutatedEntities", {}).get("CREATE", []) or
-                         resp_proc.json().get("mutatedEntities", {}).get("UPDATE", []))
-        assert proc_entities, "Process entity creation returned empty mutatedEntities"
-        proc_guid = proc_entities[0]["guid"]
-        ctx.register_entity_cleanup(proc_guid)
+        if not ok:
+            raise SkipTestError("Process creation failed — lineage not supported in this env")
         print(f"  [propagation] Process={proc_guid}")
 
         # Add classification to A with propagation enabled
@@ -411,28 +402,19 @@ class EntityClassificationsSuite:
         if not self.tags_ok:
             raise SkipTestError("Classification typedef not queryable")
 
+        io = self.io_type
         print("  [prop-delete] Creating fresh lineage for delete-cleanup test")
 
         # Create fresh lineage: A -> proc -> B
-        guid_a = _create_entity_and_get_guid(client, ctx, "prop-del-src")
-        guid_b = _create_entity_and_get_guid(client, ctx, "prop-del-tgt")
+        guid_a = _create_entity_and_get_guid(client, ctx, "prop-del-src", type_name=io)
+        guid_b = _create_entity_and_get_guid(client, ctx, "prop-del-tgt", type_name=io)
         print(f"  [prop-delete] Source={guid_a}, Target={guid_b}")
 
-        proc = build_process_entity(
-            inputs=[{"guid": guid_a, "typeName": "DataSet"}],
-            outputs=[{"guid": guid_b, "typeName": "DataSet"}],
+        ok, proc_guid = create_process_with_io(
+            client, ctx, "prop-del-proc", [guid_a], [guid_b], entity_type=io,
         )
-        resp_proc = client.post("/entity", json_data={"entity": proc})
-        if resp_proc.status_code != 200:
-            raise SkipTestError(
-                f"Process entity creation returned {resp_proc.status_code} — "
-                f"lineage not supported in this env"
-            )
-        proc_entities = (resp_proc.json().get("mutatedEntities", {}).get("CREATE", []) or
-                         resp_proc.json().get("mutatedEntities", {}).get("UPDATE", []))
-        assert proc_entities, "Process entity creation returned empty mutatedEntities"
-        proc_guid = proc_entities[0]["guid"]
-        ctx.register_entity_cleanup(proc_guid)
+        if not ok:
+            raise SkipTestError("Process creation failed — lineage not supported in this env")
 
         # Tag A with propagation enabled
         print(f"  [prop-delete] Adding {self.tag_name} to source with propagate=True")
@@ -491,48 +473,29 @@ class EntityClassificationsSuite:
         if not self.tags_ok:
             raise SkipTestError("Classification typedef not queryable")
 
-        print("  [trans-del] Creating 3-entity lineage: A -> Proc1 -> B -> Proc2 -> C")
+        io = self.io_type
+        print(f"  [trans-del] Creating 3-entity lineage: {io} A -> Proc1 -> {io} B -> Proc2 -> {io} C")
 
         # --- Create entities A, B, C ---
-        guid_a = _create_entity_and_get_guid(client, ctx, "trans-del-a")
-        guid_b = _create_entity_and_get_guid(client, ctx, "trans-del-b")
-        guid_c = _create_entity_and_get_guid(client, ctx, "trans-del-c")
+        guid_a = _create_entity_and_get_guid(client, ctx, "trans-del-a", type_name=io)
+        guid_b = _create_entity_and_get_guid(client, ctx, "trans-del-b", type_name=io)
+        guid_c = _create_entity_and_get_guid(client, ctx, "trans-del-c", type_name=io)
         print(f"  [trans-del] A={guid_a}, B={guid_b}, C={guid_c}")
 
         # --- Create Proc1: A -> B ---
-        proc1 = build_process_entity(
-            inputs=[{"guid": guid_a, "typeName": "DataSet"}],
-            outputs=[{"guid": guid_b, "typeName": "DataSet"}],
+        ok1, proc1_guid = create_process_with_io(
+            client, ctx, "trans-del-p1", [guid_a], [guid_b], entity_type=io,
         )
-        resp_p1 = client.post("/entity", json_data={"entity": proc1})
-        if resp_p1.status_code != 200:
-            raise SkipTestError(
-                f"Process entity creation returned {resp_p1.status_code} — "
-                f"lineage not supported in this env"
-            )
-        p1_creates = (resp_p1.json().get("mutatedEntities", {}).get("CREATE", []) or
-                       resp_p1.json().get("mutatedEntities", {}).get("UPDATE", []))
-        assert p1_creates, "Proc1 creation returned empty mutatedEntities"
-        proc1_guid = p1_creates[0]["guid"]
-        ctx.register_entity_cleanup(proc1_guid)
+        if not ok1:
+            raise SkipTestError("Proc1 creation failed — lineage not supported in this env")
         print(f"  [trans-del] Proc1={proc1_guid} (A->B)")
 
         # --- Create Proc2: B -> C ---
-        proc2 = build_process_entity(
-            inputs=[{"guid": guid_b, "typeName": "DataSet"}],
-            outputs=[{"guid": guid_c, "typeName": "DataSet"}],
+        ok2, proc2_guid = create_process_with_io(
+            client, ctx, "trans-del-p2", [guid_b], [guid_c], entity_type=io,
         )
-        resp_p2 = client.post("/entity", json_data={"entity": proc2})
-        if resp_p2.status_code != 200:
-            raise SkipTestError(
-                f"Process entity creation returned {resp_p2.status_code} — "
-                f"lineage not supported in this env"
-            )
-        p2_creates = (resp_p2.json().get("mutatedEntities", {}).get("CREATE", []) or
-                       resp_p2.json().get("mutatedEntities", {}).get("UPDATE", []))
-        assert p2_creates, "Proc2 creation returned empty mutatedEntities"
-        proc2_guid = p2_creates[0]["guid"]
-        ctx.register_entity_cleanup(proc2_guid)
+        if not ok2:
+            raise SkipTestError("Proc2 creation failed — lineage not supported in this env")
         print(f"  [trans-del] Proc2={proc2_guid} (B->C)")
 
         # --- Tag A with propagation enabled ---
@@ -730,27 +693,18 @@ class EntityClassificationsSuite:
         if not self.tags_ok:
             raise SkipTestError("Classification typedef not queryable")
 
+        io = self.io_type
         print("  [prop-search] Creating fresh lineage for ES propagation search test")
 
         # Create fresh lineage for search validation
-        guid_src = _create_entity_and_get_guid(client, ctx, "prop-search-src")
-        guid_tgt = _create_entity_and_get_guid(client, ctx, "prop-search-tgt")
+        guid_src = _create_entity_and_get_guid(client, ctx, "prop-search-src", type_name=io)
+        guid_tgt = _create_entity_and_get_guid(client, ctx, "prop-search-tgt", type_name=io)
 
-        proc = build_process_entity(
-            inputs=[{"guid": guid_src, "typeName": "DataSet"}],
-            outputs=[{"guid": guid_tgt, "typeName": "DataSet"}],
+        ok, proc_guid = create_process_with_io(
+            client, ctx, "prop-search-proc", [guid_src], [guid_tgt], entity_type=io,
         )
-        resp_proc = client.post("/entity", json_data={"entity": proc})
-        if resp_proc.status_code != 200:
-            raise SkipTestError(
-                f"Process creation returned {resp_proc.status_code} — "
-                f"lineage not supported in this env"
-            )
-        proc_entities = (resp_proc.json().get("mutatedEntities", {}).get("CREATE", []) or
-                         resp_proc.json().get("mutatedEntities", {}).get("UPDATE", []))
-        assert proc_entities, "Process entity creation returned empty mutatedEntities"
-        proc_guid = proc_entities[0]["guid"]
-        ctx.register_entity_cleanup(proc_guid)
+        if not ok:
+            raise SkipTestError("Process creation failed — lineage not supported in this env")
 
         # Tag src with propagation enabled
         print(f"  [prop-search] Adding {self.tag_name} to source {guid_src} with propagate=True")

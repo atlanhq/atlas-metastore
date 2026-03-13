@@ -9,14 +9,14 @@ from typing import Any, Callable, Dict, List, Optional
 def _purge_entity_with_retry(client, guid, max_attempts=3):
     """Hard-delete (purge) an entity with retry on timeout.
 
-    DELETE with purge=true is idempotent, so retrying on timeout is safe.
+    DELETE with deleteType=PURGE is idempotent, so retrying on timeout is safe.
     Uses escalating timeouts: 60s, 90s, 120s.
     """
     for attempt in range(max_attempts):
         timeout = 60 + (30 * attempt)
         resp = client.delete(
             f"/entity/guid/{guid}",
-            params={"purge": "true"},
+            params={"deleteType": "PURGE"},
             timeout=timeout,
             retries=0,  # we handle retries here
         )
@@ -40,7 +40,7 @@ class TestContext:
 
     Also maintains a LIFO cleanup stack so children are deleted before parents.
 
-    Entity cleanup uses hard delete (DELETE /entity/guid/{guid}?purge=true)
+    Entity cleanup uses hard delete (DELETE /entity/guid/{guid}?deleteType=PURGE)
     to fully remove entities from graph + ES, ensuring typedef deletion
     succeeds afterward (classification/BM types check ES for references).
     Use register_entity_cleanup(guid) for entities and register_cleanup(fn)
@@ -96,17 +96,32 @@ class TestContext:
     def register_cleanup(self, fn: Callable):
         """Register a no-arg callable to run during cleanup (LIFO order).
 
-        Use this for glossary deletes, typedef deletes, and other non-entity
-        cleanup. For entity deletes, prefer register_entity_cleanup(guid).
+        Use this for glossary deletes and other non-entity cleanup.
+        For entity deletes, prefer register_entity_cleanup(guid).
+        For typedef deletes, prefer register_typedef_cleanup(client, name).
         """
         with self._lock:
             self._cleanup_stack.append(fn)
+
+    def register_typedef_cleanup(self, client, name: str):
+        """Register a typedef for deletion during cleanup (fast-fail).
+
+        Uses retries=0 and timeout=60 because typedef DELETE returning 500
+        means the server rejected it (e.g. type has references in ES) —
+        retrying the same request won't help, it just wastes minutes.
+        """
+        with self._lock:
+            self._cleanup_stack.append(
+                lambda n=name, c=client: c.delete(
+                    f"/types/typedef/name/{n}", timeout=120, retries=0,
+                )
+            )
 
     def register_entity_cleanup(self, guid: str):
         """Register an entity GUID for hard deletion during cleanup.
 
         Entities are hard-deleted (purged) individually via
-        DELETE /entity/guid/{guid}?purge=true to fully remove them from
+        DELETE /entity/guid/{guid}?deleteType=PURGE to fully remove them from
         graph + ES, which is required before typedef deletion can succeed.
         """
         with self._lock:

@@ -13,7 +13,10 @@ from core.data_factory import (
     build_entity_def, build_business_metadata_def, build_relationship_def,
     build_dataset_entity, unique_type_name, unique_qn, unique_name,
 )
-from core.typedef_helpers import create_typedef_verified
+from core.typedef_helpers import (
+    create_typedef_verified, extract_bm_names_from_response,
+    _discover_bm_by_display_name,
+)
 
 
 @suite("typedefs", description="TypeDef CRUD operations")
@@ -24,7 +27,8 @@ class TypeDefSuite:
         self.classification_name = unique_type_name("TestClassification")
         self.struct_name = unique_type_name("TestStruct")
         self.entity_type_name = unique_type_name("TestEntityType")
-        self.bm_name = unique_type_name("TestBM")
+        self.bm_display_name = unique_type_name("TestBM")
+        self.bm_server_name = None  # Set after creation
 
     # ---- GET existing types ----
 
@@ -161,7 +165,7 @@ class TypeDefSuite:
 
     @test("create_business_metadata_def", tags=["typedef", "crud"], order=18)
     def test_create_business_metadata_def(self, client, ctx):
-        payload = {"businessMetadataDefs": [build_business_metadata_def(name=self.bm_name)]}
+        payload = {"businessMetadataDefs": [build_business_metadata_def(display_name=self.bm_display_name)]}
         ok, resp = create_typedef_verified(client, payload)
         if not ok and resp.status_code in (500, 502, 503):
             raise SkipTestError(
@@ -171,7 +175,20 @@ class TypeDefSuite:
         assert ok, (
             f"BM typedef creation failed: POST returned {resp.status_code}"
         )
-        ctx.set("test_bm_name", self.bm_name)
+
+        # Extract server-generated internal name
+        internal_name, _ = extract_bm_names_from_response(resp, self.bm_display_name)
+        if internal_name:
+            self.bm_server_name = internal_name
+        elif resp.status_code == 409:
+            # 409 body is error JSON, not typedef — discover internal name
+            # via headers endpoint
+            discovered = _discover_bm_by_display_name(client, self.bm_display_name)
+            if discovered:
+                self.bm_server_name = discovered["internal_name"]
+                print(f"  [typedef] Discovered BM internal name via headers: "
+                      f"{self.bm_server_name}")
+        ctx.set("test_bm_name", self.bm_server_name or self.bm_display_name)
 
         if resp.status_code == 200:
             body = resp.json()
@@ -180,11 +197,12 @@ class TypeDefSuite:
 
     @test("get_bm_def_by_name", tags=["typedef"], order=19, depends_on=["create_business_metadata_def"])
     def test_get_bm_def_by_name(self, client, ctx):
-        resp = client.get(f"/types/businessmetadatadef/name/{self.bm_name}")
+        lookup_name = self.bm_server_name or self.bm_display_name
+        resp = client.get(f"/types/businessmetadatadef/name/{lookup_name}")
         # May return 404 if type cache hasn't propagated yet
         assert_status_in(resp, [200, 404])
         if resp.status_code == 200:
-            assert_field_equals(resp, "name", self.bm_name)
+            assert_field_equals(resp, "name", lookup_name)
 
     # ---- UPDATE type ----
 
@@ -268,9 +286,7 @@ class TypeDefSuite:
             f"Relationship typedef creation failed: POST returned {resp.status_code}"
         )
         ctx.set("test_rel_def_name", self.rel_def_name)
-        ctx.register_cleanup(
-            lambda: client.delete(f"/types/typedef/name/{self.rel_def_name}")
-        )
+        ctx.register_typedef_cleanup(client, self.rel_def_name)
 
         if resp.status_code == 200:
             body = resp.json()
@@ -336,6 +352,7 @@ class TypeDefSuite:
 
     @test("delete_bm_def", tags=["typedef", "crud"], order=94, depends_on=["create_business_metadata_def"])
     def test_delete_bm_def(self, client, ctx):
-        resp = client.delete(f"/types/typedef/name/{self.bm_name}")
+        delete_name = self.bm_server_name or self.bm_display_name
+        resp = client.delete(f"/types/typedef/name/{delete_name}")
         # 404 if type cache never propagated the name
         assert_status_in(resp, [200, 204, 404])

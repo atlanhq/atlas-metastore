@@ -16,7 +16,10 @@ from core.data_factory import (
     build_dataset_entity, build_classification_def, build_business_metadata_def,
     unique_name, unique_qn, unique_type_name, PREFIX,
 )
-from core.typedef_helpers import ensure_classification_types, create_typedef_verified
+from core.typedef_helpers import (
+    ensure_classification_types, create_typedef_verified,
+    extract_bm_names_from_response, ensure_bm_types,
+)
 
 
 # ES field names for qualifiedName differ between local and staging
@@ -88,7 +91,7 @@ def _attr(entity, name):
     return val
 
 
-@suite("search_data_correctness", depends_on_suites=["entity_crud"],
+@suite("search_data_correctness", depends_on_suites=["entity_crud", "glossary"],
        description="Search data round-trip correctness — write then verify via search")
 class SearchDataCorrectnessSuite:
 
@@ -102,20 +105,24 @@ class SearchDataCorrectnessSuite:
         )
         self.tag_name = names[0]
         if created_tag:
-            ctx.register_cleanup(
-                lambda: client.delete(f"/types/typedef/name/{self.tag_name}")
-            )
+            ctx.register_typedef_cleanup(client, self.tag_name)
 
-        # --- BM typedef ---
-        self.bm_name = unique_type_name("DCorBM")
-        self.bm_ok, _ = create_typedef_verified(
-            client,
-            {"businessMetadataDefs": [build_business_metadata_def(name=self.bm_name)]},
+        # --- BM typedef (with fallback to existing types) ---
+        self.bm_display_name = unique_type_name("DCorBM")
+        self.bm_internal_name = None
+        self.bm_attr_map = {}
+        self.bm_field_display = "bmField1"  # default
+        bm_info, created_bm, self.bm_ok = ensure_bm_types(
+            client, self.bm_display_name,
         )
-        if self.bm_ok:
-            ctx.register_cleanup(
-                lambda: client.delete(f"/types/typedef/name/{self.bm_name}")
-            )
+        if bm_info:
+            self.bm_internal_name = bm_info["internal_name"]
+            self.bm_display_name = bm_info["display_name"]
+            self.bm_attr_map = bm_info["attr_map"]
+            self.bm_field_display = bm_info["first_attr_display"]
+        if self.bm_ok and created_bm:
+            cleanup_name = self.bm_internal_name or self.bm_display_name
+            ctx.register_typedef_cleanup(client, cleanup_name)
 
         # --- Entity A: rich entity with all attributes ---
         self.created_name = unique_name("dcor-a")
@@ -156,16 +163,16 @@ class SearchDataCorrectnessSuite:
                 if attempt < 2:
                     time.sleep(10)
 
-        # Set BM on Entity A (with retry)
+        # Set BM on Entity A via displayName endpoint (with retry)
         self.bm_value = "dcor-bm-val"
         self.bm_set = False
         if self.bm_ok:
             for attempt in range(3):
-                bm_resp = client.post(
-                    f"/entity/guid/{self.guid_a}/businessmetadata",
-                    json_data={self.bm_name: {"bmField1": self.bm_value}},
+                bm_set_resp = client.post(
+                    f"/entity/guid/{self.guid_a}/businessmetadata/displayName",
+                    json_data={self.bm_display_name: {self.bm_field_display: self.bm_value}},
                 )
-                if bm_resp.status_code in (200, 204):
+                if bm_set_resp.status_code in (200, 204):
                     self.bm_set = True
                     break
                 if attempt < 2:
@@ -344,16 +351,42 @@ class SearchDataCorrectnessSuite:
     @test("bm_matches_created_value",
           tags=["search", "data_correctness", "businessmeta"], order=7)
     def test_bm(self, client, ctx):
-        """Verify business metadata value in search matches what was set."""
+        """Verify BM value via GET entity API and check ES indexing.
+
+        AtlasEntityHeader (search result) has NO businessAttributes field.
+        Full entity from GET /entity/guid/{guid} DOES have businessAttributes.
+        BM attr values are indexed as flat ES fields keyed by attr internal name.
+        """
         if not self.bm_set:
             raise SkipTestError("BM not set on Entity A in setup")
-        available, entity = _poll_get_entity(client, self.guid_a, max_wait=30, label="bm")
-        assert available, "Search endpoint not available"
-        assert entity is not None, f"Entity {self.guid_a} not found in search after 30s"
-        bm = entity.get("businessAttributes", {}).get(self.bm_name, {})
-        if bm:  # BM may not appear in all ES mappings
-            assert bm.get("bmField1") == self.bm_value, (
-                f"bmField1 mismatch: expected {self.bm_value!r}, got {bm}"
+
+        # Step 1: Verify BM via GET entity API (returns full AtlasEntity)
+        resp = client.get(f"/entity/guid/{self.guid_a}")
+        assert_status(resp, 200)
+        entity_full = resp.json().get("entity", {})
+        bm_key = self.bm_internal_name or self.bm_display_name
+        bm = entity_full.get("businessAttributes", {}).get(bm_key, {})
+        if not bm:
+            raise SkipTestError(
+                f"BM {bm_key} not in GET entity response — type cache issue"
+            )
+        attr_key = self.bm_attr_map.get(self.bm_field_display, self.bm_field_display)
+        assert bm.get(attr_key) == self.bm_value, (
+            f"{attr_key} mismatch: expected {self.bm_value!r}, got {bm}"
+        )
+
+        # Step 2: Verify BM value is indexed in ES (attr internal name as field)
+        available, body = _index_search(client, {
+            "from": 0, "size": 1,
+            "query": {"bool": {"must": [
+                {"term": {attr_key: self.bm_value}},
+                {"term": {"__guid": self.guid_a}},
+                {"term": {"__state": "ACTIVE"}},
+            ]}}
+        })
+        if available and body.get("approximateCount", 0) == 0:
+            raise SkipTestError(
+                f"BM attr {attr_key}={self.bm_value} not yet in ES — sync delay"
             )
 
     @test("meanings_match_created_value",

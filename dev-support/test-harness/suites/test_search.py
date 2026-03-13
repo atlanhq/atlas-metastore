@@ -138,7 +138,7 @@ class SearchSuite:
             "limit": 5,
         }, timeout=60)
         # Wildcard classification search can be slow or unsupported
-        assert_status_in(resp, [200, 400, 408])
+        assert_status_in(resp, [200, 400])
         if resp.status_code == 200:
             body = resp.json()
             assert isinstance(body, dict), f"Expected dict response, got {type(body).__name__}"

@@ -77,12 +77,8 @@ class BulkClassificationsSuite:
         )
         self.tag_name, self.tag2_name = names[0], names[1]
         if self.created_types:
-            ctx.register_cleanup(
-                lambda: client.delete(f"/types/typedef/name/{self.tag_name}")
-            )
-            ctx.register_cleanup(
-                lambda: client.delete(f"/types/typedef/name/{self.tag2_name}")
-            )
+            ctx.register_typedef_cleanup(client, self.tag_name)
+            ctx.register_typedef_cleanup(client, self.tag2_name)
 
         # --- Create 4 test entities ---
         self.guid_e1 = _create_entity_and_register(client, ctx, "bulk-cls-e1")

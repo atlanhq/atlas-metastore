@@ -7,7 +7,10 @@ from core.assertions import (
     assert_status, assert_status_in, assert_field_present,
     assert_field_equals, SkipTestError,
 )
-from core.data_factory import build_dataset_entity, build_relationship_def, unique_qn, unique_name, unique_type_name
+from core.data_factory import (
+    build_dataset_entity, build_relationship_def, unique_qn, unique_name,
+    unique_type_name, detect_process_io_type, create_process_with_io,
+)
 from core.typedef_helpers import create_typedef_verified
 
 
@@ -16,11 +19,14 @@ from core.typedef_helpers import create_typedef_verified
 class RelationshipsSuite:
 
     def setup(self, client, ctx):
-        # Create two entities for relationship tests
+        # Detect entity type for Process I/O (Catalog on staging, DataSet on local)
+        self.io_type = ctx.get("process_io_type") or detect_process_io_type(client)
+
+        # Create two entities for relationship tests (use correct type for process I/O)
         qn1 = unique_qn("rel-src")
         qn2 = unique_qn("rel-tgt")
-        e1 = build_dataset_entity(qn=qn1, name=unique_name("rel-src"))
-        e2 = build_dataset_entity(qn=qn2, name=unique_name("rel-tgt"))
+        e1 = build_dataset_entity(qn=qn1, name=unique_name("rel-src"), type_name=self.io_type)
+        e2 = build_dataset_entity(qn=qn2, name=unique_name("rel-tgt"), type_name=self.io_type)
 
         resp = client.post("/entity/bulk", json_data={"entities": [e1, e2]})
         body = resp.json()
@@ -33,10 +39,10 @@ class RelationshipsSuite:
         self.tgt_guid = guids[1] if len(guids) > 1 else None
 
         if self.src_guid:
-            ctx.register_entity("rel_src", self.src_guid, "DataSet")
+            ctx.register_entity("rel_src", self.src_guid, self.io_type)
             ctx.register_entity_cleanup(self.src_guid)
         if self.tgt_guid:
-            ctx.register_entity("rel_tgt", self.tgt_guid, "DataSet")
+            ctx.register_entity("rel_tgt", self.tgt_guid, self.io_type)
             ctx.register_entity_cleanup(self.tgt_guid)
 
     @test("create_relationship", tags=["relationship", "crud"], order=1)
@@ -44,31 +50,13 @@ class RelationshipsSuite:
         if not self.src_guid or not self.tgt_guid:
             raise Exception("Missing source or target entity for relationship test")
 
-        # Use a generic process_dataset relationship or just test with the entity API
-        # Since we may not have specific relationship defs, create a Process linking them
-        from core.data_factory import build_process_entity
-        proc = build_process_entity(
-            inputs=[{"guid": self.src_guid, "typeName": "DataSet"}],
-            outputs=[{"guid": self.tgt_guid, "typeName": "DataSet"}],
+        # Create a Process linking src -> tgt (uses correct entity type and 120s timeout)
+        ok, proc_guid = create_process_with_io(
+            client, ctx, "rel-proc",
+            [self.src_guid], [self.tgt_guid], entity_type=self.io_type,
         )
-        resp = client.post("/entity", json_data={"entity": proc})
-        # Staging may reject Process if it requires connectionQualifiedName
-        assert_status_in(resp, [200, 400])
-        if resp.status_code == 200:
-            body = resp.json()
-            creates = body.get("mutatedEntities", {}).get("CREATE", [])
-            updates = body.get("mutatedEntities", {}).get("UPDATE", [])
-            entities = creates or updates
-            if entities:
-                proc_guid = entities[0]["guid"]
-                ctx.register_entity("rel_process", proc_guid, "Process")
-                ctx.register_entity_cleanup(proc_guid)
-
-                # Validate mutation response structure
-                assert entities[0].get("guid"), "Created entity should have guid"
-                assert entities[0].get("typeName") == "Process", (
-                    f"Expected typeName=Process, got {entities[0].get('typeName')}"
-                )
+        assert ok, "Process creation failed — cannot test relationship via lineage"
+        ctx.register_entity("rel_process", proc_guid, "Process")
 
     @test("get_relationship_by_guid", tags=["relationship"], order=2)
     def test_get_relationship_by_guid(self, client, ctx):
@@ -109,21 +97,21 @@ class RelationshipsSuite:
         assert self.src_guid and self.tgt_guid, (
             "src_guid or tgt_guid not found — setup must have failed"
         )
-        # Create a custom relationship def first
+        # Create a custom relationship def first (use correct entity type)
         rel_def_name = unique_type_name("TestRelDef")
-        payload = {"relationshipDefs": [build_relationship_def(name=rel_def_name)]}
-        ok, resp = create_typedef_verified(client, payload, max_wait=45, interval=15)
+        payload = {"relationshipDefs": [build_relationship_def(
+            name=rel_def_name, end1_type=self.io_type, end2_type=self.io_type,
+        )]}
+        ok, resp = create_typedef_verified(client, payload)
         if ok:
-            ctx.register_cleanup(
-                lambda: client.delete(f"/types/typedef/name/{rel_def_name}")
-            )
+            ctx.register_typedef_cleanup(client, rel_def_name)
             ctx.set("direct_rel_def_name", rel_def_name)
 
             # Create relationship instance
             rel_payload = {
                 "typeName": rel_def_name,
-                "end1": {"guid": self.src_guid, "typeName": "DataSet"},
-                "end2": {"guid": self.tgt_guid, "typeName": "DataSet"},
+                "end1": {"guid": self.src_guid, "typeName": self.io_type},
+                "end2": {"guid": self.tgt_guid, "typeName": self.io_type},
                 "propagateTags": "NONE",
             }
             resp2 = client.post("/relationship", json_data=rel_payload)
@@ -162,8 +150,8 @@ class RelationshipsSuite:
         payload = {
             "guid": rel_guid,
             "typeName": rel_def_name,
-            "end1": {"guid": self.src_guid, "typeName": "DataSet"},
-            "end2": {"guid": self.tgt_guid, "typeName": "DataSet"},
+            "end1": {"guid": self.src_guid, "typeName": self.io_type},
+            "end2": {"guid": self.tgt_guid, "typeName": self.io_type},
             "propagateTags": "ONE_TO_TWO",
         }
         resp = client.put("/relationship", json_data=payload)
@@ -209,8 +197,8 @@ class RelationshipsSuite:
         # Bulk create relationships
         rels = [{
             "typeName": rel_def_name,
-            "end1": {"guid": self.src_guid, "typeName": "DataSet"},
-            "end2": {"guid": self.tgt_guid, "typeName": "DataSet"},
+            "end1": {"guid": self.src_guid, "typeName": self.io_type},
+            "end2": {"guid": self.tgt_guid, "typeName": self.io_type},
             "propagateTags": "NONE",
         }]
         resp = client.post("/relationship/bulk", json_data=rels)

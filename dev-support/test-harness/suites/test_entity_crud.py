@@ -14,8 +14,9 @@ from core.kafka_helpers import assert_entity_in_kafka
 from core.data_factory import (
     build_dataset_entity, build_process_entity, build_entity_def,
     unique_qn, unique_name, unique_type_name,
+    detect_process_io_type, create_process_with_io,
 )
-from core.typedef_helpers import create_typedef_verified
+from core.typedef_helpers import create_typedef_verified, ensure_entity_types
 
 
 @suite("entity_crud", description="Entity CRUD operations")
@@ -29,6 +30,10 @@ class EntityCrudSuite:
         self.ds2_name = unique_name("ds2")
         self.process_qn = unique_qn("proc1")
         self.process_name = unique_name("proc1")
+
+        # Detect entity type for Process I/O (Catalog on staging, DataSet on local)
+        self.process_io_type = detect_process_io_type(client)
+        ctx.set("process_io_type", self.process_io_type)
 
     # ---- CREATE ----
 
@@ -74,10 +79,9 @@ class EntityCrudSuite:
                 # qualifiedName intentionally missing
             },
         }
-        # Use short timeout — we expect an error response, not a long-running operation
-        resp = client.post("/entity", json_data={"entity": entity}, timeout=30)
         # Atlas returns 404 with ATLAS-404-00-007 for missing mandatory attributes
-        assert_status_in(resp, [400, 404, 408, 422])
+        resp = client.post("/entity", json_data={"entity": entity})
+        assert_status_in(resp, [400, 404, 422])
         body = resp.json()
         if isinstance(body, dict):
             assert "errorMessage" in body or "errorCode" in body or "message" in body or "error" in body, (
@@ -106,24 +110,22 @@ class EntityCrudSuite:
 
     @test("create_entity_with_custom_type", tags=["crud"], order=30, depends_on=["create_entity"])
     def test_create_entity_with_custom_type(self, client, ctx):
-        # Use custom entity type from typedefs suite, or create one inline
+        # Use custom entity type from typedefs suite, or create/discover one
         custom_type = ctx.get("test_entity_type_name")
         if not custom_type:
-            # Create a lightweight entity type ourselves
-            custom_type = unique_type_name("CrudTestType")
-            payload = {"entityDefs": [build_entity_def(name=custom_type)]}
-            ok, resp = create_typedef_verified(
-                client, payload,
+            requested_name = unique_type_name("CrudTestType")
+            names, created_new, ok = ensure_entity_types(
+                client, [requested_name],
             )
             if not ok:
                 raise SkipTestError(
-                    f"Could not create custom entity type — "
-                    f"POST returned {resp.status_code if resp else 'N/A'}"
+                    "Could not create or discover a usable entity type "
+                    "extending DataSet"
                 )
+            custom_type = names[0]
             ctx.set("test_entity_type_name", custom_type)
-            ctx.register_cleanup(
-                lambda: client.delete(f"/types/typedef/name/{custom_type}")
-            )
+            if created_new:
+                ctx.register_typedef_cleanup(client, custom_type)
 
         qn = unique_qn("custom-type")
         entity = build_dataset_entity(qn=qn, name=unique_name("custom"), type_name=custom_type)
@@ -175,36 +177,55 @@ class EntityCrudSuite:
 
     @test("create_process_entity", tags=["crud"], order=3, depends_on=["create_entity", "create_entity_bulk"])
     def test_create_process_entity(self, client, ctx):
-        ds1_guid = ctx.get_entity_guid("ds1")
-        ds2_guid = ctx.get_entity_guid("ds2")
+        # Create I/O entities with the correct type for this environment
+        # (Catalog on staging/preprod, DataSet on local dev)
+        io_type = self.process_io_type
+        proc_in_qn = unique_qn("proc-in")
+        proc_out_qn = unique_qn("proc-out")
+        in_entity = build_dataset_entity(qn=proc_in_qn, name=unique_name("proc-in"), type_name=io_type)
+        out_entity = build_dataset_entity(qn=proc_out_qn, name=unique_name("proc-out"), type_name=io_type)
+
+        resp_in = client.post("/entity", json_data={"entity": in_entity})
+        assert_status(resp_in, 200)
+        in_creates = resp_in.json().get("mutatedEntities", {}).get("CREATE", []) or \
+                     resp_in.json().get("mutatedEntities", {}).get("UPDATE", [])
+        assert in_creates, "Process input entity creation returned empty mutatedEntities"
+        in_guid = in_creates[0]["guid"]
+        ctx.register_entity_cleanup(in_guid)
+
+        resp_out = client.post("/entity", json_data={"entity": out_entity})
+        assert_status(resp_out, 200)
+        out_creates = resp_out.json().get("mutatedEntities", {}).get("CREATE", []) or \
+                      resp_out.json().get("mutatedEntities", {}).get("UPDATE", [])
+        assert out_creates, "Process output entity creation returned empty mutatedEntities"
+        out_guid = out_creates[0]["guid"]
+        ctx.register_entity_cleanup(out_guid)
+
+        # Create Process — use 120s timeout since process creation can be slow
         entity = build_process_entity(
             qn=self.process_qn,
             name=self.process_name,
-            inputs=[{"guid": ds1_guid, "typeName": "DataSet"}],
-            outputs=[{"guid": ds2_guid, "typeName": "DataSet"}],
+            inputs=[{"guid": in_guid, "typeName": io_type}],
+            outputs=[{"guid": out_guid, "typeName": io_type}],
         )
-        resp = client.post("/entity", json_data={"entity": entity})
-        # On Atlan, Process outputs must be Catalog type; ds1/ds2 are DataSet
-        # which doesn't extend Catalog, so this returns 400 on preprod/staging.
-        # That's expected — lineage_correctness suite uses Catalog entities instead.
-        assert_status_in(resp, [200, 400])
+        resp = client.post("/entity", json_data={"entity": entity}, timeout=120)
+        assert_status(resp, 200)
 
-        if resp.status_code == 200:
-            body = resp.json()
-            creates = body.get("mutatedEntities", {}).get("CREATE", [])
-            updates = body.get("mutatedEntities", {}).get("UPDATE", [])
-            entities = creates or updates
-            if entities:
-                guid = entities[0]["guid"]
-                ctx.register_entity("process1", guid, "Process", qualifiedName=self.process_qn)
-                ctx.register_entity_cleanup(guid)
+        body = resp.json()
+        creates = body.get("mutatedEntities", {}).get("CREATE", [])
+        updates = body.get("mutatedEntities", {}).get("UPDATE", [])
+        entities = creates or updates
+        assert entities, "Process entity creation returned empty mutatedEntities"
+        guid = entities[0]["guid"]
+        ctx.register_entity("process1", guid, "Process", qualifiedName=self.process_qn)
+        ctx.register_entity_cleanup(guid)
 
-                # Read-after-write: verify persisted process entity
-                resp2 = client.get(f"/entity/guid/{guid}")
-                if resp2.status_code == 200:
-                    assert_field_equals(resp2, "entity.typeName", "Process")
-                    assert_field_equals(resp2, "entity.attributes.name", self.process_name)
-                    assert_field_equals(resp2, "entity.attributes.qualifiedName", self.process_qn)
+        # Read-after-write: verify persisted process entity
+        resp2 = client.get(f"/entity/guid/{guid}")
+        assert_status(resp2, 200)
+        assert_field_equals(resp2, "entity.typeName", "Process")
+        assert_field_equals(resp2, "entity.attributes.name", self.process_name)
+        assert_field_equals(resp2, "entity.attributes.qualifiedName", self.process_qn)
 
     # ---- READ ----
 

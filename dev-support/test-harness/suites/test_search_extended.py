@@ -66,7 +66,7 @@ class SearchExtendedSuite:
         ctx.set("search_ext_guid", self.guid)
         ctx.set("search_ext_qn", self.qn)
         ctx.register_cleanup(lambda: client.delete(
-            f"/entity/guid/{self.guid}", params={"purge": "true"}
+            f"/entity/guid/{self.guid}", params={"deleteType": "PURGE"}
         ))
 
         # Wait for ES indexing

@@ -200,8 +200,9 @@ def _print_all_artifacts(entities, glossaries, typedefs):
 def _delete_entities(client, entities, verbose=False):
     """Hard-delete (purge) entities in dependency-safe order.
 
-    Uses DELETE /entity/guid/{guid}?purge=true for all entities.
-    Bulk delete endpoint does NOT support purge, so we must delete individually.
+    Uses DELETE /entity/guid/{guid}?deleteType=PURGE for all entities.
+    The AuditFilter reads the ``deleteType`` query parameter and sets
+    ``RequestContext.setPurgeRequested(true)`` which triggers HardDeleteHandlerV1.
     Hard delete fully removes entities from graph + ES, which is required
     before typedef deletion can succeed (classificationHasReferences checks ES).
 
@@ -231,16 +232,16 @@ def _delete_entities(client, entities, verbose=False):
 
         # Glossary entities use specific endpoints for proper cascade handling
         if tn == "AtlasGlossary":
-            resp = client.delete(f"/glossary/{guid}", params={"purge": "true"}, timeout=60)
+            resp = client.delete(f"/glossary/{guid}", params={"deleteType": "PURGE"}, timeout=60)
         elif tn == "AtlasGlossaryTerm":
-            resp = client.delete(f"/glossary/term/{guid}", params={"purge": "true"}, timeout=60)
+            resp = client.delete(f"/glossary/term/{guid}", params={"deleteType": "PURGE"}, timeout=60)
         elif tn == "AtlasGlossaryCategory":
-            resp = client.delete(f"/glossary/category/{guid}", params={"purge": "true"}, timeout=60)
+            resp = client.delete(f"/glossary/category/{guid}", params={"deleteType": "PURGE"}, timeout=60)
         else:
             # Hard delete (purge) via entity endpoint
             resp = client.delete(
                 f"/entity/guid/{guid}",
-                params={"purge": "true"},
+                params={"deleteType": "PURGE"},
                 timeout=60,
             )
 
@@ -260,13 +261,18 @@ def _delete_entities(client, entities, verbose=False):
 
 
 def _delete_typedefs(client, typedefs, verbose=False):
-    """Delete typedefs by name."""
+    """Delete typedefs by name.
+
+    Uses retries=0 and timeout=60 because typedef DELETE returning 500
+    means the server rejected it (e.g. type has references in ES) —
+    retrying the same request won't help, it just wastes minutes.
+    """
     errors = []
     for i, td in enumerate(typedefs, 1):
         name = td.get("name")
         if not name:
             continue
-        resp = client.delete(f"/types/typedef/name/{name}")
+        resp = client.delete(f"/types/typedef/name/{name}", timeout=120, retries=0)
         if resp.status_code in (200, 204):
             if verbose:
                 print(f"  [{i}/{len(typedefs)}] Deleted typedef {name}")

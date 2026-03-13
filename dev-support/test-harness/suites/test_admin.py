@@ -231,8 +231,8 @@ class AdminSuite:
     @test("push_metrics_statsd", tags=["admin"], order=18)
     def test_push_metrics_statsd(self, client, ctx):
         resp = client.get("/pushMetricsToStatsd", admin=True)
-        # May fail if StatsD not configured or timeout on staging
-        assert_status_in(resp, [200, 404, 408])
+        # May fail if StatsD not configured
+        assert_status_in(resp, [200, 404])
 
     @test("check_state", tags=["admin"], order=20)
     def test_check_state(self, client, ctx):

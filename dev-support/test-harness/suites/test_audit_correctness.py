@@ -48,7 +48,7 @@ class AuditCorrectnessSuite:
         ctx.set("audit_corr_guid", self.guid)
         ctx.set("audit_corr_qn", self.qn)
         ctx.register_cleanup(lambda: client.delete(
-            f"/entity/guid/{self.guid}", params={"purge": "true"}
+            f"/entity/guid/{self.guid}", params={"deleteType": "PURGE"}
         ))
 
         # Check if audit endpoint is available
@@ -67,9 +67,7 @@ class AuditCorrectnessSuite:
         )
         self.tag_name = names[0]
         if self.created_tag:
-            ctx.register_cleanup(
-                lambda: client.delete(f"/types/typedef/name/{self.tag_name}")
-            )
+            ctx.register_typedef_cleanup(client, self.tag_name)
 
     @test("audit_create_event_fields", tags=["audit"], order=1)
     def test_audit_create_event_fields(self, client, ctx):

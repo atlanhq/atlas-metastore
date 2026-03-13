@@ -4,7 +4,10 @@ import time
 
 from core.decorators import suite, test
 from core.assertions import assert_status, assert_status_in, assert_field_present, assert_field_equals, SkipTestError
-from core.data_factory import build_dataset_entity, build_process_entity, unique_qn, unique_name
+from core.data_factory import (
+    build_dataset_entity, build_process_entity, unique_qn, unique_name,
+    detect_process_io_type, create_process_with_io,
+)
 
 
 @suite("lineage", depends_on_suites=["entity_crud"],
@@ -364,11 +367,13 @@ class LineageSuite:
     @test("lineage_diamond_topology", tags=["lineage"], order=13)
     def test_lineage_diamond_topology(self, client, ctx):
         """Create A->P1->B, A->P2->B diamond; verify B appears once in guidEntityMap."""
-        # Create two datasets and two processes forming a diamond
+        io_type = ctx.get("process_io_type") or detect_process_io_type(client)
+
+        # Create two entities with correct type for process I/O
         qn_a = unique_qn("diamond-a")
         qn_b = unique_qn("diamond-b")
-        ent_a = build_dataset_entity(qn=qn_a, name=unique_name("diamond-a"))
-        ent_b = build_dataset_entity(qn=qn_b, name=unique_name("diamond-b"))
+        ent_a = build_dataset_entity(qn=qn_a, name=unique_name("diamond-a"), type_name=io_type)
+        ent_b = build_dataset_entity(qn=qn_b, name=unique_name("diamond-b"), type_name=io_type)
         resp = client.post("/entity/bulk", json_data={"entities": [ent_a, ent_b]})
         assert_status(resp, 200)
         body = resp.json()
@@ -383,32 +388,19 @@ class LineageSuite:
         ctx.register_entity_cleanup(guid_b)
 
         # Create P1: A -> B
-        proc1 = build_process_entity(
-            inputs=[{"guid": guid_a, "typeName": "DataSet"}],
-            outputs=[{"guid": guid_b, "typeName": "DataSet"}],
+        ok1, p1_guid = create_process_with_io(
+            client, ctx, "diamond-p1", [guid_a], [guid_b], entity_type=io_type,
         )
-        resp_p1 = client.post("/entity", json_data={"entity": proc1})
-        assert_status_in(resp_p1, [200, 400])
-        if resp_p1.status_code == 200:
-            p1_entities = resp_p1.json().get("mutatedEntities", {}).get("CREATE", [])
-            if p1_entities:
-                p1_guid = p1_entities[0]["guid"]
-                ctx.register_entity_cleanup(p1_guid)
+        if not ok1:
+            raise SkipTestError("P1 creation failed — lineage not supported")
 
         # Create P2: A -> B (second path)
-        proc2 = build_process_entity(
-            inputs=[{"guid": guid_a, "typeName": "DataSet"}],
-            outputs=[{"guid": guid_b, "typeName": "DataSet"}],
+        ok2, p2_guid = create_process_with_io(
+            client, ctx, "diamond-p2", [guid_a], [guid_b], entity_type=io_type,
         )
-        resp_p2 = client.post("/entity", json_data={"entity": proc2})
-        assert_status_in(resp_p2, [200, 400])
-        if resp_p2.status_code == 200:
-            p2_entities = resp_p2.json().get("mutatedEntities", {}).get("CREATE", [])
-            if p2_entities:
-                p2_guid = p2_entities[0]["guid"]
-                ctx.register_entity_cleanup(p2_guid)
+        if not ok2:
+            raise SkipTestError("P2 creation failed — lineage not supported")
 
-        import time
         time.sleep(2)
 
         # Get lineage from A -> B should be unique in guidEntityMap

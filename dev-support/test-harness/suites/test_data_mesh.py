@@ -72,9 +72,9 @@ class DataMeshSuite:
     def test_create_sub_domain(self, client, ctx):
         if ctx.get("data_mesh_unavailable"):
             raise SkipTestError("Data mesh not available — domain creation failed (400/403)")
-        parent_qn = ctx.get("domain1_qn")
-        assert parent_qn, "domain1_qn not found in context — create_domain must have failed"
-        entity = build_domain_entity(name=self.sub_domain_name, parent_domain_qn=parent_qn)
+        parent_guid = ctx.get_entity_guid("domain1")
+        assert parent_guid, "domain1 GUID not found in context — create_domain must have failed"
+        entity = build_domain_entity(name=self.sub_domain_name, parent_domain_guid=parent_guid)
         resp = client.post("/entity", json_data={"entity": entity})
         assert_status_in(resp, [200, 400, 403])
         if resp.status_code == 200:
@@ -109,6 +109,18 @@ class DataMeshSuite:
                 for s in sub_domains
             )
             assert found, f"Expected sub-domain {sub_guid} in parent's subDomains"
+
+        # Verify sub-domain's parentDomainQualifiedName was set by preprocessor
+        if sub_guid:
+            resp2 = client.get(f"/entity/guid/{sub_guid}")
+            if resp2.status_code == 200:
+                sub_attrs = resp2.json().get("entity", {}).get("attributes", {})
+                parent_qn = sub_attrs.get("parentDomainQualifiedName")
+                domain_qn = ctx.get("domain1_qn")
+                if parent_qn and domain_qn:
+                    assert parent_qn == domain_qn, (
+                        f"Expected parentDomainQualifiedName={domain_qn}, got {parent_qn}"
+                    )
 
     @test("create_data_product", tags=["data_mesh", "crud"], order=5, depends_on=["create_domain"])
     def test_create_data_product(self, client, ctx):

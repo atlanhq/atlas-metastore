@@ -91,16 +91,30 @@ def build_entity_def(name=None, super_types=None, attribute_defs=None):
     }
 
 
-def build_business_metadata_def(name=None, attribute_defs=None):
-    name = name or unique_type_name("TestBM")
-    return {
-        "name": name,
-        "displayName": name,
-        "description": f"Test business metadata {name}",
-        "typeVersion": "1.0",
-        "attributeDefs": attribute_defs or [
+def build_business_metadata_def(display_name=None, attribute_defs=None, include_attrs=True):
+    """Build a BM typedef matching the UI creation pattern.
+
+    The server auto-generates random 22-char ``name`` values for BM typedefs
+    and their attributes (``TypesREST.setRandomNameForEntityAndAttributeDefs``).
+    We omit ``name`` and only provide ``displayName`` — the same pattern the UI
+    uses.  After POST, read back the server-generated names from the response.
+
+    Args:
+        display_name:   Human-readable name for the BM typedef
+        attribute_defs: Custom attribute definitions list
+        include_attrs:  If False, omit attributeDefs entirely (UI Step 1 pattern)
+    """
+    display_name = display_name or unique_type_name("TestBM")
+    bm_def = {
+        # No "name" — server auto-generates a random 22-char internal name
+        "displayName": display_name,
+        "description": f"Test business metadata {display_name}",
+        "options": {},
+    }
+    if include_attrs:
+        bm_def["attributeDefs"] = attribute_defs or [
             {
-                "name": "bmField1",
+                "name": "",          # Empty — server auto-generates
                 "displayName": "bmField1",
                 "typeName": "string",
                 "isOptional": True,
@@ -108,12 +122,12 @@ def build_business_metadata_def(name=None, attribute_defs=None):
                 "isUnique": False,
                 "isIndexable": True,
                 "options": {
-                    "applicableEntityTypes": "[\"DataSet\"]",
+                    "applicableEntityTypes": "[\"Asset\"]",
                     "maxStrLength": "50",
                 },
             }
-        ],
-    }
+        ]
+    return bm_def
 
 
 def build_relationship_def(name=None, end1_type="DataSet", end2_type="DataSet"):
@@ -139,6 +153,68 @@ def build_relationship_def(name=None, end1_type="DataSet", end2_type="DataSet"):
     }
 
 
+# ---- Environment detection ----
+
+def detect_process_io_type(client):
+    """Determine which entity type to use for Process inputs/outputs.
+
+    On Atlan (preprod/staging), the relationship ``process_catalog_outputs``
+    expects outputs of type ``Catalog``.  DataSet does NOT extend Catalog, so
+    Process creation with DataSet outputs returns 400.
+
+    Returns "Catalog" if the type exists, else "DataSet" (local dev).
+    Caches the result on the client instance to avoid repeated lookups.
+    """
+    cached = getattr(client, "_process_io_type", None)
+    if cached:
+        return cached
+    resp = client.get("/types/typedef/name/Catalog")
+    if resp.status_code == 200:
+        client._process_io_type = "Catalog"
+        print("  [detect] Catalog type found — using Catalog for process I/O entities")
+        return "Catalog"
+    client._process_io_type = "DataSet"
+    print("  [detect] Catalog type not found — using DataSet for process I/O entities")
+    return "DataSet"
+
+
+def create_process_with_io(client, ctx, suffix, input_guids, output_guids,
+                           entity_type=None, timeout=120):
+    """Create a Process entity with proper entity type detection and timeout.
+
+    Detects the correct entity type for inputs/outputs (Catalog on staging,
+    DataSet on local dev) and uses a 120s timeout for process creation which
+    can be slow on staging.
+
+    Returns (ok: bool, proc_guid: str or None).
+    """
+    if entity_type is None:
+        entity_type = detect_process_io_type(client)
+    inputs = [{"guid": g, "typeName": entity_type} for g in input_guids]
+    outputs = [{"guid": g, "typeName": entity_type} for g in output_guids]
+    proc = build_process_entity(
+        qn=unique_qn(suffix), name=unique_name(suffix),
+        inputs=inputs, outputs=outputs,
+    )
+    resp = client.post("/entity", json_data={"entity": proc}, timeout=timeout)
+    if resp.status_code != 200:
+        detail = repr(resp.body)[:500] if resp.body else "(empty body)"
+        print(f"  [process] Process creation for {suffix} returned "
+              f"{resp.status_code}: {detail}")
+        return False, None
+    body = resp.json()
+    creates = body.get("mutatedEntities", {}).get("CREATE", [])
+    updates = body.get("mutatedEntities", {}).get("UPDATE", [])
+    entities = creates or updates
+    if not entities:
+        print(f"  [process] Process creation for {suffix} got 200 but "
+              f"no entities: {list(body.keys())}")
+        return False, None
+    guid = entities[0]["guid"]
+    ctx.register_entity_cleanup(guid)
+    return True, guid
+
+
 # ---- Entity builders ----
 
 def build_dataset_entity(qn=None, name=None, type_name="DataSet", extra_attrs=None):
@@ -156,15 +232,19 @@ def build_dataset_entity(qn=None, name=None, type_name="DataSet", extra_attrs=No
 def build_process_entity(qn=None, name=None, inputs=None, outputs=None):
     qn = qn or unique_qn("process")
     name = name or unique_name("process")
-    attrs = {"qualifiedName": qn, "name": name}
-    if inputs:
-        attrs["inputs"] = inputs
-    if outputs:
-        attrs["outputs"] = outputs
-    return {
+    entity = {
         "typeName": "Process",
-        "attributes": attrs,
+        "attributes": {"qualifiedName": qn, "name": name},
     }
+    # inputs/outputs are relationship attributes (process_dataset_inputs/outputs)
+    rel_attrs = {}
+    if inputs:
+        rel_attrs["inputs"] = inputs
+    if outputs:
+        rel_attrs["outputs"] = outputs
+    if rel_attrs:
+        entity["relationshipAttributes"] = rel_attrs
+    return entity
 
 
 def build_glossary(name=None):
@@ -217,16 +297,27 @@ def build_glossary_category(glossary_guid, name=None, parent_category_guid=None)
 
 # ---- Data Mesh entity builders ----
 
-def build_domain_entity(name=None, parent_domain_qn=None):
-    """DataDomain entity. QN is auto-generated by preprocessor."""
+def build_domain_entity(name=None, parent_domain_guid=None):
+    """DataDomain entity. QN is auto-generated by preprocessor.
+
+    For sub-domains, pass ``parent_domain_guid`` — the preprocessor reads
+    ``relationshipAttributes.parentDomain``, NOT ``attributes.parentDomainQualifiedName``
+    (which is an OUTPUT the preprocessor writes).
+    """
     name = name or unique_name("domain")
     attrs = {"qualifiedName": unique_qn("domain"), "name": name}
-    if parent_domain_qn:
-        attrs["parentDomainQualifiedName"] = parent_domain_qn
-    return {
+    entity = {
         "typeName": "DataDomain",
         "attributes": attrs,
     }
+    if parent_domain_guid:
+        entity["relationshipAttributes"] = {
+            "parentDomain": {
+                "guid": parent_domain_guid,
+                "typeName": "DataDomain",
+            },
+        }
+    return entity
 
 
 def build_data_product_entity(name=None, domain_guid=None):
@@ -309,17 +400,16 @@ def build_auth_policy_entity(persona_guid, name=None):
 
 # ---- Multi-attribute BM typedef builder ----
 
-def build_multi_attr_business_metadata_def(name=None):
-    """BM def with string + int + boolean attributes."""
-    name = name or unique_type_name("TestMultiBM")
+def build_multi_attr_business_metadata_def(display_name=None):
+    """BM def with string + int + boolean attributes (UI pattern — no ``name``)."""
+    display_name = display_name or unique_type_name("TestMultiBM")
     return {
-        "name": name,
-        "displayName": name,
-        "description": f"Multi-attribute BM {name}",
-        "typeVersion": "1.0",
+        "displayName": display_name,
+        "description": f"Multi-attribute BM {display_name}",
+        "options": {},
         "attributeDefs": [
             {
-                "name": "bmStrField",
+                "name": "",
                 "displayName": "bmStrField",
                 "typeName": "string",
                 "isOptional": True,
@@ -327,12 +417,12 @@ def build_multi_attr_business_metadata_def(name=None):
                 "isUnique": False,
                 "isIndexable": True,
                 "options": {
-                    "applicableEntityTypes": "[\"DataSet\"]",
+                    "applicableEntityTypes": "[\"Asset\"]",
                     "maxStrLength": "50",
                 },
             },
             {
-                "name": "bmIntField",
+                "name": "",
                 "displayName": "bmIntField",
                 "typeName": "int",
                 "isOptional": True,
@@ -340,11 +430,11 @@ def build_multi_attr_business_metadata_def(name=None):
                 "isUnique": False,
                 "isIndexable": True,
                 "options": {
-                    "applicableEntityTypes": "[\"DataSet\"]",
+                    "applicableEntityTypes": "[\"Asset\"]",
                 },
             },
             {
-                "name": "bmBoolField",
+                "name": "",
                 "displayName": "bmBoolField",
                 "typeName": "boolean",
                 "isOptional": True,
@@ -352,7 +442,7 @@ def build_multi_attr_business_metadata_def(name=None):
                 "isUnique": False,
                 "isIndexable": True,
                 "options": {
-                    "applicableEntityTypes": "[\"DataSet\"]",
+                    "applicableEntityTypes": "[\"Asset\"]",
                 },
             },
         ],

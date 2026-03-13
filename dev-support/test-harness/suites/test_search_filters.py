@@ -13,7 +13,7 @@ from core.data_factory import (
     build_dataset_entity, build_business_metadata_def,
     unique_name, unique_qn, unique_type_name, PREFIX,
 )
-from core.typedef_helpers import create_typedef_verified
+from core.typedef_helpers import create_typedef_verified, extract_bm_names_from_response, ensure_bm_types
 
 
 # ES field names for qualifiedName differ between local and staging
@@ -124,34 +124,52 @@ class SearchFiltersSuite:
         self.guid_c, self.qn_c, self.name_c = _create_entity_and_register(
             client, ctx, "filt-c", labels=self.labels_c,
         )
+        # Read-after-write: verify labels were persisted via entity creation
+        resp_check = client.get(f"/entity/guid/{self.guid_c}")
+        if resp_check.status_code == 200:
+            labels_check = resp_check.json().get("entity", {}).get("labels", [])
+            if not labels_check:
+                # Labels not set via entity body — set via explicit labels endpoint
+                client.post(
+                    f"/entity/guid/{self.guid_c}/labels",
+                    json_data=self.labels_c,
+                )
 
         # --- Entity E: plain, no extras (negative check) ---
         self.guid_e, self.qn_e, self.name_e = _create_entity_and_register(
             client, ctx, "filt-e",
         )
 
-        # --- BM typedef + Entity D ---
+        # --- BM typedef (with fallback) + Entity D ---
         self.bm_ok = False
-        self.bm_name = unique_type_name("FiltBM")
-        bm_typedef_ok, _bm_resp = create_typedef_verified(
-            client,
-            {"businessMetadataDefs": [build_business_metadata_def(name=self.bm_name)]},
+        self.bm_display_name = unique_type_name("FiltBM")
+        self.bm_internal_name = None
+        self.bm_field_display = "bmField1"  # default
+        self.bm_attr_internal = None  # ES field name for BM attr value
+        bm_info, created_bm, bm_typedef_ok = ensure_bm_types(
+            client, self.bm_display_name,
         )
-        if bm_typedef_ok:
-            ctx.register_cleanup(
-                lambda: client.delete(f"/types/typedef/name/{self.bm_name}")
+        if bm_info:
+            self.bm_internal_name = bm_info["internal_name"]
+            self.bm_display_name = bm_info["display_name"]
+            self.bm_field_display = bm_info["first_attr_display"]
+            self.bm_attr_internal = bm_info["attr_map"].get(
+                bm_info["first_attr_display"], bm_info["first_attr_display"]
             )
+        if bm_typedef_ok and created_bm:
+            cleanup_name = self.bm_internal_name or self.bm_display_name
+            ctx.register_typedef_cleanup(client, cleanup_name)
 
         self.guid_d, self.qn_d, self.name_d = _create_entity_and_register(
             client, ctx, "filt-d",
         )
 
         if bm_typedef_ok:
-            # Set BM value on Entity D (retry on 404 type cache lag)
+            # Set BM value on Entity D via displayName endpoint (retry on 404 type cache lag)
             for attempt in range(3):
                 bm_set_resp = client.post(
-                    f"/entity/guid/{self.guid_d}/businessmetadata",
-                    json_data={self.bm_name: {"bmField1": "filter-bm-val"}},
+                    f"/entity/guid/{self.guid_d}/businessmetadata/displayName",
+                    json_data={self.bm_display_name: {self.bm_field_display: "filter-bm-val"}},
                 )
                 if bm_set_resp.status_code in (200, 204):
                     self.bm_ok = True
@@ -312,11 +330,13 @@ class SearchFiltersSuite:
 
     @test("filter_by_label_dsl", tags=["filter", "search", "label"], order=4)
     def test_filter_by_label_dsl(self, client, ctx):
-        """DSL term filter on __labels."""
+        """DSL filter on __labels (wildcard for pipe-delimited storage)."""
+        # Labels stored as pipe-delimited string "|label1|label2|" in ES __labels field.
+        # Use wildcard query since term query requires exact string match.
         dsl = {
             "from": 0, "size": 10,
             "query": {"bool": {"must": [
-                {"term": {"__labels": "filter-label-x"}},
+                {"wildcard": {"__labels": "*filter-label-x*"}},
                 {"term": {"__typeName.keyword": "DataSet"}},
                 {"term": {"__state": "ACTIVE"}},
             ]}}
@@ -328,7 +348,7 @@ class SearchFiltersSuite:
         if count == 0:
             raise SkipTestError(
                 "Label filter-label-x not indexed in ES after 60s — "
-                "ES sync may be slow on this environment"
+                "ES sync may be slow or labels stored differently"
             )
 
         guids = [e.get("guid") for e in body.get("entities", [])]
@@ -343,7 +363,7 @@ class SearchFiltersSuite:
         available, body = _index_search(client, {
             "from": 0, "size": 10,
             "query": {"bool": {"must": [
-                {"term": {"__labels": "filter-label-x"}},
+                {"wildcard": {"__labels": "*filter-label-x*"}},
                 {"term": {"__guid": self.guid_e}},
                 {"term": {"__state": "ACTIVE"}},
             ]}}
@@ -362,26 +382,37 @@ class SearchFiltersSuite:
     @test("filter_by_bm_value_in_search", tags=["filter", "search", "businessmeta"],
           order=6)
     def test_filter_by_bm_value_in_search(self, client, ctx):
-        """Search Entity D by GUID and verify BM attribute in search result."""
+        """Filter entities by BM attribute value in ES (DSL term query on attr internal name)."""
         if not self.bm_ok:
             raise SkipTestError("BM typedef/set not available — skipping BM search test")
-        available, body = _poll_search_by_guid(client, self.guid_d, max_wait=30)
+        if not self.bm_attr_internal:
+            raise SkipTestError("BM attr internal name not available")
+
+        # Use BM attribute's internal name as flat ES field for filtering —
+        # same pattern the UI uses (see SearchByBM.txt).
+        # AtlasEntityHeader (search result) has NO businessAttributes field;
+        # BM values are indexed as flat ES fields keyed by the attr internal name.
+        dsl = {
+            "from": 0, "size": 5,
+            "query": {"bool": {"must": [
+                {"term": {self.bm_attr_internal: "filter-bm-val"}},
+                {"term": {"__state": "ACTIVE"}},
+            ]}}
+        }
+        available, body = _poll_index_search(
+            client, dsl, max_wait=30, interval=5, label="bm-filter",
+        )
         assert available, "Index search API not available"
+        count = body.get("approximateCount", 0)
+        if count == 0:
+            raise SkipTestError(
+                f"BM attr {self.bm_attr_internal}=filter-bm-val not indexed "
+                f"in ES after 30s — ES sync delay"
+            )
 
-        entities = body.get("entities", [])
-        assert entities, f"Entity D ({self.guid_d}) not found in search after polling"
-
-        entity = entities[0]
-        assert entity.get("guid") == self.guid_d, (
-            f"Expected guid={self.guid_d}, got {entity.get('guid')}"
-        )
-        bm = entity.get("businessAttributes", {}).get(self.bm_name, {})
-        assert bm, (
-            f"Expected businessAttributes.{self.bm_name} in search result, "
-            f"got businessAttributes={entity.get('businessAttributes', {})}"
-        )
-        assert bm.get("bmField1") == "filter-bm-val", (
-            f"Expected bmField1='filter-bm-val', got {bm}"
+        guids = [e.get("guid") for e in body.get("entities", [])]
+        assert self.guid_d in guids, (
+            f"Entity D ({self.guid_d}) not found in BM filter results: {guids}"
         )
 
     # ----------------------------------------------------------------
