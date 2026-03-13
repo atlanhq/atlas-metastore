@@ -90,21 +90,19 @@ public class DatasetPreProcessorTest {
     @Test
     public void testValidDatasetTypes() {
         // Test that all valid dataset types are accepted
-        assertTrue(PreProcessorUtils.VALID_DATASET_TYPES.contains("RAW"));
-        assertTrue(PreProcessorUtils.VALID_DATASET_TYPES.contains("REFINED"));
-        assertTrue(PreProcessorUtils.VALID_DATASET_TYPES.contains("AGGREGATED"));
+        assertTrue(PreProcessorUtils.VALID_DATASET_TYPES.contains("Raw"));
+        assertTrue(PreProcessorUtils.VALID_DATASET_TYPES.contains("Refined"));
+        assertTrue(PreProcessorUtils.VALID_DATASET_TYPES.contains("Aggregated"));
         assertEquals(3, PreProcessorUtils.VALID_DATASET_TYPES.size());
     }
 
     @Test
     public void testDatasetTypeNormalization() {
         // Test case-insensitive type validation
-        assertTrue(PreProcessorUtils.VALID_DATASET_TYPES.contains("RAW".toUpperCase()));
-        assertFalse(PreProcessorUtils.VALID_DATASET_TYPES.contains("raw"));
-        assertFalse(PreProcessorUtils.VALID_DATASET_TYPES.contains("Raw"));
+        assertFalse(PreProcessorUtils.VALID_DATASET_TYPES.contains("RAW"));
 
         // Verify normalization is needed (types are stored uppercase)
-        String normalizedType = "raw".toUpperCase();
+        String normalizedType = "Raw".trim();
         assertTrue(PreProcessorUtils.VALID_DATASET_TYPES.contains(normalizedType));
     }
 
@@ -122,12 +120,6 @@ public class DatasetPreProcessorTest {
     // =====================================================================================
 
     @Test
-    public void testElementCountAttributeName() {
-        // Verify the constant is correctly defined
-        assertEquals("dataMeshDatasetElementCount", ELEMENT_COUNT_ATTR);
-    }
-
-    @Test
     public void testDatasetTypeAttributeName() {
         // Verify the constant is correctly defined
         assertEquals("dataMeshDatasetType", DATASET_TYPE_ATTR);
@@ -142,7 +134,7 @@ public class DatasetPreProcessorTest {
     @Test
     public void testDatasetEntityTypeName() {
         // Verify the constant is correctly defined
-        assertEquals("Dataset", DATASET_ENTITY_TYPE);
+        assertEquals("DataMeshDataset", DATASET_ENTITY_TYPE);
     }
 
     // =====================================================================================
@@ -160,7 +152,7 @@ public class DatasetPreProcessorTest {
     @Test
     public void testDatasetTypeValueBoundaries() {
         // Test the three valid values
-        String[] validTypes = {"RAW", "REFINED", "AGGREGATED"};
+        String[] validTypes = {"Raw", "Refined", "Aggregated"};
         for (String type : validTypes) {
             assertTrue(PreProcessorUtils.VALID_DATASET_TYPES.contains(type),
                     "Type '" + type + "' should be valid");
@@ -263,15 +255,6 @@ public class DatasetPreProcessorTest {
         assertFalse(PreProcessorUtils.VALID_DATASET_TYPES.contains(" RAW "));
     }
 
-    @Test
-    public void testCaseSensitivityOfValidTypes() {
-        // Valid types are uppercase only
-        assertTrue(PreProcessorUtils.VALID_DATASET_TYPES.contains("RAW"));
-        assertFalse(PreProcessorUtils.VALID_DATASET_TYPES.contains("raw"));
-        assertFalse(PreProcessorUtils.VALID_DATASET_TYPES.contains("Raw"));
-        assertFalse(PreProcessorUtils.VALID_DATASET_TYPES.contains("RaW"));
-    }
-
     // =====================================================================================
     // Test Group 10: Documentation Tests
     // =====================================================================================
@@ -281,7 +264,6 @@ public class DatasetPreProcessorTest {
         // Document all constants used by DatasetPreProcessor
         assertNotNull(DATASET_ENTITY_TYPE);
         assertNotNull(DATASET_TYPE_ATTR);
-        assertNotNull(ELEMENT_COUNT_ATTR);
         assertNotNull(CATALOG_DATASET_GUID_ATTR);
         assertNotNull(STATE_PROPERTY_KEY);
         assertNotNull(QUALIFIED_NAME);
@@ -290,7 +272,7 @@ public class DatasetPreProcessorTest {
     @Test
     public void testValidDatasetTypesList() {
         // Document the complete list of valid dataset types
-        String[] expectedTypes = {"RAW", "REFINED", "AGGREGATED"};
+        String[] expectedTypes = {"Raw", "Refined", "Aggregated"};
         assertEquals(expectedTypes.length, PreProcessorUtils.VALID_DATASET_TYPES.size());
         for (String type : expectedTypes) {
             assertTrue(PreProcessorUtils.VALID_DATASET_TYPES.contains(type),

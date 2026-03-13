@@ -48,7 +48,7 @@ public class PreProcessorUtils {
     public static final String INIT_LEXORANK_OFFSET = "0|100000:";
 
     //Dataset constants
-    public static final Set<String> VALID_DATASET_TYPES = new HashSet<>(Arrays.asList("RAW", "REFINED", "AGGREGATED"));
+    public static final Set<String> VALID_DATASET_TYPES = new HashSet<>(Arrays.asList("Raw", "Refined", "Aggregated"));
 
     //DataMesh models constants
     public static final String PARENT_DOMAIN_REL_TYPE = "parentDomain";

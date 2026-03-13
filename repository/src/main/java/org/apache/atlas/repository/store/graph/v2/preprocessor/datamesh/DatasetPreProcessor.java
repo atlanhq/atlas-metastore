@@ -91,13 +91,6 @@ public class DatasetPreProcessor extends AbstractDomainPreProcessor {
             }
 
             entity.setAttribute(QUALIFIED_NAME, createQualifiedName());
-
-            if (entity.hasAttribute(ELEMENT_COUNT_ATTR) && entity.getAttribute(ELEMENT_COUNT_ATTR) != null) {
-                throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS,
-                        "elementCount cannot be set during Dataset creation. It is auto-calculated based on linked data elements.");
-            }
-
-            entity.setAttribute(ELEMENT_COUNT_ATTR, 0L);
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
@@ -119,20 +112,6 @@ public class DatasetPreProcessor extends AbstractDomainPreProcessor {
                 if (!isBeingRestored) {
                     throw new AtlasBaseException(OPERATION_NOT_SUPPORTED, "Cannot update Dataset that is Archived!");
                 }
-            }
-
-            // Only block if elementCount is being *changed*
-            if (entity.hasAttribute(ELEMENT_COUNT_ATTR) && entity.getAttribute(ELEMENT_COUNT_ATTR) != null) {
-                Long storedCount = AtlasGraphUtilsV2.getProperty(vertex, ELEMENT_COUNT_ATTR, Long.class);
-                Long incomingCount = (Long) entity.getAttribute(ELEMENT_COUNT_ATTR);
-
-                if (!Objects.equals(storedCount, incomingCount)) {
-                    throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS,
-                            "elementCount cannot be set during Dataset update. It is auto-calculated based on linked data elements.");
-                }
-
-                // Strip system-managed attribute to avoid unnecessary processing
-                entity.getAttributes().remove(ELEMENT_COUNT_ATTR);
             }
 
             if (entity.hasAttribute(DATASET_TYPE_ATTR)) {
@@ -196,10 +175,10 @@ public class DatasetPreProcessor extends AbstractDomainPreProcessor {
             return ;
         }
 
-        String normalizedDatasetType = ((String) datasetTypeObj).toUpperCase();
+        String normalizedDatasetType = ((String) datasetTypeObj).trim();
         if (!VALID_DATASET_TYPES.contains(normalizedDatasetType)) {
             throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS,
-                    "Invalid datasetType: " + datasetTypeObj + ". Valid values: RAW, REFINED, AGGREGATED");
+                    "Invalid datasetType: " + datasetTypeObj + ". Valid values: Raw, Refined, Aggregated.");
         }
 
         entity.setAttribute(DATASET_TYPE_ATTR, normalizedDatasetType);
@@ -211,7 +190,6 @@ public class DatasetPreProcessor extends AbstractDomainPreProcessor {
 
     /**
      * TODO (V2): Auto-calculate elementCount from dataElements linked to this dataset.
-     * Query assets with catalogDatasetGuid = datasetGuid and return the count.
      */
     @SuppressWarnings("unused")
     private int calculateElementCount(String datasetGuid) {

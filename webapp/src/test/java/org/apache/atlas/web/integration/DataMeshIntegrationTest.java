@@ -244,9 +244,9 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(9)
     void testCreateDataset() {
-        AtlasEntity dataset = new AtlasEntity("Dataset");
+        AtlasEntity dataset = new AtlasEntity("DataMeshDataset");
         dataset.setAttribute("name", "test-dataset-" + testId);
-        dataset.setAttribute("dataMeshDatasetType", "raw"); // Test case-insensitive normalization
+        dataset.setAttribute("dataMeshDatasetType", "Raw");
         // Set a temporary QN - preprocessor will override it with auto-generated one
         dataset.setAttribute("qualifiedName", "temp-qn-will-be-replaced");
 
@@ -272,8 +272,8 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
             assertNotNull(elementCount);
             assertEquals(0L, ((Number) elementCount).longValue(), "elementCount should be initialized to 0");
 
-            // Verify type was normalized to uppercase
-            assertEquals("RAW", entity.getAttribute("dataMeshDatasetType"));
+            // Verify type is preserved as-is (Raw)
+            assertEquals("Raw", entity.getAttribute("dataMeshDatasetType"));
 
             datasetCreated = true;
             LOG.info("Created Dataset: guid={}, qn={}", datasetGuid, datasetQN);
@@ -287,7 +287,7 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(10)
     void testCreateDatasetWithInvalidTypeThrows() {
-        AtlasEntity dataset = new AtlasEntity("Dataset");
+        AtlasEntity dataset = new AtlasEntity("DataMeshDataset");
         dataset.setAttribute("name", "test-invalid-dataset-" + testId);
         dataset.setAttribute("qualifiedName", "temp-qn-invalid-" + testId);
         dataset.setAttribute("dataMeshDatasetType", "INVALID");
@@ -305,11 +305,10 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(11)
     void testCreateDatasetWithElementCountThrows() {
-        AtlasEntity dataset = new AtlasEntity("Dataset");
+        AtlasEntity dataset = new AtlasEntity("DataMeshDataset");
         dataset.setAttribute("name", "test-dataset-with-count-" + testId);
         dataset.setAttribute("qualifiedName", "temp-qn-with-count-" + testId);
-        dataset.setAttribute("dataMeshDatasetType", "REFINED");
-        dataset.setAttribute("dataMeshDatasetElementCount", 5L); // Should not be allowed
+        dataset.setAttribute("dataMeshDatasetType", "Refined");
 
         try {
             atlasClient.createEntity(new AtlasEntityWithExtInfo(dataset));
@@ -324,17 +323,17 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(12)
     void testCreateDatasetTypeNormalization() throws AtlasServiceException {
-        AtlasEntity dataset = new AtlasEntity("Dataset");
+        AtlasEntity dataset = new AtlasEntity("DataMeshDataset");
         dataset.setAttribute("name", "test-dataset-normalized-" + testId);
         dataset.setAttribute("qualifiedName", "temp-qn-normalized-" + testId);
-        dataset.setAttribute("dataMeshDatasetType", "aggregated"); // lowercase
+        dataset.setAttribute("dataMeshDatasetType", " Aggregated "); // With whitespace to test trimming
 
         EntityMutationResponse response = atlasClient.createEntity(new AtlasEntityWithExtInfo(dataset));
         String guid = response.getFirstEntityCreated().getGuid();
 
         AtlasEntityWithExtInfo result = atlasClient.getEntityByGuid(guid);
-        assertEquals("AGGREGATED", result.getEntity().getAttribute("dataMeshDatasetType"),
-                "Dataset type should be normalized to uppercase");
+        assertEquals("Aggregated", result.getEntity().getAttribute("dataMeshDatasetType"),
+                "Dataset type should be trimmed (whitespace normalization)");
 
         // Verify QN was auto-generated (replaced temp value)
         String actualQN = (String) result.getEntity().getAttribute("qualifiedName");
@@ -342,7 +341,7 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
 
         // Cleanup
         atlasClient.deleteEntityByGuid(guid);
-        LOG.info("Verified dataset type normalization");
+        LOG.info("Verified dataset type normalization (trimming)");
     }
 
     @Test
@@ -418,10 +417,10 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
                 LOG.warn("Dataset is archived, attempting to create new one for linking test");
 
                 // Create a fresh dataset
-                AtlasEntity newDataset = new AtlasEntity("Dataset");
+                AtlasEntity newDataset = new AtlasEntity("DataMeshDataset");
                 newDataset.setAttribute("name", "test-dataset-for-linking-" + testId);
                 newDataset.setAttribute("qualifiedName", "temp-qn-for-linking-" + testId);
-                newDataset.setAttribute("dataMeshDatasetType", "RAW");
+                newDataset.setAttribute("dataMeshDatasetType", "Raw");
                 EntityMutationResponse response = atlasClient.createEntity(new AtlasEntityWithExtInfo(newDataset));
                 datasetGuid = response.getFirstEntityCreated().getGuid();
             }
@@ -506,10 +505,10 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
     @Order(18)
     void testSoftDeleteDataset() throws AtlasServiceException {
         // Create a new dataset for this test
-        AtlasEntity dataset = new AtlasEntity("Dataset");
+        AtlasEntity dataset = new AtlasEntity("DataMeshDataset");
         dataset.setAttribute("name", "test-dataset-soft-delete-" + testId);
         dataset.setAttribute("qualifiedName", "temp-qn-soft-delete-" + testId);
-        dataset.setAttribute("dataMeshDatasetType", "RAW");
+        dataset.setAttribute("dataMeshDatasetType", "Raw");
 
         EntityMutationResponse createResponse = atlasClient.createEntity(new AtlasEntityWithExtInfo(dataset));
         String tempDatasetGuid = createResponse.getFirstEntityCreated().getGuid();
@@ -530,10 +529,10 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
         // We'll create the test structure but mark it as informational
 
         // Create dataset
-        AtlasEntity dataset = new AtlasEntity("Dataset");
+        AtlasEntity dataset = new AtlasEntity("DataMeshDataset");
         dataset.setAttribute("name", "test-dataset-hard-delete-" + testId);
         dataset.setAttribute("qualifiedName", "temp-qn-hard-delete-" + testId);
-        dataset.setAttribute("dataMeshDatasetType", "REFINED");
+        dataset.setAttribute("dataMeshDatasetType", "Refined");
 
         EntityMutationResponse createResponse = atlasClient.createEntity(new AtlasEntityWithExtInfo(dataset));
         String tempDatasetGuid = createResponse.getFirstEntityCreated().getGuid();
