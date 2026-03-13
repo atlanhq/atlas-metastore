@@ -515,7 +515,7 @@ public class AssetPreProcessorTest {
 
     @Test
     public void testDatasetLinkAttribute_excludedTypesCannotSetGuid_DatasetSelfLink() {
-        AtlasEntity entity = new AtlasEntity("Dataset");
+        AtlasEntity entity = new AtlasEntity("DataMeshDataset");
         entity.setAttribute(QUALIFIED_NAME, "test-dataset");
         entity.setAttribute("catalogDatasetGuid", "another-dataset-guid");
 
@@ -582,7 +582,7 @@ public class AssetPreProcessorTest {
         // Mock entityRetriever to return a valid Dataset vertex
         org.apache.atlas.repository.graphdb.AtlasVertex datasetVertex =
             mock(org.apache.atlas.repository.graphdb.AtlasVertex.class);
-        when(datasetVertex.getProperty("__typeName", String.class)).thenReturn("Dataset");
+        when(datasetVertex.getProperty("__typeName", String.class)).thenReturn("DataMeshDataset");
         when(entityRetriever.getEntityVertex("valid-dataset-guid")).thenReturn(datasetVertex);
 
         // Should not throw exception - valid Dataset GUID
@@ -626,7 +626,7 @@ public class AssetPreProcessorTest {
         // Mock entityRetriever to return a valid Dataset vertex
         org.apache.atlas.repository.graphdb.AtlasVertex datasetVertex =
             mock(org.apache.atlas.repository.graphdb.AtlasVertex.class);
-        when(datasetVertex.getProperty("__typeName", String.class)).thenReturn("Dataset");
+        when(datasetVertex.getProperty("__typeName", String.class)).thenReturn("DataMeshDataset");
         when(entityRetriever.getEntityVertex("valid-dataset-guid")).thenReturn(datasetVertex);
 
         // Mock retrieverNoRelation to return an entity header for authorization check (UPDATE path)
@@ -652,7 +652,7 @@ public class AssetPreProcessorTest {
         // Mock entityRetriever to return a valid Dataset vertex
         org.apache.atlas.repository.graphdb.AtlasVertex datasetVertex =
             mock(org.apache.atlas.repository.graphdb.AtlasVertex.class);
-        when(datasetVertex.getProperty("__typeName", String.class)).thenReturn("Dataset");
+        when(datasetVertex.getProperty("__typeName", String.class)).thenReturn("DataMeshDataset");
         when(entityRetriever.getEntityVertex(sharedDatasetGuid)).thenReturn(datasetVertex);
 
         // First asset
