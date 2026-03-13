@@ -29,6 +29,7 @@ on:
       - lg-async-producer
       - ms-428-delete-by-conn
       - ms-664-fix-audit-search
+      - faster_index_search
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
@@ -889,6 +890,7 @@ jobs:
       
       - name: Create GitHub Release
         if: steps.can_publish.outputs.should_publish == 'true'
+        continue-on-error: true
         uses: ncipollo/release-action@v1
         with:
           tag: helm-${{ matrix.chart }}-v${{ steps.version.outputs.chart }}
