@@ -4,7 +4,8 @@ from core.decorators import suite, test
 from core.assertions import assert_status, assert_status_in
 
 
-@suite("purpose_discovery", description="Purpose discovery endpoint")
+@suite("purpose_discovery", depends_on_suites=["persona_purpose"],
+       description="Purpose discovery endpoint")
 class PurposeDiscoverySuite:
 
     @test("get_user_purposes", tags=["purpose_discovery"], order=1)
@@ -46,7 +47,7 @@ class PurposeDiscoverySuite:
     @test("purposes_with_created_purpose", tags=["purpose_discovery"], order=4)
     def test_purposes_with_created_purpose(self, client, ctx):
         """After persona_purpose suite, query user purposes and look for created purpose."""
-        purpose_guid = ctx.get_entity_guid("purpose")
+        purpose_guid = ctx.get_entity_guid("purpose1")
         if not purpose_guid:
             from core.assertions import SkipTestError
             raise SkipTestError("Purpose entity not available — persona_purpose suite may not have run")

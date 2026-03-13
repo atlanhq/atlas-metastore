@@ -172,7 +172,8 @@ class EntityRestoreSuite:
             entity_data = resp3.json().get("entity", {})
             if entity_data.get("status") != "ACTIVE":
                 continue
-            cls_names = entity_data.get("classificationNames", []) or []
+            classifications = entity_data.get("classifications", [])
+            cls_names = [c.get("typeName") for c in classifications if isinstance(c, dict)]
             if tag_name in cls_names:
                 break
         assert_field_equals(resp3, "entity.status", "ACTIVE")

@@ -43,13 +43,13 @@ def _create_entity_and_register(client, ctx, suffix, max_retries=3):
 
 
 def _get_entity_classifications(client, guid):
-    """GET entity and return its classificationNames list."""
+    """GET entity and return classification type names from classifications list."""
     resp = client.get(f"/entity/guid/{guid}")
     if resp.status_code != 200:
         return []
-    body = resp.json()
-    entity = body.get("entity", {})
-    return entity.get("classificationNames", []) or []
+    entity = resp.json().get("entity", {})
+    classifications = entity.get("classifications", [])
+    return [c.get("typeName") for c in classifications if isinstance(c, dict)]
 
 
 def _poll_entity_has_classification(client, guid, tag_name, max_wait=30,
@@ -272,6 +272,12 @@ class BulkClassificationsSuite:
         Send both BulkTag + BulkTag2 for E4 (which already has BulkTag2).
         With override=false the server should merge/add BulkTag without
         removing BulkTag2.
+
+        KNOWN SERVER BUG: ClassificationAssociator.validateAndTransfer()
+        reads from getAddOrUpdateClassifications() which is never populated
+        by the REST API (only getClassifications() is). This means
+        override=false is effectively a no-op — new classifications are
+        never added. See ClassificationAssociator.java:297.
         """
         if not self.tag_ok:
             raise SkipTestError("Classification typedef creation failed after retries")
@@ -298,22 +304,25 @@ class BulkClassificationsSuite:
         if resp.status_code == 404:
             raise SkipTestError("Endpoint /entity/bulk/setClassifications returned 404 — not available")
 
-        time.sleep(3)
-        names = _get_entity_classifications(client, self.guid_e4)
-        # With override=false and both tags in payload, at minimum BulkTag2
-        # should be retained (it was already present).
-        assert len(names) > 0, (
-            f"Entity E4 should have at least one classification after "
-            f"no-override setClassifications, got {names}"
+        # Existing tag should be preserved regardless
+        found_tag2, names = _poll_entity_has_classification(
+            client, self.guid_e4, self.tag2_name, max_wait=15, interval=5,
         )
-        assert self.tag2_name in names, (
+        assert found_tag2, (
             f"Entity E4 should still have {self.tag2_name} after no-override, "
             f"got {names}"
         )
-        # BulkTag should also be added
-        assert self.tag_name in names, (
-            f"Entity E4 should have {self.tag_name} after no-override add, "
-            f"got {names}"
+
+        # Server should merge new classification with existing ones
+        found_tag1, names = _poll_entity_has_classification(
+            client, self.guid_e4, self.tag_name, max_wait=15, interval=5,
+        )
+        assert found_tag1, (
+            f"KNOWN BUG: overrideClassifications=false does not add new "
+            f"classifications — ClassificationAssociator.validateAndTransfer() "
+            f"reads from getAddOrUpdateClassifications() (always null) instead "
+            f"of getClassifications(). See ClassificationAssociator.java:297. "
+            f"E4 has {names}"
         )
 
     # ----------------------------------------------------------------
@@ -340,11 +349,12 @@ class BulkClassificationsSuite:
 
         if resp.status_code == 200:
             body = resp.json()
-            # Response should be a map with GUIDs as keys
-            if isinstance(body, dict):
+            # Response is an error map — empty dict {} means all GUIDs repaired successfully.
+            # Non-empty dict means some GUIDs had errors (key=guid, value=error message).
+            if isinstance(body, dict) and body:
                 for guid in (self.guid_e1, self.guid_e2):
-                    assert guid in body, (
-                        f"Expected {guid} in repair response keys, got {list(body.keys())}"
+                    assert guid not in body, (
+                        f"Repair reported error for {guid}: {body.get(guid)}"
                     )
 
     # ----------------------------------------------------------------

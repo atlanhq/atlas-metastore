@@ -424,10 +424,10 @@ class LineageCorrectnessSuite:
         if not self.lineage_ok:
             raise SkipTestError("Lineage setup failed — process creation returned non-200")
         resp = client.post(f"/lineage/{self.ds_b}", json_data={
-            "direction": "BOTH",
-            "inputRelationsLimit": 10,
-            "outputRelationsLimit": 10,
-            "depth": 3,
+            "defaultParams": {
+                "inputRelationsLimit": 10,
+                "outputRelationsLimit": 10,
+            },
         })
         if resp.status_code in (400, 404, 405):
             raise SkipTestError(f"On-demand lineage returned {resp.status_code} — not available")
@@ -449,6 +449,7 @@ class LineageCorrectnessSuite:
         resp = client.post("/lineage/list", json_data={
             "guid": self.ds_a,
             "size": 10,
+            "from": 0,
             "depth": 3,
             "direction": "OUTPUT",
         })

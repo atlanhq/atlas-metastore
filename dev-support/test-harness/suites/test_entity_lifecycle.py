@@ -122,18 +122,23 @@ class EntityLifecycleSuite:
         if resp.status_code == 404:
             raise SkipTestError("Classification type not yet propagated")
 
-        # Poll for classification to appear (propagation can take up to 2 min on preprod)
+        # Poll for classification to appear via GET entity
+        # Note: AtlasEntity (GET response) has 'classifications' (list of objects),
+        # NOT 'classificationNames' (that field only exists in AtlasEntityHeader/search results)
         cls_names = []
         for _attempt in range(24):
             time.sleep(5)
             resp2 = client.get(f"/entity/guid/{guid}")
             if resp2.status_code != 200:
                 continue
-            cls_names = resp2.json().get("entity", {}).get("classificationNames", []) or []
+            entity_data = resp2.json().get("entity", {})
+            classifications = entity_data.get("classifications", [])
+            cls_names = [c.get("typeName") for c in classifications if isinstance(c, dict)]
             if self.tag_name in cls_names:
                 break
         assert self.tag_name in cls_names, (
-            f"Expected {self.tag_name} in classificationNames after 120s, got {cls_names}"
+            f"Expected {self.tag_name} in entity classifications after 120s, "
+            f"got {cls_names}"
         )
 
     @test("lifecycle_add_labels", tags=["lifecycle"], order=4,

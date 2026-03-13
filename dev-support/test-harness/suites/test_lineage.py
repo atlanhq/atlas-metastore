@@ -96,10 +96,10 @@ class LineageSuite:
         guid = ctx.get_entity_guid("ds1")
         assert guid, "ds1 GUID not found in context — entity_crud suite must have failed"
         resp = client.post(f"/lineage/{guid}", json_data={
-            "direction": "BOTH",
-            "inputRelationsLimit": 10,
-            "outputRelationsLimit": 10,
-            "depth": 3,
+            "defaultParams": {
+                "inputRelationsLimit": 10,
+                "outputRelationsLimit": 10,
+            },
         })
         assert_status_in(resp, [200, 400])
         if resp.status_code == 200:
@@ -120,8 +120,9 @@ class LineageSuite:
         resp = client.post("/lineage/list", json_data={
             "guid": guid,
             "size": 10,
+            "from": 0,
             "depth": 3,
-            "direction": "BOTH",
+            "direction": "OUTPUT",
         })
         assert_status_in(resp, [200, 400, 404])
         if resp.status_code == 200:
@@ -248,21 +249,21 @@ class LineageSuite:
         resp = client.post("/lineage/list", json_data={
             "guid": guid,
             "size": 10,
-            "offset": 0,
+            "from": 0,
             "depth": 3,
-            "direction": "BOTH",
+            "direction": "OUTPUT",
         })
         assert_status_in(resp, [200, 400, 404])
         if resp.status_code == 200:
             body = resp.json()
             if isinstance(body, dict):
-                # Try offset=1
+                # Try from=1
                 resp2 = client.post("/lineage/list", json_data={
                     "guid": guid,
                     "size": 10,
-                    "offset": 1,
+                    "from": 1,
                     "depth": 3,
-                    "direction": "BOTH",
+                    "direction": "OUTPUT",
                 })
                 assert_status_in(resp2, [200, 400])
 

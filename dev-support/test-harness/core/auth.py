@@ -56,6 +56,8 @@ class AuthProvider:
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if self.token_manager:
             headers["Authorization"] = f"Bearer {self.token_manager.get_token()}"
+            # Required by staging/preprod for endpoints like /direct/search
+            headers["x-atlan-client-origin"] = "test-harness"
         return headers
 
     def get_requests_auth(self):

@@ -167,20 +167,20 @@ class DataMeshSuite:
 
     @test("add_assets_to_product", tags=["data_mesh"], order=6.5, depends_on=["create_data_product"])
     def test_add_assets_to_product(self, client, ctx):
-        """PR-02 (add): Add asset GUIDs to a DataProduct via dataProductAssetsDSL.
+        """PR-02 (add): Link an asset to a DataProduct via outputPorts relationship.
 
-        On staging/preprod, the DataProductPreProcessor computes dapiAssetGuids
-        from dataProductAssetsDSL.  Setting dapiAssetGuids directly doesn't persist
-        because the preprocessor overwrites it with DSL query results.
-        So we update the DSL to match our test asset, then verify dapiAssetGuids.
+        dapiAssetGuids is a computed attribute derived from graph relationship
+        edges (outputPorts/inputPorts), not set directly or via DSL evaluation
+        (DSL evaluation requires an async Argo workflow).  The correct approach
+        is to link assets via relationshipAttributes.outputPorts.
         """
-        import json
+        import time
         if ctx.get("data_mesh_unavailable"):
             raise SkipTestError("Data mesh not available — domain creation failed (400/403)")
         product_guid = ctx.get_entity_guid("product1")
         assert product_guid, "product1 GUID not found in context"
 
-        # Create a throwaway DataSet to assign as an asset
+        # Create a throwaway DataSet to link as an asset
         qn = unique_qn("product-asset")
         entity = build_dataset_entity(qn=qn, name=unique_name("prod-asset"))
         resp = client.post("/entity", json_data={"entity": entity})
@@ -201,13 +201,7 @@ class DataMeshSuite:
         prod_qn = prod_entity.get("attributes", {}).get("qualifiedName")
         assert prod_qn, f"Expected qualifiedName on product {product_guid}"
 
-        # Update product: set dataProductAssetsDSL to match our asset GUID.
-        # The preprocessor runs this DSL and populates dapiAssetGuids from results.
-        assets_dsl = json.dumps({
-            "query": {"bool": {"must": [
-                {"term": {"__guid": asset_guid}},
-            ]}}
-        })
+        # Link asset to product via outputPorts relationship attribute
         resp = client.post("/entity", json_data={
             "entity": {
                 "typeName": "DataProduct",
@@ -215,56 +209,37 @@ class DataMeshSuite:
                 "attributes": {
                     "qualifiedName": prod_qn,
                     "name": self.product_name,
-                    "dataProductAssetsDSL": assets_dsl,
+                },
+                "relationshipAttributes": {
+                    "outputPorts": [
+                        {"typeName": "DataSet", "guid": asset_guid},
+                    ],
                 },
             }
         })
         assert_status(resp, 200)
 
-        # Wait for preprocessor to evaluate DSL and populate dapiAssetGuids
-        import time
         time.sleep(5)
 
-        # Read back and check dapiAssetGuids
-        resp2 = client.get(f"/entity/guid/{product_guid}")
+        # Verify: GET product and check outputPorts relationship
+        resp2 = client.get(f"/entity/guid/{product_guid}",
+                           params={"minExtInfo": "false"})
         assert_status(resp2, 200)
-        attrs = resp2.json().get("entity", {}).get("attributes", {})
-        asset_guids = attrs.get("dapiAssetGuids") or []
-        print(f"  [add-assets] dapiAssetGuids={asset_guids}, "
-              f"DSL updated to match {asset_guid}")
-
-        if asset_guid not in asset_guids:
-            # On some environments, dapiAssetGuids is computed asynchronously
-            # or requires a separate service. Try direct attribute set as fallback.
-            resp3 = client.post("/entity", json_data={
-                "entity": {
-                    "typeName": "DataProduct",
-                    "guid": product_guid,
-                    "attributes": {
-                        "qualifiedName": prod_qn,
-                        "name": self.product_name,
-                        "dapiAssetGuids": [asset_guid],
-                    },
-                }
-            })
-            if resp3.status_code == 200:
-                time.sleep(3)
-                resp4 = client.get(f"/entity/guid/{product_guid}")
-                if resp4.status_code == 200:
-                    asset_guids = resp4.json().get("entity", {}).get("attributes", {}).get("dapiAssetGuids") or []
-                    print(f"  [add-assets] After direct set: dapiAssetGuids={asset_guids}")
-
-        if asset_guid not in asset_guids:
+        rel_attrs = resp2.json().get("entity", {}).get("relationshipAttributes", {})
+        output_ports = rel_attrs.get("outputPorts", [])
+        port_guids = [p.get("guid") for p in output_ports if isinstance(p, dict)]
+        print(f"  [add-assets] outputPorts guids={port_guids}")
+        if asset_guid not in port_guids:
             raise SkipTestError(
-                f"dapiAssetGuids not populated after DSL update or direct set — "
-                f"preprocessor may compute this asynchronously or via a background service"
+                f"Asset {asset_guid} not found in outputPorts after relationship set — "
+                f"outputPorts has {len(output_ports)} entries: {port_guids[:5]}"
             )
 
     @test("remove_assets_from_product", tags=["data_mesh"], order=6.7,
           depends_on=["add_assets_to_product"])
     def test_remove_assets_from_product(self, client, ctx):
-        """PR-02 (remove): Clear dapiAssetGuids by resetting DSL to match nothing."""
-        import json
+        """PR-02 (remove): Unlink asset from DataProduct by clearing outputPorts."""
+        import time
         if ctx.get("data_mesh_unavailable"):
             raise SkipTestError("Data mesh not available — domain creation failed (400/403)")
         product_guid = ctx.get_entity_guid("product1")
@@ -277,12 +252,7 @@ class DataMeshSuite:
         prod_qn = prod_entity.get("attributes", {}).get("qualifiedName")
         assert prod_qn, f"Expected qualifiedName on product {product_guid}"
 
-        # Reset DSL to match nothing (fake GUID), which clears dapiAssetGuids
-        empty_dsl = json.dumps({
-            "query": {"bool": {"must": [
-                {"term": {"__guid": "00000000-0000-0000-0000-000000000000"}},
-            ]}}
-        })
+        # Clear outputPorts by setting to empty list
         resp = client.post("/entity", json_data={
             "entity": {
                 "typeName": "DataProduct",
@@ -290,22 +260,28 @@ class DataMeshSuite:
                 "attributes": {
                     "qualifiedName": prod_qn,
                     "name": self.product_name,
-                    "dataProductAssetsDSL": empty_dsl,
+                },
+                "relationshipAttributes": {
+                    "outputPorts": [],
                 },
             }
         })
         assert_status(resp, 200)
 
-        import time
         time.sleep(5)
 
-        # Read back and verify cleared
-        resp2 = client.get(f"/entity/guid/{product_guid}")
+        # Verify: outputPorts should be empty or all DELETED
+        resp2 = client.get(f"/entity/guid/{product_guid}",
+                           params={"minExtInfo": "false"})
         assert_status(resp2, 200)
-        attrs = resp2.json().get("entity", {}).get("attributes", {})
-        asset_guids = attrs.get("dapiAssetGuids") or []
-        print(f"  [remove-assets] dapiAssetGuids after DSL reset: {asset_guids}")
-        assert not asset_guids, f"Expected empty dapiAssetGuids, got {asset_guids}"
+        rel_attrs = resp2.json().get("entity", {}).get("relationshipAttributes", {})
+        output_ports = rel_attrs.get("outputPorts", [])
+        active_ports = [p for p in output_ports
+                        if isinstance(p, dict) and p.get("relationshipStatus") != "DELETED"]
+        print(f"  [remove-assets] active outputPorts after clear: {len(active_ports)}")
+        assert not active_ports, (
+            f"Expected empty outputPorts, got {len(active_ports)} active entries"
+        )
 
     @test("update_domain", tags=["data_mesh", "crud"], order=7, depends_on=["create_domain"])
     def test_update_domain(self, client, ctx):

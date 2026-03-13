@@ -3,6 +3,11 @@
 from core.decorators import suite, test
 from core.assertions import assert_status, assert_status_in, SkipTestError
 
+# ES index name used by JanusGraph on staging/preprod
+ES_INDEX_NAME = "janusgraph_vertex_index"
+# PIT keepAlive in milliseconds (server expects Long, not string like "1m")
+PIT_KEEP_ALIVE_MS = 60000
+
 
 @suite("direct_search", depends_on_suites=["entity_crud"],
        description="Direct Elasticsearch search endpoint")
@@ -27,17 +32,26 @@ class DirectSearchSuite:
     def test_direct_search_pit_create(self, client, ctx):
         resp = client.post("/direct/search", json_data={
             "searchType": "PIT_CREATE",
-            "keepAlive": "1m",
+            "keepAlive": PIT_KEEP_ALIVE_MS,
+            "indexName": ES_INDEX_NAME,
         })
         assert_status_in(resp, [200, 400, 403])
         if resp.status_code == 200:
             body = resp.json()
-            # Try known field names for PIT ID
-            pit_id = body.get("pitId") or body.get("id") or body.get("pit_id")
+            # DirectSearchResponse wraps ES response in pitCreateResponse field
+            pit_obj = body.get("pitCreateResponse", {})
+            if not isinstance(pit_obj, dict):
+                pit_obj = {}
+            pit_id = (
+                body.get("pitId") or body.get("id") or body.get("pit_id")
+                or pit_obj.get("id") or pit_obj.get("pointInTimeId")
+            )
             if pit_id:
                 ctx.set("pit_id", pit_id)
             else:
-                print(f"  [pit-create] 200 but no pitId in response keys: {list(body.keys())}")
+                print(f"  [pit-create] 200 but no pitId found. "
+                      f"Response keys: {list(body.keys())}, "
+                      f"pitCreateResponse keys: {list(pit_obj.keys()) if pit_obj else 'N/A'}")
 
     @test("direct_search_pit_delete", tags=["search", "direct_search"], order=3,
           depends_on=["direct_search_pit_create"])
@@ -126,12 +140,20 @@ class DirectSearchSuite:
         # Create PIT
         resp1 = client.post("/direct/search", json_data={
             "searchType": "PIT_CREATE",
-            "keepAlive": "1m",
+            "keepAlive": PIT_KEEP_ALIVE_MS,
+            "indexName": ES_INDEX_NAME,
         })
         assert_status_in(resp1, [200, 400, 403])
         if resp1.status_code != 200:
             return
-        pit_id = resp1.json().get("pitId") or resp1.json().get("id")
+        body1 = resp1.json()
+        pit_obj = body1.get("pitCreateResponse", {})
+        if not isinstance(pit_obj, dict):
+            pit_obj = {}
+        pit_id = (
+            body1.get("pitId") or body1.get("id")
+            or pit_obj.get("id") or pit_obj.get("pointInTimeId")
+        )
         if not pit_id:
             return
         # Search with PIT
