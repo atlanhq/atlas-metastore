@@ -245,7 +245,7 @@ class EntityBusinessMetaSuite:
         result = assert_entity_in_kafka(ctx, self.entity_guid, "BUSINESS_ATTRIBUTE_UPDATE")
         # Soft assertion — result is None if Kafka unavailable or not found
 
-    @test("search_by_bm_attribute", tags=["businessmeta", "search"], order=4.7,
+    @test("search_by_bm_attribute", tags=["businessmeta", "search"], order=1.8,
           depends_on=["add_business_metadata"])
     def test_search_by_bm_attribute(self, client, ctx):
         """CM-04: Verify BM attribute value is indexed in ES via DSL filter.
@@ -260,11 +260,13 @@ class EntityBusinessMetaSuite:
         attr_internal = self.bm_attr_map.get(
             self.bm_field_display, self.bm_field_display,
         )
-        print(f"  [bm-search] Polling ES for BM attr {attr_internal}=test-value "
-              f"on entity {self.entity_guid}...")
+        bm_name = self.bm_internal_name or self.bm_display_name
+        print(f"  [bm-search] BM typedef: {bm_name} (display: {self.bm_display_name})")
+        print(f"  [bm-search] Polling ES for BM attr {self.bm_field_display} "
+              f"(internal: {attr_internal})=test-value on entity {self.entity_guid}...")
 
         found = False
-        for i in range(6):
+        for i in range(24):
             time.sleep(5)
             resp = client.post("/search/indexsearch", json_data={
                 "dsl": {
@@ -282,11 +284,11 @@ class EntityBusinessMetaSuite:
                     found = True
                     print(f"  [bm-search] BM found in ES after {(i+1)*5}s")
                     break
-            print(f"  [bm-search] BM not in ES yet ({(i+1)*5}s/30s)")
+            print(f"  [bm-search] BM not in ES yet ({(i+1)*5}s/120s)")
 
         assert found, (
             f"BM attr {attr_internal}=test-value not indexed for entity "
-            f"{self.entity_guid} after 30s"
+            f"{self.entity_guid} after 120s"
         )
 
     @test("add_bm_nonexistent_entity", tags=["businessmeta"], order=5)

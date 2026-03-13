@@ -203,12 +203,23 @@ class LineageSuite:
         if resp.status_code == 200:
             body = resp.json()
             guid_map = body.get("guidEntityMap", {})
-            # If hideProcess works, no Process entities in guidEntityMap
-            for entity_guid, entity_data in guid_map.items():
-                if isinstance(entity_data, dict):
-                    type_name = entity_data.get("typeName", "")
-                    assert type_name != "Process", (
-                        f"Expected no Process entities with hideProcess=true, found {entity_guid}"
+            relations = body.get("relations", [])
+            # hideProcess=true: relations should be virtual (dataset→dataset).
+            # Process entities ARE expected in guidEntityMap (for processId lookup),
+            # but no relation endpoint should be a Process.
+            process_guids = {
+                eg for eg, ed in guid_map.items()
+                if isinstance(ed, dict) and ed.get("typeName") == "Process"
+            }
+            for rel in relations:
+                if isinstance(rel, dict):
+                    from_id = rel.get("fromEntityId")
+                    to_id = rel.get("toEntityId")
+                    assert from_id not in process_guids, (
+                        f"Relation fromEntityId {from_id} is a Process with hideProcess=true"
+                    )
+                    assert to_id not in process_guids, (
+                        f"Relation toEntityId {to_id} is a Process with hideProcess=true"
                     )
 
     @test("lineage_output_direction_only", tags=["lineage"], order=4.5)

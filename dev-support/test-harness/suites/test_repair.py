@@ -74,14 +74,14 @@ class RepairSuite:
 
     @test("repair_all_classifications", tags=["repair"], order=6)
     def test_repair_all_classifications(self, client, ctx):
-        """POST /repair/all-classifications endpoint."""
-        resp = client.post("/repair/all-classifications")
+        """POST /entity/repairAllClassifications endpoint."""
+        resp = client.post("/entity/repairAllClassifications", timeout=120)
         assert_status_in(resp, [200, 204, 400, 404])
 
     @test("repair_has_lineage", tags=["repair"], order=7)
     def test_repair_has_lineage(self, client, ctx):
-        """POST /repair/has-lineage endpoint."""
-        resp = client.post("/repair/has-lineage")
+        """POST /entity/repairhaslineage endpoint."""
+        resp = client.post("/entity/repairhaslineage", timeout=120)
         assert_status_in(resp, [200, 204, 400, 404])
 
     @test("repair_nonexistent", tags=["repair", "negative"], order=8)

@@ -170,7 +170,7 @@ class DeleteCorrectnessSuite:
                     "from": 0, "size": 10,
                     "query": {"bool": {"must": [
                         {"wildcard": {qn_field: f"{PREFIX}/del-*"}},
-                        {"term": {"__typeName.keyword": "DataSet"}},
+                        {"term": {"__typeName.keyword": self.io_type}},
                         {"term": {"__state": "ACTIVE"}},
                     ]}}
                 })

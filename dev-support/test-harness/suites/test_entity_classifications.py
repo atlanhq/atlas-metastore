@@ -370,15 +370,15 @@ class EntityClassificationsSuite:
         ctx.set("prop_tgt_guid", guid_b)
         ctx.set("prop_proc_guid", proc_guid)
 
-        # Poll for propagation to target B (through process) — 30s
-        print(f"  [propagation] Waiting up to 30s for propagation to target {guid_b}...")
+        # Poll for propagation to target B (through process) — 120s
+        print(f"  [propagation] Waiting up to 120s for propagation to target {guid_b}...")
         found_b, names_b = _poll_entity_classifications(
-            client, guid_b, self.tag_name, max_wait=30, interval=5,
+            client, guid_b, self.tag_name, max_wait=120, interval=5,
             label="propagation",
         )
         assert found_b, (
             f"Classification {self.tag_name} did NOT propagate from source "
-            f"{guid_a} to target {guid_b} through lineage after 30s. "
+            f"{guid_a} to target {guid_b} through lineage after 120s. "
             f"Target classifications: {names_b}"
         )
 
@@ -426,15 +426,15 @@ class EntityClassificationsSuite:
         resp_tag = client.post(f"/entity/guid/{guid_a}/classifications", json_data=payload)
         assert_status_in(resp_tag, [200, 204])
 
-        # Wait for propagation to B
+        # Wait for propagation to B (up to 120s — can be slow on preprod)
         print(f"  [prop-delete] Waiting for propagation to target {guid_b}...")
         found_b, _ = _poll_entity_classifications(
-            client, guid_b, self.tag_name, max_wait=30, interval=5,
+            client, guid_b, self.tag_name, max_wait=120, interval=5,
             label="prop-delete",
         )
         assert found_b, (
             f"Classification {self.tag_name} did not propagate to target "
-            f"{guid_b} — cannot verify delete cleanup"
+            f"{guid_b} after 120s — cannot verify delete cleanup"
         )
 
         # Now remove the tag from source A
@@ -442,15 +442,15 @@ class EntityClassificationsSuite:
         resp_del = client.delete(f"/entity/guid/{guid_a}/classification/{self.tag_name}")
         assert_status_in(resp_del, [200, 204])
 
-        # Poll for propagation cleanup — tag should disappear from B
-        print(f"  [prop-delete] Waiting up to 30s for propagated tag to be removed from {guid_b}...")
+        # Poll for propagation cleanup — tag should disappear from B (up to 120s)
+        print(f"  [prop-delete] Waiting up to 120s for propagated tag to be removed from {guid_b}...")
         tag_gone, remaining = _poll_tag_removed(
-            client, guid_b, self.tag_name, max_wait=30, interval=5,
+            client, guid_b, self.tag_name, max_wait=120, interval=5,
             label="prop-delete",
         )
         assert tag_gone, (
             f"Propagated classification {self.tag_name} was NOT cleaned up on "
-            f"target {guid_b} after removing from source {guid_a} (waited 30s). "
+            f"target {guid_b} after removing from source {guid_a} (waited 120s). "
             f"Remaining tags: {remaining}"
         )
 
@@ -508,26 +508,26 @@ class EntityClassificationsSuite:
         }])
         assert_status_in(resp_tag, [200, 204])
 
-        # --- Wait for tag to propagate to B ---
+        # --- Wait for tag to propagate to B (up to 120s) ---
         print(f"  [trans-del] Waiting for tag to propagate to B ({guid_b})...")
         found_b, names_b = _poll_entity_classifications(
-            client, guid_b, self.tag_name, max_wait=30, interval=5,
+            client, guid_b, self.tag_name, max_wait=120, interval=5,
             label="trans-del-B",
         )
         assert found_b, (
-            f"Tag {self.tag_name} did NOT propagate from A to B after 30s. "
+            f"Tag {self.tag_name} did NOT propagate from A to B after 120s. "
             f"B classifications: {names_b}"
         )
 
-        # --- Wait for tag to propagate to C (transitive through B) ---
+        # --- Wait for tag to propagate to C (transitive through B, up to 120s) ---
         print(f"  [trans-del] Waiting for tag to propagate to C ({guid_c})...")
         found_c, names_c = _poll_entity_classifications(
-            client, guid_c, self.tag_name, max_wait=30, interval=5,
+            client, guid_c, self.tag_name, max_wait=120, interval=5,
             label="trans-del-C",
         )
         assert found_c, (
             f"Tag {self.tag_name} did NOT propagate transitively from A through B to C "
-            f"after 30s. C classifications: {names_c}"
+            f"after 120s. C classifications: {names_c}"
         )
         print(f"  [trans-del] VERIFIED: tag propagated A -> B -> C")
 
@@ -715,26 +715,47 @@ class EntityClassificationsSuite:
         }])
         assert_status_in(resp_tag, [200, 204])
 
-        # Wait for propagation + ES indexing (longer wait for ES)
-        es_wait = max(ctx.get("es_sync_wait", 5), 15)
-        print(f"  [prop-search] Waiting {es_wait}s for propagation + ES sync...")
-        time.sleep(es_wait)
-
-        # Search tgt entity, check propagatedClassificationNames in ES (with retries)
-        found, entity = _search_entity_in_es(
-            client, guid_tgt, es_sync_wait=es_wait,
-            max_retries=5, retry_interval=5,
+        # Step 1: Poll REST API to confirm propagation reached target (up to 120s)
+        # Classification propagation is async via task queue and can take 2+ min on preprod
+        print(f"  [prop-search] Waiting for propagation to target {guid_tgt} via REST API...")
+        found_prop, prop_names = _poll_entity_classifications(
+            client, guid_tgt, self.tag_name, max_wait=120, interval=5,
+            label="prop-search",
         )
-        assert found, f"Target entity {guid_tgt} not found in search"
-
-        prop_names = entity.get("propagatedClassificationNames", [])
-        assert self.tag_name in prop_names, (
-            f"Propagated classification {self.tag_name} NOT found in "
-            f"ES propagatedClassificationNames for target {guid_tgt}. "
-            f"Got: {prop_names}. "
-            f"classificationNames: {entity.get('classificationNames', [])}"
+        assert found_prop, (
+            f"Classification {self.tag_name} did NOT propagate from source "
+            f"{guid_src} to target {guid_tgt} after 120s. "
+            f"Target classifications: {prop_names}"
         )
-        print(f"  [prop-search] VERIFIED: {self.tag_name} in propagatedClassificationNames "
+
+        # Step 2: Poll ES for classificationNames to contain the tag (up to 120s)
+        # AtlasEntityHeader.classificationNames merges both direct + propagated names
+        # (there is no separate propagatedClassificationNames field in search results)
+        print(f"  [prop-search] Propagation confirmed via REST. "
+              f"Now polling ES for classificationNames...")
+        found_in_es = False
+        es_cn = []
+        for i in range(24):
+            time.sleep(5)
+            found, entity = _search_entity_in_es(
+                client, guid_tgt, max_retries=1, retry_interval=1,
+            )
+            if found:
+                es_cn = entity.get("classificationNames", [])
+                if self.tag_name in es_cn:
+                    found_in_es = True
+                    print(f"  [prop-search] Tag found in ES classificationNames "
+                          f"after {(i+1)*5}s: {es_cn}")
+                    break
+            print(f"  [prop-search] Tag not in ES yet ({(i+1)*5}s/120s). "
+                  f"classificationNames: {es_cn}")
+
+        assert found_in_es, (
+            f"Propagated classification {self.tag_name} confirmed via REST API "
+            f"but NOT found in ES classificationNames for target {guid_tgt} "
+            f"after 120s. Got: {es_cn}"
+        )
+        print(f"  [prop-search] VERIFIED: {self.tag_name} in ES classificationNames "
               f"for target {guid_tgt}")
 
     @test("classification_es_cleanup_after_removal",

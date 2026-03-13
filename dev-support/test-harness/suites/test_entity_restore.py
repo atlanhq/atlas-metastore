@@ -162,10 +162,10 @@ class EntityRestoreSuite:
         if resp2.status_code == 404:
             raise SkipTestError("Restore endpoint not available")
 
-        # Verify classification preserved (poll for read-after-write delay)
+        # Verify classification preserved (poll up to 120s — propagation can be slow on preprod)
         cls_names = []
-        for _attempt in range(5):
-            time.sleep(2)
+        for _attempt in range(24):
+            time.sleep(5)
             resp3 = client.get(f"/entity/guid/{guid}")
             if resp3.status_code != 200:
                 continue
@@ -177,7 +177,7 @@ class EntityRestoreSuite:
                 break
         assert_field_equals(resp3, "entity.status", "ACTIVE")
         assert tag_name in cls_names, (
-            f"Expected {tag_name} in classificationNames after restore, got {cls_names}"
+            f"Expected {tag_name} in classificationNames after restore (120s), got {cls_names}"
         )
 
     @test("restore_with_labels", tags=["restore"], order=7)

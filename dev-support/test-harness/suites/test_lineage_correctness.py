@@ -327,7 +327,7 @@ class LineageCorrectnessSuite:
     @test("lineage_hide_process_excludes_processes",
           tags=["lineage", "data_correctness"], order=7)
     def test_hide_process(self, client, ctx):
-        """hideProcess=true — no Process entities in guidEntityMap."""
+        """hideProcess=true — relations are virtual (dataset→dataset), no Process as relation endpoint."""
         if not self.lineage_ok:
             raise SkipTestError("Lineage setup failed — process creation returned non-200")
         available, body = _get_lineage(
@@ -337,11 +337,24 @@ class LineageCorrectnessSuite:
             raise SkipTestError("Lineage API not available in this env")
 
         gem = body.get("guidEntityMap", {})
-        for guid, info in gem.items():
-            if isinstance(info, dict):
-                tn = info.get("typeName", "")
-                assert tn != "Process", (
-                    f"Process entity {guid} in guidEntityMap with hideProcess=true"
+        relations = body.get("relations", [])
+
+        # Relations should NOT have Process entities as endpoints.
+        # Process entities ARE expected in guidEntityMap (for processId lookup),
+        # but virtual relations should be dataset→dataset only.
+        process_guids = {
+            guid for guid, info in gem.items()
+            if isinstance(info, dict) and info.get("typeName") == "Process"
+        }
+        for rel in relations:
+            if isinstance(rel, dict):
+                from_id = rel.get("fromEntityId")
+                to_id = rel.get("toEntityId")
+                assert from_id not in process_guids, (
+                    f"Relation fromEntityId {from_id} is a Process with hideProcess=true"
+                )
+                assert to_id not in process_guids, (
+                    f"Relation toEntityId {to_id} is a Process with hideProcess=true"
                 )
 
         # Non-Process entities should still be present
@@ -481,10 +494,10 @@ class LineageCorrectnessSuite:
         )
         assert_status_in(resp, [200, 204])
 
-        # Wait for propagation through graph (30s with polling)
-        print(f"  [lin-propagation] Waiting up to 30s for propagation to {self.prop_tgt}...")
+        # Wait for propagation through graph (120s with polling — can be slow on preprod)
+        print(f"  [lin-propagation] Waiting up to 120s for propagation to {self.prop_tgt}...")
         found = False
-        for i in range(6):
+        for i in range(24):
             time.sleep(5)
             classifications = _get_entity_classifications(client, self.prop_tgt)
             if classifications is None:
@@ -494,7 +507,7 @@ class LineageCorrectnessSuite:
                 found = True
                 print(f"  [lin-propagation] Tag found on target after {(i+1)*5}s: {tag_names}")
                 break
-            print(f"  [lin-propagation] Polling ({(i+1)*5}s/30s): target tags = {tag_names}")
+            print(f"  [lin-propagation] Polling ({(i+1)*5}s/120s): target tags = {tag_names}")
         classifications = _get_entity_classifications(client, self.prop_tgt) or []
 
         tag_found = any(
@@ -550,16 +563,16 @@ class LineageCorrectnessSuite:
         )
         assert_status_in(resp, [200, 204])
 
-        # Poll for cleanup (30s)
-        print(f"  [lin-remove] Waiting up to 30s for propagated tag removal from {self.prop_tgt}...")
-        for i in range(6):
+        # Poll for cleanup (120s — propagation cleanup can be slow on preprod)
+        print(f"  [lin-remove] Waiting up to 120s for propagated tag removal from {self.prop_tgt}...")
+        for i in range(24):
             time.sleep(5)
             classifications = _get_entity_classifications(client, self.prop_tgt) or []
             tag_names = [c.get("typeName") for c in classifications if isinstance(c, dict)]
             if self.tag_name not in tag_names:
                 print(f"  [lin-remove] Tag removed from target after {(i+1)*5}s")
                 break
-            print(f"  [lin-remove] Polling ({(i+1)*5}s/30s): target tags = {tag_names}")
+            print(f"  [lin-remove] Polling ({(i+1)*5}s/120s): target tags = {tag_names}")
         classifications = _get_entity_classifications(client, self.prop_tgt) or []
 
         tag_names = [

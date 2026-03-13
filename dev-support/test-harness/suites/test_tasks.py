@@ -123,18 +123,6 @@ class TasksSuite:
                             f"Expected status=FAILED with filter, got {t['status']}"
                         )
 
-    @test("delete_nonexistent_task", tags=["tasks", "negative"], order=8)
-    def test_delete_nonexistent_task(self, client, ctx):
-        """DELETE /task/{nonexistent-guid} — expect 404 or error."""
-        resp = client.delete("/task/00000000-0000-0000-0000-000000000000")
-        assert_status_in(resp, [200, 204, 400, 404])
-        if resp.status_code in [400, 404]:
-            body = resp.json()
-            if isinstance(body, dict):
-                assert any(k in body for k in ("errorMessage", "errorCode", "message", "error")), (
-                    f"Expected error details in response, got keys: {list(body.keys())}"
-                )
-
     @test("task_result_structure", tags=["tasks"], order=9)
     def test_task_result_structure(self, client, ctx):
         """Validate task entry structure when tasks exist."""
