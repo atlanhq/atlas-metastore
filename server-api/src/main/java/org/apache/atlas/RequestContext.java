@@ -625,6 +625,12 @@ public class RequestContext {
         }
     }
 
+    public void removeFromEntityCache(String guid) {
+        if (guid != null) {
+            entityCache.remove(guid);
+        }
+    }
+
     public void cacheDifferentialEntity(AtlasEntity entity) {
         if (entity != null && entity.getGuid() != null) {
             diffEntityCache.put(entity.getGuid(), entity);

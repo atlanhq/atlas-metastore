@@ -753,6 +753,14 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
                     entity = new AtlasEntity(entityHeader);
                 } else {
                     String entityGuid = entityHeader.getGuid();
+
+                    // MS-710: Evict partial entity from cache before reading for notification construction.
+                    // During entity mutation, EntityGraphMapper caches the partial request entity (only containing
+                    // attributes sent in the update request). getAndCacheEntity() checks the cache first, so it
+                    // would return this partial entity instead of the full entity from the graph, causing attributes
+                    // like connectorName (marked includeInNotification=true) to be missing from notifications.
+                    RequestContext.get().removeFromEntityCache(entityGuid);
+
                     entity = fullTextMapperV2.getAndCacheEntity(entityGuid);
 
                     // MLH-927: Fix for ENTITY_UPDATE events missing attributes on relationship changes
