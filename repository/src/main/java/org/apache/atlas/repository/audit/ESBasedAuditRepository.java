@@ -738,6 +738,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                 updateFieldLimit();
             }
             updateMappingsIfChanged();
+            suppressDetailFieldIndexing();
         } catch (IOException e) {
             LOG.error("error", e);
             throw new AtlasException(e);
@@ -803,6 +804,72 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
             }
         } catch (IOException e) {
             LOG.error("Error while updating the field limit", e);
+        }
+    }
+
+    private static final String DETAIL_SUPPRESSION_MARKER_ID = "entity_audits_detail_suppression_applied";
+
+    /**
+     * Adds a catch-all dynamic template to suppress indexing of all new fields under detail.*.
+     *
+     * The detail field is mapped as nested and every unique attribute name across all entity types
+     * creates a new mapped field (e.g. detail.attributes.qualifiedName, detail.attributes.name).
+     * Existing regex suppressions catch NanoID-pattern keys but real attribute names slip through,
+     * causing unbounded field growth — up to 17,000+ fields on some tenants.
+     *
+     * No code across the entire atlanhq org queries detail sub-fields via ES search.
+     * All consumers (ESBasedAuditRepository, support scripts) read detail from _source after
+     * fetching by entityId/action/timestamp. Disabling indexing on detail sub-fields is safe.
+     *
+     * This adds a dynamic template that sets enabled:false on any new field under detail.*,
+     * stopping further field growth. Already-mapped fields remain but no new ones are created.
+     * This is a live PUT _mapping call — no index close/open required, no write downtime.
+     *
+     * Uses a marker document so the update runs exactly once across all pods and deployments.
+     */
+    private void suppressDetailFieldIndexing() {
+        try {
+            // Fast path: check if suppression was already applied
+            try {
+                Request head = new Request("HEAD", INDEX_NAME + "/_doc/" + DETAIL_SUPPRESSION_MARKER_ID);
+                Response headResponse = lowLevelClient.performRequest(head);
+                if (headResponse.getStatusLine().getStatusCode() == 200) {
+                    return;
+                }
+            } catch (Exception e) {
+                // 404 or error — proceed with suppression
+            }
+
+            // Add catch-all dynamic template to suppress all detail sub-fields
+            // This must come BEFORE the existing allow_* templates in evaluation order.
+            // ES evaluates dynamic templates in order — first match wins.
+            // By using path_match "detail.*" with a wildcard, this catches everything
+            // under detail that isn't already explicitly mapped.
+            String mappingBody = "{\"dynamic_templates\": [" +
+                    "{\"suppress_detail_all\": {" +
+                    "\"path_match\": \"detail.*\"," +
+                    "\"match_mapping_type\": \"*\"," +
+                    "\"mapping\": {\"enabled\": false}" +
+                    "}}" +
+                    "]}";
+
+            Request putMapping = new Request("PUT", INDEX_NAME + "/_mapping");
+            putMapping.setEntity(new NStringEntity(mappingBody, ContentType.APPLICATION_JSON));
+            Response response = lowLevelClient.performRequest(putMapping);
+
+            if (isSuccess(response)) {
+                LOG.info("entity_audits: added suppress_detail_all dynamic template to stop field explosion");
+
+                // Write marker so we don't repeat this
+                Request marker = new Request("PUT", INDEX_NAME + "/_doc/" + DETAIL_SUPPRESSION_MARKER_ID);
+                String body = "{\"migration\":\"suppress_detail_fields\",\"timestamp\":" + System.currentTimeMillis() + "}";
+                marker.setEntity(new NStringEntity(body, ContentType.APPLICATION_JSON));
+                lowLevelClient.performRequest(marker);
+            } else {
+                LOG.warn("entity_audits: failed to add suppress_detail_all dynamic template");
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to suppress detail field indexing on entity_audits, will retry on next startup", e);
         }
     }
 
