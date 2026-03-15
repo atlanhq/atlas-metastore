@@ -1,5 +1,11 @@
 # ES Sync Redesign: Tag Denormalization — Implementation Details
 
+## Scope
+
+**Phase 1 (this PR):** Migrate the **4 propagation paths** to the new buffer+flush pattern.
+Direct attachment paths (5 paths) remain unchanged and use the existing `ESDeferredOperation` pattern.
+They are marked with `TODO: Migrate to buffer+flush pattern` for Phase 2 once the propagation approach is validated in production.
+
 ## Problem Statement
 
 The codebase had **9 separate ES sync paths** for tag denormalized attributes, split across two patterns:
@@ -40,29 +46,31 @@ The ONE path that worked correctly was `repairClassificationMappingsV2` — it r
 
 ## Architecture
 
-```
-Tag Mutation (all 9 paths)
-  → Cassandra write (add/delete/update/propagate)
-  → RequestContext.addVertexNeedingTagDenorm(vertexId, guid)
+### Propagation paths (Phase 1 — this PR)
 
-Flush Step (two call sites)
-  → EntityGraphMapper.flushTagDenormToES()
-    → For each buffered (vertexId, guid):
-        → tagDAO.getAllClassificationsForVertex(vertexId)
-        → TagDeNormAttributesUtil.getAllAttributesForAllTagsForRepair(guid, tags, ...)
+```
+Propagation Mutation (4 paths)
+  → Cassandra write (putPropagatedTags / deletePropagations)
+  → RequestContext.addVertexNeedingTagDenorm(vertexId, guid)
+  → EntityGraphMapper.flushTagDenormToES()  [per ~200-asset chunk]
+    → tagDAO.getAllTagsByVertexIds(vertexIds)  [batch async Cassandra read]
+    → TagDeNormAttributesUtil.computeAllDenormAttributes(tags, ...)
     → ESConnector.writeTagPropertiesWithResult(deNormMap)
         → Parse bulk response for partial failures
     → On success: accumulate counts in RequestContext
     → On failure: emit failed vertex IDs + GUIDs to ATLAS_TAG_DENORM_DLQ
     → Clear the buffer
+```
 
-Call site 1: EntityMutationService.executeESPostProcessing()
-  → For deferred paths (direct tag add/delete/update + repair)
-  → Called in finally block after graph transaction
+### Direct attachment paths (unchanged — Phase 2)
 
-Call site 2: Inline per-chunk in propagation methods
-  → For propagation add/delete/update/refresh tasks
-  → Called at the end of each ~200-asset batch
+```
+Direct Tag Mutation (5 paths)
+  → Cassandra write (putDirectTag / deleteDirectTag)
+  → Compute denorm inline (getDirectTagAttachmentAttributesForAddTag / ForDeleteTag)
+  → RequestContext.addESDeferredOperation(...)
+  → EntityMutationService.executeESPostProcessing()
+    → entityMutationPostProcessor.executeESOperations(deferredOps)
 ```
 
 ## Files Modified
@@ -72,9 +80,9 @@ Call site 2: Inline per-chunk in propagation methods
 | File | Changes |
 |------|---------|
 | `server-api/.../RequestContext.java` | Added `verticesNeedingTagDenorm` buffer (LinkedHashMap), ES success/failure counters, accessor methods, cleanup in `clearCache()` |
-| `repository/.../EntityGraphMapper.java` | Added `flushTagDenormToES()`, `bufferTagDenormForTags()`. Refactored all 9 paths. Removed dead methods. Injected `TagDenormDLQProducer`. |
-| `repository/.../EntityMutationService.java` | `executeESPostProcessing()` now calls `entityGraphMapper.flushTagDenormToES()` instead of the old `ESDeferredOperation` path |
-| `repository/.../TagDeNormAttributesUtil.java` | Removed 5 dead methods. Only `getAllAttributesForAllTagsForRepair` + `getClassificationTextKey` remain. |
+| `repository/.../EntityGraphMapper.java` | Added `flushTagDenormToES()`, `bufferTagDenormForTags()`. Refactored 4 propagation paths. Removed `updateClassificationTextV2` overloads (propagation-only). Injected `TagDenormDLQProducer`. Direct paths unchanged. |
+| `repository/.../EntityMutationService.java` | `executeESPostProcessing()` now runs both: deferred ops (direct paths) + `flushTagDenormToES()` (propagation safety net, usually no-op) |
+| `repository/.../TagDeNormAttributesUtil.java` | Removed 3 propagation-only methods (`getPropagatedAttributesForNoTags`, `getPropagatedAttributesForTags`, `updateDenormAttributesForPropagatedTags`). Added `computeAllDenormAttributes`. Direct-path methods (`getDirectTagAttachmentAttributesForAddTag/ForDeleteTag`) retained. |
 
 ### ES Partial Failure Handling
 
@@ -96,11 +104,9 @@ Call site 2: Inline per-chunk in propagation methods
 | `repository/.../TagDenormDLQProducer.java` | **New.** Kafka producer that emits `{ type: TAG_DENORM_SYNC, vertices: { vertexId: guid, ... } }` to `ATLAS_TAG_DENORM_DLQ` topic. Lazy initialization, best-effort (never fails the caller). |
 | `webapp/.../TagDenormDLQReplayService.java` | **New.** Kafka consumer that subscribes to `ATLAS_TAG_DENORM_DLQ`. For each message: reads Cassandra truth, computes full denorm, writes to ES. Configurable via `atlas.kafka.tag.denorm.dlq.*` properties. |
 
-### Dead Code Removed
+### Dead Code Removed (propagation-only methods)
 
 **TagDeNormAttributesUtil.java:**
-- `getDirectTagAttachmentAttributesForAddTag` — was used by add/update direct tag paths
-- `getDirectTagAttachmentAttributesForDeleteTag` — was used by delete direct tag paths
 - `getPropagatedAttributesForNoTags` — was used by propagation paths for empty case
 - `getPropagatedAttributesForTags` — was used by propagation paths
 - `updateDenormAttributesForPropagatedTags` — private helper for propagation
@@ -109,19 +115,13 @@ Call site 2: Inline per-chunk in propagation methods
 - `updateClassificationTextV2` (overload 1: `Collection<AtlasVertex>`) — was used by propagation add
 - `updateClassificationTextV2` (overload 2: `List<Tag>`) — was used by propagation delete/update/refresh
 
+**Retained (used by direct paths — Phase 2 migration):**
+- `getDirectTagAttachmentAttributesForAddTag` — used by add/update direct tag paths
+- `getDirectTagAttachmentAttributesForDeleteTag` — used by delete direct tag paths
+
 ## The 9 Paths — Before and After
 
-### Deferred Paths (flushed by EntityMutationService)
-
-| # | Method | Before | After |
-|---|--------|--------|-------|
-| 5 | `repairClassificationMappingsV2` | Read tags → compute denorm → `addESDeferredOperation` | `addVertexNeedingTagDenorm(vertexId, guid)` |
-| 6 | `addClassificationsV2` | Build in-memory tag list → `getDirectTagAttachmentAttributesForAddTag` → `addESDeferredOperation` | `addVertexNeedingTagDenorm(vertexId, guid)` |
-| 7 | `deleteClassificationV2` | Read tags → `getDirectTagAttachmentAttributesForDeleteTag` → `addESDeferredOperation` | `addVertexNeedingTagDenorm(vertexId, guid)` |
-| 8 | `addEsDeferredOperation` | Create dummy classification → `getDirectTagAttachmentAttributesForDeleteTag` → `addESDeferredOperation` | `addVertexNeedingTagDenorm(vertexId, guid)` |
-| 9 | `updateClassificationsV2` | Filter/replace in-memory tag list → `getDirectTagAttachmentAttributesForAddTag` → `addESDeferredOperation` | `addVertexNeedingTagDenorm(vertexId, guid)` |
-
-### Direct Paths (flushed per chunk in propagation tasks)
+### Propagation Paths — CHANGED (Phase 1, this PR)
 
 | # | Method | Before | After |
 |---|--------|--------|-------|
@@ -129,6 +129,16 @@ Call site 2: Inline per-chunk in propagation methods
 | 2 | `deleteClassificationPropagationV2` | `deletePropagations` → `updateClassificationTextV2` (overload 2) → `writeTagProperties` | `deletePropagations` → buffer vertexIds → `flushTagDenormToES()` |
 | 3 | `updateClassificationTextPropagationV2` | `putPropagatedTags` → `updateClassificationTextV2` (overload 2) → `writeTagProperties` | `putPropagatedTags` → buffer vertexIds → `flushTagDenormToES()` |
 | 4 | `processDeletions_new` | `deleteTags` → `updateClassificationTextV2` (overload 2) → `writeTagProperties` | `deleteTags` → buffer vertexIds → `flushTagDenormToES()` |
+
+### Direct Attachment Paths — UNCHANGED (Phase 2, future)
+
+| # | Method | Current (unchanged) |
+|---|--------|---------------------|
+| 5 | `repairClassificationMappingsV2` | Read tags → `getAllAttributesForAllTagsForRepair` → `addESDeferredOperation` |
+| 6 | `addClassificationsV2` | Build in-memory tag list → `getDirectTagAttachmentAttributesForAddTag` → `addESDeferredOperation` |
+| 7 | `deleteClassificationV2` | Read tags → `getDirectTagAttachmentAttributesForDeleteTag` → `addESDeferredOperation` |
+| 8 | `addEsDeferredOperation` | Create dummy classification → `getDirectTagAttachmentAttributesForDeleteTag` → `addESDeferredOperation` |
+| 9 | `updateClassificationsV2` | Filter/replace in-memory tag list → `getDirectTagAttachmentAttributesForAddTag` → `addESDeferredOperation` |
 
 **Key change for Path 1:** `putPropagatedTags` is now called BEFORE denorm computation (previously denorm was computed from in-memory state BEFORE the Cassandra write). This ensures the Cassandra read in `flushTagDenormToES` sees the committed propagated tag.
 

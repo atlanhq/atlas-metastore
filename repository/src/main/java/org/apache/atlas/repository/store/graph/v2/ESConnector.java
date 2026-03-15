@@ -192,7 +192,7 @@ public class ESConnector implements Closeable {
                 if (updateResult == null) continue;
 
                 Object statusObj = updateResult.get("status");
-                int itemStatus = statusObj instanceof Number ? ((Number) statusObj).intValue() : 200;
+                int itemStatus = statusObj instanceof Number ? ((Number) statusObj).intValue() : 500;
 
                 if (itemStatus >= 400) {
                     String docId = (String) updateResult.get("_id");

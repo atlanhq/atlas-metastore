@@ -3979,6 +3979,7 @@ public class EntityGraphMapper {
         return entity;
     }
 
+    // TODO: Migrate to buffer+flush pattern (like propagation paths) once validated in production
     public Map<String, String> repairClassificationMappingsV2(List<AtlasVertex> entityVertices) throws AtlasBaseException {
         Map<String, String> errorMap = new HashMap<>(0);
 
@@ -4269,11 +4270,10 @@ public class EntityGraphMapper {
                                 minAssetMap)
                 );
 
-                // Update ES attributes
+                // TODO: Migrate to buffer+flush pattern (like propagation paths) once validated in production
                 Map<String, Map<String, Object>> deNormMap = new HashMap<>();
                 deNormMap.put(entityVertex.getIdForDisplay(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForAddTag(classification,
                         currentTags, typeRegistry, fullTextMapperV2));
-                // ES operation collected to be executed in the end
                 RequestContext.get().addESDeferredOperation(
                         new ESDeferredOperation(
                                 ESDeferredOperation.OperationType.TAG_DENORM_FOR_ADD_CLASSIFICATIONS,
@@ -4656,7 +4656,7 @@ public class EntityGraphMapper {
                 // Write to Cassandra FIRST (reordered for read-after-write correctness)
                 tagDAO.putPropagatedTags(entityVertexId, classification.getTypeName(), assetMinAttrsMap.keySet(), assetMinAttrsMap, classification);
 
-                // Buffer for lazy denorm + flush per chunk
+                // Buffer vertex IDs for full-snapshot ES denorm, then flush per chunk
                 for (Map.Entry<String, Map<String, Object>> entry : assetMinAttrsMap.entrySet()) {
                     RequestContext.get().addVertexNeedingTagDenorm(entry.getKey(), (String) entry.getValue().get(GUID_PROPERTY_KEY));
                 }
@@ -4944,13 +4944,13 @@ public class EntityGraphMapper {
                         currentTag.getAssetMetadata())
         );
 
+        // TODO: Migrate to buffer+flush pattern (like propagation paths) once validated in production
         List<AtlasClassification> currentTags = tagDAO.getAllClassificationsForVertex(entityVertex.getIdForDisplay());
         currentTags = mapClassificationsV2(currentTags);
 
         Map<String, Map<String, Object>> deNormMap = new HashMap<>();
         deNormMap.put(entityVertex.getIdForDisplay(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForDeleteTag(currentClassification, currentTags, typeRegistry, fullTextMapperV2));
 
-        // ES operation collected to be executed in the end
         RequestContext.get().addESDeferredOperation(
                 new ESDeferredOperation(
                         ESDeferredOperation.OperationType.TAG_DENORM_FOR_DELETE_CLASSIFICATIONS,
@@ -4969,6 +4969,7 @@ public class EntityGraphMapper {
         AtlasPerfTracer.log(perf);
     }
 
+    // TODO: Migrate to buffer+flush pattern (like propagation paths) once validated in production
     private void addEsDeferredOperation(AtlasVertex entityVertex, String classificationName) throws AtlasBaseException {
         LOG.info("Adding ES deferred operation for Entity not found in cassandra. id : [{}]", entityVertex.getId());
         List<AtlasClassification> currentTags = tagDAO.getAllClassificationsForVertex(entityVertex.getIdForDisplay());
@@ -5388,10 +5389,10 @@ public class EntityGraphMapper {
                             currentTag.getAssetMetadata()
                     )
             );
+            // TODO: Migrate to buffer+flush pattern (like propagation paths) once validated in production
             Map<String, Map<String, Object>> deNormMap = new HashMap<>();
             deNormMap.put(entityVertex.getIdForDisplay(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForAddTag(classification,
                     currentTags, typeRegistry, fullTextMapperV2));
-            // ES operation collected to be executed in the end
             RequestContext.get().addESDeferredOperation(
                     new ESDeferredOperation(
                             ESDeferredOperation.OperationType.TAG_DENORM_FOR_UPDATE_CLASSIFICATIONS,
@@ -5713,7 +5714,7 @@ public class EntityGraphMapper {
                 // Delete from Cassandra. The DAO correctly performs a hard delete on the lookup table.
                 deletePropagations(batchToDelete);
 
-                // Buffer for lazy denorm + flush per chunk (delete already happened above)
+                // Buffer vertex IDs for full-snapshot ES denorm, then flush per chunk (delete already happened above)
                 bufferTagDenormForTags(batchToDelete);
                 flushTagDenormToES();
 
@@ -6796,7 +6797,7 @@ public class EntityGraphMapper {
                 // Update all propagated tags in Cassandra
                 tagDAO.putPropagatedTags(sourceEntityVertex.getIdForDisplay(), tagTypeName, new HashSet<>(vertexIds), assetMinAttrsMap, originalClassification);
 
-                // Buffer for lazy denorm + flush per chunk (update already happened above)
+                // Buffer vertex IDs for full-snapshot ES denorm, then flush per chunk (update already happened above)
                 bufferTagDenormForTags(batchToUpdate);
                 flushTagDenormToES();
 
@@ -7025,7 +7026,7 @@ public class EntityGraphMapper {
                 .map(Tag::getVertexId)
                 .toList();
 
-        // Buffer for lazy denorm + flush per chunk (delete already happened above)
+        // Buffer vertex IDs for full-snapshot ES denorm, then flush per chunk (delete already happened above)
         bufferTagDenormForTags(tagsToDelete);
         flushTagDenormToES();
 
