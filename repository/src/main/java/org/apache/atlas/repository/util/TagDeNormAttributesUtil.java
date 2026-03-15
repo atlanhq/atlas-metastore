@@ -2,15 +2,14 @@ package org.apache.atlas.repository.util;
 
 import joptsimple.internal.Strings;
 import org.apache.atlas.AtlasErrorCode;
-import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.atlas.model.Tag;
 import org.apache.atlas.model.instance.AtlasClassification;
 import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.repository.graph.IFullTextMapper;
-import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
 import org.apache.atlas.type.AtlasClassificationType;
 import org.apache.atlas.type.AtlasTypeRegistry;
-import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -101,34 +100,6 @@ public class TagDeNormAttributesUtil {
         return deNormAttrs;
     }
 
-    public static Map<String, Object> getPropagatedAttributesForNoTags() {
-        // Add tag Propagation, asset does not have any other tag
-
-        Map<String, Object> deNormAttrs = new HashMap<>();
-
-        deNormAttrs.put(CLASSIFICATION_TEXT_KEY, FULL_TEXT_DELIMITER);
-        deNormAttrs.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, List.of());
-        deNormAttrs.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, CLASSIFICATION_NAME_DELIMITER);
-
-        return deNormAttrs;
-    }
-
-    public static Map<String, Object> getPropagatedAttributesForTags(AtlasClassification propagatedTag,
-                                                                     List<AtlasClassification> finalTags,
-                                                                     List<AtlasClassification> finalPropagatedTags,
-                                                                     AtlasTypeRegistry typeRegistry,
-                                                                     IFullTextMapper fullTextMapperV2,
-                                                                     boolean isDelete) throws AtlasBaseException {
-        Map<String, Object> deNormAttrs = new HashMap<>();
-
-        if (CollectionUtils.isNotEmpty(finalTags))
-            deNormAttrs.put(CLASSIFICATION_TEXT_KEY, getClassificationTextKey(finalTags, typeRegistry, fullTextMapperV2));
-
-        updateDenormAttributesForPropagatedTags(propagatedTag, finalPropagatedTags, deNormAttrs, isDelete);
-
-        return deNormAttrs;
-    }
-
     public static Map<String, Object> getAllAttributesForAllTagsForRepair(String sourceAssetGuid,
                                                                         List<AtlasClassification> currentTags,
                                                                         AtlasTypeRegistry typeRegistry,
@@ -180,35 +151,60 @@ public class TagDeNormAttributesUtil {
         return deNormAttrs;
     }
 
-    private static void updateDenormAttributesForPropagatedTags(AtlasClassification propagatedTag,
-                                                                  List<AtlasClassification> finalPropagatedTags,
-                                                                  Map<String, Object> deNormAttrs,
-                                                                  boolean isDelete) {
-        List<String> propTraits = finalPropagatedTags.stream()
-                .map(AtlasStruct::getTypeName)
-                .collect(Collectors.toList());
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-        if (CollectionUtils.isNotEmpty(propTraits)) {
-            deNormAttrs.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, propTraits);
+    /**
+     * Computes all 5 denorm attributes from Tag objects read directly from Cassandra.
+     * Uses Tag.isPropagated() to determine direct vs propagated.
+     */
+    public static Map<String, Object> computeAllDenormAttributes(List<Tag> tags,
+                                                                AtlasTypeRegistry typeRegistry,
+                                                                IFullTextMapper fullTextMapperV2) throws AtlasBaseException {
+        Map<String, Object> deNormAttrs = new HashMap<>();
 
-            StringBuilder finalTagNames = new StringBuilder();
-            propTraits.forEach(tagName -> finalTagNames.append(CLASSIFICATION_NAME_DELIMITER).append(tagName));
+        String classificationTextKey = Strings.EMPTY;
+        String classificationNamesKey = Strings.EMPTY;
+        String propagatedClassificationNamesKey = Strings.EMPTY;
 
-            deNormAttrs.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, finalTagNames.toString());
-        } else {
-            if (isDelete) {
-                // MS-655: During delete propagation, no remaining propagated tags means
-                // __propagatedTraitNames should be empty. Previously this branch incorrectly
-                // wrote the deleted tag name back into ES.
-                //TO DO: We will do a larger ES sync design change in future to avoid calculating de-norm attributes
-                // but directly sync latest state from cassandra for the asset.
-                deNormAttrs.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, Collections.emptyList());
-                deNormAttrs.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, CLASSIFICATION_NAME_DELIMITER);
-            } else {
-                deNormAttrs.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, Collections.singletonList(propagatedTag.getTypeName()));
-                deNormAttrs.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, CLASSIFICATION_NAME_DELIMITER + propagatedTag.getTypeName());
+        List<String> traitNames = Collections.EMPTY_LIST;
+        List<String> propagatedTraitNames = Collections.EMPTY_LIST;
+
+        if (CollectionUtils.isNotEmpty(tags)) {
+            traitNames = new ArrayList<>();
+            propagatedTraitNames = new ArrayList<>();
+            List<AtlasClassification> allClassifications = new ArrayList<>(tags.size());
+
+            for (Tag tag : tags) {
+                AtlasClassification classification = OBJECT_MAPPER.convertValue(tag.getTagMetaJson(), AtlasClassification.class);
+                allClassifications.add(classification);
+
+                if (tag.isPropagated()) {
+                    propagatedTraitNames.add(tag.getTagTypeName());
+                } else {
+                    traitNames.add(tag.getTagTypeName());
+                }
+            }
+
+            classificationTextKey = getClassificationTextKey(allClassifications, typeRegistry, fullTextMapperV2);
+
+            if (!traitNames.isEmpty()) {
+                classificationNamesKey = getDelimitedClassificationNames(traitNames);
+            }
+
+            if (!propagatedTraitNames.isEmpty()) {
+                StringBuilder sb = new StringBuilder();
+                propagatedTraitNames.forEach(tagName -> sb.append(CLASSIFICATION_NAME_DELIMITER).append(tagName));
+                propagatedClassificationNamesKey = sb.toString();
             }
         }
+
+        deNormAttrs.put(CLASSIFICATION_TEXT_KEY, classificationTextKey);
+        deNormAttrs.put(TRAIT_NAMES_PROPERTY_KEY, traitNames);
+        deNormAttrs.put(CLASSIFICATION_NAMES_KEY, classificationNamesKey);
+        deNormAttrs.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, propagatedTraitNames);
+        deNormAttrs.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, propagatedClassificationNamesKey);
+
+        return deNormAttrs;
     }
 
     private static String getClassificationTextKey(List<AtlasClassification> tags, AtlasTypeRegistry typeRegistry, IFullTextMapper fullTextMapperV2) throws AtlasBaseException {
@@ -226,7 +222,11 @@ public class TagDeNormAttributesUtil {
             final AtlasClassificationType classificationType = typeRegistry.getClassificationTypeByName(currentTag.getTypeName());
 
             sb.append(currentTag.getTypeName()).append(FULL_TEXT_DELIMITER);
-            fullTextMapperV2.mapAttributes(classificationType, currentTag.getAttributes(), null, sb, null, new HashSet<>(), true);
+            if (classificationType != null) {
+                fullTextMapperV2.mapAttributes(classificationType, currentTag.getAttributes(), null, sb, null, new HashSet<>(), true);
+            } else {
+                LOG.warn("Classification type not found in registry: {}. Skipping attribute mapping.", currentTag.getTypeName());
+            }
         }
 
         return sb.toString();
