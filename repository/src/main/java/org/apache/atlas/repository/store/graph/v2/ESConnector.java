@@ -75,31 +75,27 @@ public class ESConnector implements Closeable {
     }
 
     public static void writeTagProperties(Map<String, Map<String, Object>> entitiesMap) {
-        writeTagProperties(entitiesMap, false);
+        writeTagPropertiesWithResult(entitiesMap, false);
+    }
+
+    public static void writeTagProperties(Map<String, Map<String, Object>> entitiesMap, boolean upsert) {
+        writeTagPropertiesWithResult(entitiesMap, upsert);
     }
 
     /**
-     * Updates and writes tag properties for multiple entities to Elasticsearch index.
-     *
-     * This method processes the provided entities map to prepare an Elasticsearch bulk
-     * request for updating tag properties and denormalized attributes. The modifications
-     * include attributes specified in the {@code DENORM_ATTRS} field and a modification
-     * timestamp. The bulk request is then executed using a low-level client.
-     *
-     * @param entitiesMap A map where the keys represent the entity vertex IDs (as strings),
-     *                    and the values are maps containing the attributes to be updated
-     *                    for each entity.
-     * @param upsert A boolean flag that indicates whether the update operation should upsert
-     *               (create new doc if not found) the document in the Elasticsearch index.
+     * Updates tag properties in ES and returns detailed result with success/failure per doc.
+     * Parses the ES bulk response to detect partial failures.
      */
-    public static void writeTagProperties(Map<String, Map<String, Object>> entitiesMap, boolean upsert) {
+    public static TagDenormESWriteResult writeTagPropertiesWithResult(Map<String, Map<String, Object>> entitiesMap, boolean upsert) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("writeTagPropertiesES");
 
         try {
             if (MapUtils.isEmpty(entitiesMap))
-                return;
+                return TagDenormESWriteResult.allSuccess(0);
 
             StringBuilder bulkRequestBody = new StringBuilder();
+            // Track docId → vertexId mapping for failure reporting
+            Map<String, String> docIdToVertexId = new LinkedHashMap<>();
 
             for (String assetVertexId : entitiesMap.keySet()) {
                 Map<String, Object> entry = entitiesMap.get(assetVertexId);
@@ -109,6 +105,8 @@ public class ESConnector implements Closeable {
 
                 long vertexId = Long.parseLong(assetVertexId);
                 String docId = LongEncoding.encode(vertexId);
+                docIdToVertexId.put(docId, assetVertexId);
+
                 bulkRequestBody.append("{\"update\":{\"_index\":\"janusgraph_vertex_index\",\"_id\":\"").append(docId).append("\" }}\n");
 
                 bulkRequestBody.append("{");
@@ -126,24 +124,20 @@ public class ESConnector implements Closeable {
             request.setEntity(new StringEntity(bulkRequestBody.toString(), ContentType.APPLICATION_JSON));
 
             int maxRetries = AtlasConfiguration.ES_MAX_RETRIES.getInt();
-            long retryDelay = AtlasConfiguration.ES_RETRY_DELAY_MS.getLong();
             long initialRetryDelay = AtlasConfiguration.ES_RETRY_DELAY_MS.getLong();
 
             for (int retryCount = 0; retryCount < maxRetries; retryCount++) {
                 try {
-                    Response response = lowLevelClient.performRequest(request); // Capture the response
+                    Response response = lowLevelClient.performRequest(request);
                     int statusCode = response.getStatusLine().getStatusCode();
 
                     if (statusCode >= 200 && statusCode < 300) {
-                        // Check response body for partial failures if necessary
-                        return; // Success
+                        return parseBulkResponse(response, docIdToVertexId, entitiesMap.size());
                     }
 
-                    // Add logic to retry on 5xx or throw on 4xx
                     if (statusCode >= 500) {
                         LOG.warn("Failed to update ES doc due to server error ({}). Retrying...", statusCode);
                     } else {
-                        // Not a retryable error
                         String responseBody = EntityUtils.toString(response.getEntity());
                         throw new RuntimeException("Failed to update ES doc. Status: " + statusCode + ", Body: " + responseBody);
                     }
@@ -161,10 +155,64 @@ public class ESConnector implements Closeable {
                     }
                 }
             }
-            // If the loop completes, all retries have failed. Throw an exception.
-            throw new RuntimeException("Failed to update ES doc for denorm attributes after " + maxRetries + " retries");
+
+            // All retries exhausted — all docs failed
+            LOG.error("Failed to update ES docs for denorm attributes after {} retries. Marking all {} docs as failed.", maxRetries, entitiesMap.size());
+            return TagDenormESWriteResult.allFailed(entitiesMap.keySet());
         } finally {
             RequestContext.get().endMetricRecord(recorder);
+        }
+    }
+
+    /**
+     * Parses ES bulk response to detect partial failures.
+     * Returns a result indicating which docs succeeded and which failed.
+     */
+    @SuppressWarnings("unchecked")
+    private static TagDenormESWriteResult parseBulkResponse(Response response, Map<String, String> docIdToVertexId, int totalDocs) {
+        try {
+            String responseBody = EntityUtils.toString(response.getEntity());
+            Map<String, Object> bulkResponse = AtlasType.fromJson(responseBody, Map.class);
+
+            Boolean hasErrors = (Boolean) bulkResponse.get("errors");
+            if (hasErrors == null || !hasErrors) {
+                return TagDenormESWriteResult.allSuccess(totalDocs);
+            }
+
+            // Parse individual item results to find failures
+            List<Map<String, Object>> items = (List<Map<String, Object>>) bulkResponse.get("items");
+            if (items == null) {
+                LOG.warn("ES bulk response has errors=true but no items array");
+                return TagDenormESWriteResult.allSuccess(totalDocs);
+            }
+
+            List<String> failedVertexIds = new ArrayList<>();
+            for (Map<String, Object> item : items) {
+                Map<String, Object> updateResult = (Map<String, Object>) item.get("update");
+                if (updateResult == null) continue;
+
+                Object statusObj = updateResult.get("status");
+                int itemStatus = statusObj instanceof Number ? ((Number) statusObj).intValue() : 500;
+
+                if (itemStatus >= 400) {
+                    String docId = (String) updateResult.get("_id");
+                    String vertexId = docIdToVertexId.get(docId);
+                    if (vertexId != null) {
+                        failedVertexIds.add(vertexId);
+                    }
+                    LOG.warn("ES bulk update failed for docId={}, vertexId={}, status={}, error={}",
+                            docId, vertexId, itemStatus, updateResult.get("error"));
+                }
+            }
+
+            int successCount = totalDocs - failedVertexIds.size();
+            if (!failedVertexIds.isEmpty()) {
+                LOG.warn("ES bulk write: {}/{} docs succeeded, {} failed", successCount, totalDocs, failedVertexIds.size());
+            }
+            return new TagDenormESWriteResult(successCount, failedVertexIds);
+        } catch (Exception e) {
+            LOG.warn("Failed to parse ES bulk response, treating as all failed for safety", e);
+            return TagDenormESWriteResult.allFailed(docIdToVertexId.values());
         }
     }
 
@@ -173,5 +221,30 @@ public class ESConnector implements Closeable {
         if (lowLevelClient != null) {
             lowLevelClient.close();
         }
+    }
+
+    /**
+     * Result of a bulk ES write operation for tag denorm attributes.
+     */
+    public static class TagDenormESWriteResult {
+        private final int successCount;
+        private final List<String> failedVertexIds;
+
+        public TagDenormESWriteResult(int successCount, List<String> failedVertexIds) {
+            this.successCount = successCount;
+            this.failedVertexIds = failedVertexIds;
+        }
+
+        public static TagDenormESWriteResult allSuccess(int count) {
+            return new TagDenormESWriteResult(count, Collections.emptyList());
+        }
+
+        public static TagDenormESWriteResult allFailed(Collection<String> vertexIds) {
+            return new TagDenormESWriteResult(0, new ArrayList<>(vertexIds));
+        }
+
+        public int getSuccessCount()          { return successCount; }
+        public List<String> getFailedVertexIds() { return failedVertexIds; }
+        public boolean hasFailures()           { return !failedVertexIds.isEmpty(); }
     }
 }
