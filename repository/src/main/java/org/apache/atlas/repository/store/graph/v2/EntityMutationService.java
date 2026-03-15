@@ -351,6 +351,7 @@ public class EntityMutationService {
                     throw e;
                 } finally {
                     executeESPostProcessing(isGraphTransactionFailed);
+                    RequestContext.get().getESDeferredOperations().clear();
                 }
 
             } else {
@@ -395,6 +396,15 @@ public class EntityMutationService {
 
     private void executeESPostProcessing(boolean isGraphTransactionFailed) {
         if (!isGraphTransactionFailed) {
+            // Process deferred operations from direct tag paths (add/delete/update classifications)
+            if (!RequestContext.get().getESDeferredOperations().isEmpty()) {
+                try {
+                    entityMutationPostProcessor.executeESOperations(RequestContext.get().getESDeferredOperations());
+                } catch (Exception e) {
+                    LOG.error("Failed to execute ES deferred operations", e);
+                }
+            }
+            // Flush any remaining buffered propagation denorms (no-op when buffer is empty)
             try {
                 entityGraphMapper.flushTagDenormToES();
             } catch (Exception e) {

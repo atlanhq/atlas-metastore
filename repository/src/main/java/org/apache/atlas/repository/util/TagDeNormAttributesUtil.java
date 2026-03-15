@@ -6,6 +6,7 @@ import org.apache.atlas.exception.AtlasBaseException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.model.Tag;
 import org.apache.atlas.model.instance.AtlasClassification;
+import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.repository.graph.IFullTextMapper;
 import org.apache.atlas.type.AtlasClassificationType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -19,6 +20,8 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 import static org.apache.atlas.repository.Constants.CLASSIFICATION_NAMES_KEY;
 import static org.apache.atlas.repository.Constants.CLASSIFICATION_NAME_DELIMITER;
@@ -32,6 +35,70 @@ import static org.apache.atlas.repository.graph.GraphHelper.getDelimitedClassifi
 public class TagDeNormAttributesUtil {
 
     private static final Logger LOG = LoggerFactory.getLogger(TagDeNormAttributesUtil.class);
+
+    public static Map<String, Object> getDirectTagAttachmentAttributesForAddTag(AtlasClassification tagAdded,
+                                                                                List<AtlasClassification> currentTags,
+                                                                                AtlasTypeRegistry typeRegistry,
+                                                                                IFullTextMapper fullTextMapperV2) throws AtlasBaseException {
+        // Add direct Tag
+        Map<String, Object> deNormAttrs = new HashMap<>();
+
+        deNormAttrs.put(CLASSIFICATION_TEXT_KEY, getClassificationTextKey(currentTags, typeRegistry, fullTextMapperV2));
+
+        if (currentTags.size() == 1) {
+            deNormAttrs.put(CLASSIFICATION_NAMES_KEY, getDelimitedClassificationNames(Collections.singletonList(tagAdded.getTypeName())));
+            deNormAttrs.put(TRAIT_NAMES_PROPERTY_KEY, Collections.singletonList(tagAdded.getTypeName()));
+
+        } else {
+            //filter direct attachments
+            List<String> directTraits = currentTags.stream()
+                    .filter(tag -> tagAdded.getEntityGuid().equals(tag.getEntityGuid()))
+                    .map(AtlasStruct::getTypeName)
+                    .collect(Collectors.toList());
+            deNormAttrs.put(CLASSIFICATION_NAMES_KEY, getDelimitedClassificationNames(directTraits));
+
+            deNormAttrs.put(TRAIT_NAMES_PROPERTY_KEY, directTraits);
+        }
+
+        return deNormAttrs;
+    }
+
+    public static Map<String, Object> getDirectTagAttachmentAttributesForDeleteTag(AtlasClassification tagDeleted,
+                                                                                List<AtlasClassification> currentTags,
+                                                                                AtlasTypeRegistry typeRegistry,
+                                                                                IFullTextMapper fullTextMapperV2) throws AtlasBaseException {
+        // Delete direct Tag
+        Map<String, Object> deNormAttrs = new HashMap<>();
+
+        if (CollectionUtils.isEmpty(currentTags)) {
+            deNormAttrs.put(CLASSIFICATION_NAMES_KEY, Strings.EMPTY);
+            deNormAttrs.put(CLASSIFICATION_TEXT_KEY, Strings.EMPTY);
+            deNormAttrs.put(TRAIT_NAMES_PROPERTY_KEY, Collections.EMPTY_LIST);
+
+        } else {
+            // Filtering by both typeName and entityGuid ensures we never include the deleted tag in ES updates.
+            String deletedTagTypeName = tagDeleted.getTypeName();
+            String deletedTagEntityGuid = tagDeleted.getEntityGuid();
+
+            List<AtlasClassification> remainingTags = currentTags.stream()
+                    .filter(tag -> !(Objects.equals(deletedTagTypeName, tag.getTypeName()) &&
+                                     Objects.equals(deletedTagEntityGuid, tag.getEntityGuid())))
+                    .collect(Collectors.toList());
+
+            deNormAttrs.put(CLASSIFICATION_TEXT_KEY, getClassificationTextKey(remainingTags, typeRegistry, fullTextMapperV2));
+
+            //filter direct attachments
+            List<String> directTraits = remainingTags.stream()
+                    .filter(tag -> Objects.equals(deletedTagEntityGuid, tag.getEntityGuid()))
+                    .map(AtlasStruct::getTypeName)
+                    .collect(Collectors.toList());
+            deNormAttrs.put(CLASSIFICATION_NAMES_KEY, getDelimitedClassificationNames(directTraits));
+
+            deNormAttrs.put(TRAIT_NAMES_PROPERTY_KEY, directTraits);
+        }
+
+        return deNormAttrs;
+    }
 
     public static Map<String, Object> getAllAttributesForAllTagsForRepair(String sourceAssetGuid,
                                                                         List<AtlasClassification> currentTags,
