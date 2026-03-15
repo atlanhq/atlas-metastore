@@ -4,6 +4,7 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.Tag;
 import org.apache.atlas.model.instance.AtlasClassification;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -53,5 +54,15 @@ public interface TagDAO {
                                                                        String pagingStateStr, int pageSize) throws AtlasBaseException;
 
     PaginatedVertexIdResult getVertexIdFromTagsByIdTableWithPagination(String pagingStateStr, int pageSize) throws AtlasBaseException;
+
+    /**
+     * Batch-reads all tags for multiple vertex IDs in parallel using async queries.
+     * Avoids N sequential point reads when reconciling denorm attributes for a batch.
+     *
+     * @param vertexIds The vertex IDs to fetch tags for
+     * @return A map from vertexId to its list of non-deleted Tag objects
+     * @throws AtlasBaseException If an error occurs during retrieval
+     */
+    Map<String, List<Tag>> getAllTagsByVertexIds(Collection<String> vertexIds) throws AtlasBaseException;
 }
 
