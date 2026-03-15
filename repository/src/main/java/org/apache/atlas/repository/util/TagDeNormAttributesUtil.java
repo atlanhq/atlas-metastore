@@ -164,7 +164,7 @@ public class TagDeNormAttributesUtil {
      * @param fullTextMapperV2 The full text mapper for classification text computation
      * @return A map of all 5 denorm attributes
      */
-    public static Map<String, Object> reconcileDenormAttributes(List<Tag> tags,
+    public static Map<String, Object> computeAllDenormAttributes(List<Tag> tags,
                                                                 AtlasTypeRegistry typeRegistry,
                                                                 IFullTextMapper fullTextMapperV2) throws AtlasBaseException {
         Map<String, Object> deNormAttrs = new HashMap<>();

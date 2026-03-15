@@ -41,6 +41,10 @@ public class TagDenormDLQProducer {
     private volatile KafkaProducer<String, String> producer;
     private String topic;
 
+    public TagDenormDLQProducer() {
+        // Default constructor for Spring and testability
+    }
+
     public void init() {
         try {
             Configuration appConfig = ApplicationProperties.get();

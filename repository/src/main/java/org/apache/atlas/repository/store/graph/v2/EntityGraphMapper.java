@@ -4011,100 +4011,6 @@ public class EntityGraphMapper {
         return errorMap;
     }
 
-    /**
-     * Flushes all buffered tag denorm updates to ES.
-     * Reads ALL tags from Cassandra for each collected vertex,
-     * computes ALL 5 denorm fields, batch-writes to ES.
-     * Clears the buffer after successful write.
-     *
-     * @return result with success count and any failed vertex IDs
-     */
-    public ESConnector.TagDenormESWriteResult flushTagDenormToES() throws AtlasBaseException {
-        Map<String, String> vertexIdToGuidMap = RequestContext.get().getVerticesNeedingTagDenorm();
-        if (MapUtils.isEmpty(vertexIdToGuidMap)) {
-            return ESConnector.TagDenormESWriteResult.allSuccess(0);
-        }
-
-        // Snapshot the map before clearing (needed for DLQ GUID mapping on failure)
-        Map<String, String> snapshotMap = new HashMap<>(vertexIdToGuidMap);
-
-        try {
-            // Batch async read from Cassandra — fires all queries in parallel
-            Map<String, List<Tag>> allTagsByVertex = tagDAO.getAllTagsByVertexIds(snapshotMap.keySet());
-
-            // Compute denorm using Tag.isPropagated() (more reliable than entityGuid comparison)
-            Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-            for (String vertexId : snapshotMap.keySet()) {
-                List<Tag> tags = allTagsByVertex.getOrDefault(vertexId, Collections.emptyList());
-                deNormMap.put(vertexId, TagDeNormAttributesUtil.reconcileDenormAttributes(tags, typeRegistry, fullTextMapperV2));
-            }
-
-            // Populate ESDeferredOperations so EntityNotificationListenerV2 can merge
-            // denorm attrs into notification payloads (backward compat)
-            for (Map.Entry<String, Map<String, Object>> entry : deNormMap.entrySet()) {
-                Map<String, Map<String, Object>> payload = new HashMap<>();
-                payload.put(entry.getKey(), entry.getValue());
-                RequestContext.get().addESDeferredOperation(
-                        new ESDeferredOperation(ESDeferredOperation.OperationType.TAG_DENORM_FOR_ADD_CLASSIFICATIONS,
-                                entry.getKey(), payload));
-            }
-
-            ESConnector.TagDenormESWriteResult result;
-            if (MapUtils.isNotEmpty(deNormMap)) {
-                result = ESConnector.writeTagPropertiesWithResult(deNormMap, false);
-            } else {
-                result = ESConnector.TagDenormESWriteResult.allSuccess(0);
-            }
-
-            // Accumulate counts for task-level observability
-            RequestContext.get().addTagDenormEsSuccessCount(result.getSuccessCount());
-            if (result.hasFailures()) {
-                RequestContext.get().addTagDenormEsFailureCount(result.getFailedVertexIds().size());
-                // Emit partially failed vertex IDs + GUIDs to DLQ for later repair
-                tagDenormDLQProducer.emitFailedVertices(result.getFailedVertexIds(), snapshotMap);
-            }
-
-            return result;
-        } catch (Exception e) {
-            // Total failure (Cassandra read failed, or ES completely down, or unexpected error).
-            // Emit ALL buffered vertex IDs to DLQ so they can be repaired later.
-            LOG.error("flushTagDenormToES failed for {} vertices, emitting all to DLQ", snapshotMap.size(), e);
-            try {
-                tagDenormDLQProducer.emitFailedVertices(new ArrayList<>(snapshotMap.keySet()), snapshotMap);
-            } catch (Exception dlqError) {
-                LOG.error("Failed to emit to DLQ as well. Vertices needing repair: {}", snapshotMap.keySet(), dlqError);
-            }
-            RequestContext.get().addTagDenormEsFailureCount(snapshotMap.size());
-            return ESConnector.TagDenormESWriteResult.allFailed(snapshotMap.keySet());
-        } finally {
-            // Always clear the buffer, even on exception (idempotent — DLQ handles recovery)
-            RequestContext.get().clearVerticesNeedingTagDenorm();
-        }
-    }
-
-    /**
-     * Buffers tag denorm updates for a batch of Tags, using assetMetadata for GUID with graph fallback.
-     */
-    private void bufferTagDenormForTags(List<Tag> tags) {
-        for (Tag tag : tags) {
-            String guid = null;
-            if (tag.getAssetMetadata() != null) {
-                guid = (String) tag.getAssetMetadata().get(GUID_PROPERTY_KEY);
-            }
-            if (guid == null) {
-                AtlasVertex vertex = graph.getVertex(tag.getVertexId());
-                if (vertex != null) {
-                    guid = GraphHelper.getGuid(vertex);
-                }
-            }
-            if (guid != null) {
-                RequestContext.get().addVertexNeedingTagDenorm(tag.getVertexId(), guid);
-            } else {
-                LOG.warn("Could not resolve GUID for vertexId={}, skipping denorm", tag.getVertexId());
-            }
-        }
-    }
-
     public void addClassificationsV1(final EntityMutationContext context, String guid, List<AtlasClassification> classifications) throws AtlasBaseException {
         if (CollectionUtils.isNotEmpty(classifications)) {
             MetricRecorder metric = RequestContext.get().startMetricRecord("addClassifications");
@@ -6322,6 +6228,100 @@ public class EntityGraphMapper {
 
         RequestContext.get().endMetricRecord(metricRecorder);
         return propagatedEntities;
+    }
+
+    /**
+     * Flushes all buffered tag denorm updates to ES.
+     * Reads ALL tags from Cassandra for each collected vertex,
+     * computes ALL 5 denorm fields, batch-writes to ES.
+     * Clears the buffer after successful write.
+     *
+     * @return result with success count and any failed vertex IDs
+     */
+    public ESConnector.TagDenormESWriteResult flushTagDenormToES() throws AtlasBaseException {
+        Map<String, String> vertexIdToGuidMap = RequestContext.get().getVerticesNeedingTagDenorm();
+        if (MapUtils.isEmpty(vertexIdToGuidMap)) {
+            return ESConnector.TagDenormESWriteResult.allSuccess(0);
+        }
+
+        // Snapshot the map before clearing (needed for DLQ GUID mapping on failure)
+        Map<String, String> snapshotMap = new HashMap<>(vertexIdToGuidMap);
+
+        try {
+            // Batch async read from Cassandra — fires all queries in parallel
+            Map<String, List<Tag>> allTagsByVertex = tagDAO.getAllTagsByVertexIds(snapshotMap.keySet());
+
+            // Compute denorm using Tag.isPropagated() (more reliable than entityGuid comparison)
+            Map<String, Map<String, Object>> deNormMap = new HashMap<>();
+            for (String vertexId : snapshotMap.keySet()) {
+                List<Tag> tags = allTagsByVertex.getOrDefault(vertexId, Collections.emptyList());
+                deNormMap.put(vertexId, TagDeNormAttributesUtil.computeAllDenormAttributes(tags, typeRegistry, fullTextMapperV2));
+            }
+
+            // Populate ESDeferredOperations so EntityNotificationListenerV2 can merge
+            // denorm attrs into notification payloads (backward compat)
+            for (Map.Entry<String, Map<String, Object>> entry : deNormMap.entrySet()) {
+                Map<String, Map<String, Object>> payload = new HashMap<>();
+                payload.put(entry.getKey(), entry.getValue());
+                RequestContext.get().addESDeferredOperation(
+                        new ESDeferredOperation(ESDeferredOperation.OperationType.TAG_DENORM_FOR_ADD_CLASSIFICATIONS,
+                                entry.getKey(), payload));
+            }
+
+            ESConnector.TagDenormESWriteResult result;
+            if (MapUtils.isNotEmpty(deNormMap)) {
+                result = ESConnector.writeTagPropertiesWithResult(deNormMap, false);
+            } else {
+                result = ESConnector.TagDenormESWriteResult.allSuccess(0);
+            }
+
+            // Accumulate counts for task-level observability
+            RequestContext.get().addTagDenormEsSuccessCount(result.getSuccessCount());
+            if (result.hasFailures()) {
+                RequestContext.get().addTagDenormEsFailureCount(result.getFailedVertexIds().size());
+                // Emit partially failed vertex IDs + GUIDs to DLQ for later repair
+                tagDenormDLQProducer.emitFailedVertices(result.getFailedVertexIds(), snapshotMap);
+            }
+
+            return result;
+        } catch (Exception e) {
+            // Total failure (Cassandra read failed, or ES completely down, or unexpected error).
+            // Emit ALL buffered vertex IDs to DLQ so they can be repaired later.
+            LOG.error("flushTagDenormToES failed for {} vertices, emitting all to DLQ", snapshotMap.size(), e);
+            try {
+                tagDenormDLQProducer.emitFailedVertices(new ArrayList<>(snapshotMap.keySet()), snapshotMap);
+            } catch (Exception dlqError) {
+                LOG.error("Failed to emit to DLQ as well. Vertices needing repair: {}", snapshotMap.keySet(), dlqError);
+            }
+            RequestContext.get().addTagDenormEsFailureCount(snapshotMap.size());
+            return ESConnector.TagDenormESWriteResult.allFailed(snapshotMap.keySet());
+        } finally {
+            // Always clear the buffer, even on exception (idempotent — DLQ handles recovery)
+            RequestContext.get().clearVerticesNeedingTagDenorm();
+        }
+    }
+
+    /**
+     * Buffers tag denorm updates for a batch of Tags, using assetMetadata for GUID with graph fallback.
+     */
+    private void bufferTagDenormForTags(List<Tag> tags) {
+        for (Tag tag : tags) {
+            String guid = null;
+            if (tag.getAssetMetadata() != null) {
+                guid = (String) tag.getAssetMetadata().get(GUID_PROPERTY_KEY);
+            }
+            if (guid == null) {
+                AtlasVertex vertex = graph.getVertex(tag.getVertexId());
+                if (vertex != null) {
+                    guid = GraphHelper.getGuid(vertex);
+                }
+            }
+            if (guid != null) {
+                RequestContext.get().addVertexNeedingTagDenorm(tag.getVertexId(), guid);
+            } else {
+                LOG.warn("Could not resolve GUID for vertexId={}, skipping denorm", tag.getVertexId());
+            }
+        }
     }
 
     private void updateLabels(AtlasVertex vertex, Set<String> labels) {

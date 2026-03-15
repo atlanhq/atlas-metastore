@@ -83,31 +83,6 @@ public class ESConnector implements Closeable {
     }
 
     /**
-     * Result of a bulk ES write operation for tag denorm attributes.
-     */
-    public static class TagDenormESWriteResult {
-        private final int successCount;
-        private final List<String> failedVertexIds;
-
-        public TagDenormESWriteResult(int successCount, List<String> failedVertexIds) {
-            this.successCount = successCount;
-            this.failedVertexIds = failedVertexIds;
-        }
-
-        public static TagDenormESWriteResult allSuccess(int count) {
-            return new TagDenormESWriteResult(count, Collections.emptyList());
-        }
-
-        public static TagDenormESWriteResult allFailed(Collection<String> vertexIds) {
-            return new TagDenormESWriteResult(0, new ArrayList<>(vertexIds));
-        }
-
-        public int getSuccessCount()          { return successCount; }
-        public List<String> getFailedVertexIds() { return failedVertexIds; }
-        public boolean hasFailures()           { return !failedVertexIds.isEmpty(); }
-    }
-
-    /**
      * Updates tag properties in ES and returns detailed result with success/failure per doc.
      * Parses the ES bulk response to detect partial failures.
      */
@@ -236,8 +211,8 @@ public class ESConnector implements Closeable {
             }
             return new TagDenormESWriteResult(successCount, failedVertexIds);
         } catch (Exception e) {
-            LOG.warn("Failed to parse ES bulk response, assuming all succeeded", e);
-            return TagDenormESWriteResult.allSuccess(totalDocs);
+            LOG.warn("Failed to parse ES bulk response, treating as all failed for safety", e);
+            return TagDenormESWriteResult.allFailed(docIdToVertexId.values());
         }
     }
 
@@ -246,5 +221,30 @@ public class ESConnector implements Closeable {
         if (lowLevelClient != null) {
             lowLevelClient.close();
         }
+    }
+
+    /**
+     * Result of a bulk ES write operation for tag denorm attributes.
+     */
+    public static class TagDenormESWriteResult {
+        private final int successCount;
+        private final List<String> failedVertexIds;
+
+        public TagDenormESWriteResult(int successCount, List<String> failedVertexIds) {
+            this.successCount = successCount;
+            this.failedVertexIds = failedVertexIds;
+        }
+
+        public static TagDenormESWriteResult allSuccess(int count) {
+            return new TagDenormESWriteResult(count, Collections.emptyList());
+        }
+
+        public static TagDenormESWriteResult allFailed(Collection<String> vertexIds) {
+            return new TagDenormESWriteResult(0, new ArrayList<>(vertexIds));
+        }
+
+        public int getSuccessCount()          { return successCount; }
+        public List<String> getFailedVertexIds() { return failedVertexIds; }
+        public boolean hasFailures()           { return !failedVertexIds.isEmpty(); }
     }
 }
