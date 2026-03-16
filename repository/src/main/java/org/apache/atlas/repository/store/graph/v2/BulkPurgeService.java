@@ -94,7 +94,7 @@ public class BulkPurgeService {
     private static final int    HEARTBEAT_INTERVAL_MS           = 30_000;
     private static final int    SCROLL_TIMEOUT_MINUTES          = 30;
     private static final long   STALL_THRESHOLD_MS              = 900_000; // 15 minutes
-    private static final int    INCREMENTAL_ES_CLEANUP_INTERVAL = 500;
+    private static final long   ES_SETTLE_WAIT_MS               = 5_000;  // wait for JanusGraph index mutations to propagate
     private static final long   ORPHAN_CHECK_INTERVAL_MS        = 300_000;
     private static final int    ORPHAN_MAX_RESUBMITS            = 3;
 
@@ -531,18 +531,21 @@ public class BulkPurgeService {
             } else {
                 long phaseStart = System.currentTimeMillis();
 
-                ctx.currentPhase = "ES_CLEANUP";
+                ctx.currentPhase = "ES_RECONCILIATION";
                 writeRedisStatus(ctx);
 
-                // Retry ES cleanup up to 3 times if entities remain after delete_by_query.
-                // The first attempt may fail due to transient ES issues (circuit breaker,
-                // concurrent load, shard relocation) — the exception is caught inside esCleanup().
-                int esCleanupMaxRetries = 3;
+                // Reconciliation-based ES cleanup:
+                // 1. Wait for JanusGraph's ES index mutations to settle
+                // 2. Scroll any remaining ES docs and check each against JanusGraph
+                // 3. If vertex is gone from graph → delete ES doc (index lag orphan)
+                // 4. If vertex still exists → retry graph deletion, then delete ES doc
+                // This ensures a clean final state: no orphans on either side.
+                int esReconcileMaxRetries = 3;
                 long remainingAfterEsCleanup = -1;
-                for (int esAttempt = 1; esAttempt <= esCleanupMaxRetries; esAttempt++) {
-                    esCleanup(ctx);
-                    LOG.info("BulkPurge: ES cleanup attempt {}/{} completed in {}ms for purgeKey={}",
-                            esAttempt, esCleanupMaxRetries, System.currentTimeMillis() - phaseStart, ctx.purgeKey);
+                for (int esAttempt = 1; esAttempt <= esReconcileMaxRetries; esAttempt++) {
+                    reconcileESCleanup(ctx);
+                    LOG.info("BulkPurge: ES reconciliation attempt {}/{} completed in {}ms for purgeKey={}",
+                            esAttempt, esReconcileMaxRetries, System.currentTimeMillis() - phaseStart, ctx.purgeKey);
 
                     try {
                         remainingAfterEsCleanup = getEntityCount(ctx.esQuery);
@@ -556,8 +559,8 @@ public class BulkPurgeService {
                         break;
                     }
 
-                    if (esAttempt < esCleanupMaxRetries) {
-                        LOG.warn("BulkPurge: {} entities remain after ES cleanup attempt {} for purgeKey={}, retrying...",
+                    if (esAttempt < esReconcileMaxRetries) {
+                        LOG.warn("BulkPurge: {} entities remain after ES reconciliation attempt {} for purgeKey={}, retrying...",
                                 remainingAfterEsCleanup, esAttempt, ctx.purgeKey);
                         try { Thread.sleep(2000L * esAttempt); } catch (InterruptedException ie) {
                             Thread.currentThread().interrupt();
@@ -570,9 +573,9 @@ public class BulkPurgeService {
                 writeRedisStatus(ctx);
                 ctx.remainingAfterCleanup = Math.max(0, remainingAfterEsCleanup);
                 if (remainingAfterEsCleanup > 0) {
-                    LOG.error("BulkPurge: {} entities remain after all ES cleanup attempts for purgeKey={}",
-                            remainingAfterEsCleanup, ctx.purgeKey);
-                    ctx.error = remainingAfterEsCleanup + " entities remain after cleanup";
+                    LOG.warn("BulkPurge: {} entities remain after all reconciliation attempts for purgeKey={}. " +
+                            "These may require manual cleanup.", remainingAfterEsCleanup, ctx.purgeKey);
+                    ctx.error = remainingAfterEsCleanup + " entities remain after reconciliation";
                 } else {
                     LOG.info("BulkPurge: Verification passed — 0 entities remaining for purgeKey={}", ctx.purgeKey);
                 }
@@ -789,8 +792,10 @@ public class BulkPurgeService {
 
     /**
      * Process a single batch: delete vertices, commit, update progress.
-     * Uses batch vertex retrieval (single round-trip) and relies on
-     * JanusGraph's AbstractVertex.remove() to handle edge cleanup internally.
+     * Uses batch vertex retrieval (single round-trip). Explicitly removes all
+     * adjacent edges before removing each vertex to ensure clean Cassandra state —
+     * this mirrors the regular delete path (DeleteHandlerV1) and prevents orphaned
+     * edge columns from keeping the vertex row alive in the storage backend.
      */
     private void processBatch(PurgeContext ctx, BatchWork work, AtlasGraph workerGraph) {
         long batchStartTime = System.nanoTime();
@@ -858,6 +863,16 @@ public class BulkPurgeService {
                     }
                 }
 
+                // Explicitly remove all adjacent edges before removing the vertex.
+                // The regular delete path (DeleteHandlerV1.deleteVertex) does this edge-by-edge;
+                // on a bulk-loading graph, relying solely on JanusGraph's internal
+                // AbstractVertex.remove() can leave orphaned edge columns in Cassandra,
+                // causing the vertex row to survive even after commit.
+                Iterable<AtlasEdge> edges = vertex.getEdges(AtlasEdgeDirection.BOTH);
+                for (AtlasEdge edge : edges) {
+                    workerGraph.removeEdge(edge);
+                }
+
                 workerGraph.removeVertex(vertex);
                 batchDeleted++;
             } catch (Exception e) {
@@ -909,11 +924,6 @@ public class BulkPurgeService {
         // Periodic Redis status update
         if (batches % 10 == 0) {
             writeRedisStatus(ctx);
-        }
-
-        // P6: Incremental ES cleanup every N committed batches
-        if (INCREMENTAL_ES_CLEANUP_INTERVAL > 0 && batches % INCREMENTAL_ES_CLEANUP_INTERVAL == 0 && committed) {
-            triggerIncrementalEsCleanup(ctx);
         }
     }
 
@@ -1111,92 +1121,226 @@ public class BulkPurgeService {
     // ======================== POST-PURGE PHASE ========================
 
     /**
-     * Phase 3a: ES delete_by_query as safety-net cleanup.
-     * Uses wait_for_completion=false for large purges to avoid blocking on a
-     * slow single-node ES. Falls back to synchronous mode if async submission fails.
+     * Phase 3a: Reconciliation-based ES cleanup.
+     *
+     * Instead of a blanket _delete_by_query (which deletes ALL entities matching the prefix,
+     * even those whose graph deletion was never attempted or failed), this method:
+     *
+     * 1. Waits for JanusGraph's ES index mutations to settle (refresh + short delay)
+     * 2. Counts remaining ES docs matching the prefix query
+     * 3. If 0: done — JanusGraph's MixedIndex handled everything during commit
+     * 4. If any remain, scrolls through them and checks each against JanusGraph:
+     *    a. Vertex GONE from graph → index lag orphan. Delete ES doc directly.
+     *    b. Vertex STILL in graph → graph deletion failed/was never attempted.
+     *       Retry the graph deletion (edges + vertex), commit, then delete ES doc.
+     *
+     * This achieves a clean final state — no orphans on either side — without the
+     * dangerous blanket _delete_by_query that caused ES/Graph desync on crash recovery.
+     *
+     * Performance: In the normal path, JanusGraph index mutations already cleaned ES
+     * during commit, so step 2 count is 0 — fast exit. In crash/failure recovery,
+     * the scroll + graph check is O(remaining) with ~1-5ms per Cassandra point-read.
      */
-    private void esCleanup(PurgeContext ctx) {
+    private void reconcileESCleanup(PurgeContext ctx) {
         try {
             RestClient esClient = getEsClient();
 
-            if (ctx.totalDiscovered > 10_000) {
-                // Large purge: run async to avoid blocking the coordinator thread
-                esCleanupAsync(esClient, ctx);
-            } else {
-                // Small purge: synchronous is fine
-                esCleanupSync(esClient, ctx);
+            // Wait for JanusGraph's ES index mutations to settle.
+            // After bulk-loading graph commits, the MixedIndex mutations may still be
+            // in-flight to ES. A refresh + short delay ensures they are visible.
+            refreshEsIndex(esClient);
+            try { Thread.sleep(ES_SETTLE_WAIT_MS); } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return;
             }
-        } catch (Exception e) {
-            LOG.error("BulkPurge: ES cleanup failed for purgeKey={}. Manual cleanup may be needed.", ctx.purgeKey, e);
-        }
-    }
+            refreshEsIndex(esClient);
 
-    private void esCleanupSync(RestClient esClient, PurgeContext ctx) throws Exception {
-        String endpoint = "/" + VERTEX_INDEX_NAME + "/_delete_by_query?conflicts=proceed&refresh=false&requests_per_second=5000";
-
-        Request request = new Request("POST", endpoint);
-        request.setEntity(new NStringEntity(ctx.esQuery, ContentType.APPLICATION_JSON));
-
-        Response response = esClient.performRequest(request);
-        String responseBody = readResponseBody(response);
-        LOG.info("BulkPurge: ES cleanup completed (sync) for purgeKey={}, response={}", ctx.purgeKey, responseBody);
-    }
-
-    private void esCleanupAsync(RestClient esClient, PurgeContext ctx) throws Exception {
-        // Submit as async task — ES returns immediately with a task ID
-        String endpoint = "/" + VERTEX_INDEX_NAME + "/_delete_by_query?conflicts=proceed&wait_for_completion=false&requests_per_second=5000";
-
-        Request request = new Request("POST", endpoint);
-        request.setEntity(new NStringEntity(ctx.esQuery, ContentType.APPLICATION_JSON));
-
-        Response response = esClient.performRequest(request);
-        String responseBody = readResponseBody(response);
-        JsonNode root = MAPPER.readTree(responseBody);
-
-        String taskId = root.has("task") ? root.get("task").asText() : null;
-        if (taskId == null) {
-            LOG.warn("BulkPurge: ES delete_by_query did not return task ID, response={}", responseBody);
-            return;
-        }
-
-        LOG.info("BulkPurge: ES cleanup submitted as async task={} for purgeKey={}", taskId, ctx.purgeKey);
-
-        // Poll task status until complete (with timeout)
-        long maxWaitMs = 5 * 60 * 1000; // 5 minutes max
-        long deadline = System.currentTimeMillis() + maxWaitMs;
-        int pollIntervalMs = 2000;
-
-        while (System.currentTimeMillis() < deadline) {
-            Thread.sleep(pollIntervalMs);
-
-            Request taskRequest = new Request("GET", "/_tasks/" + taskId);
-            Response taskResponse = esClient.performRequest(taskRequest);
-            String taskBody = readResponseBody(taskResponse);
-            JsonNode taskNode = MAPPER.readTree(taskBody);
-
-            boolean completed = taskNode.has("completed") && taskNode.get("completed").asBoolean();
-            if (completed) {
-                JsonNode taskResponseNode = taskNode.path("response");
-                long deleted = taskResponseNode.path("deleted").asLong();
-                long failures = taskResponseNode.path("failures").size();
-                LOG.info("BulkPurge: ES cleanup completed (async) for purgeKey={}, deleted={}, failures={}",
-                        ctx.purgeKey, deleted, failures);
-
-                // Refresh index so subsequent _count verification sees the deletions
-                refreshEsIndex(esClient);
+            long remaining = getEntityCount(ctx.esQuery);
+            if (remaining <= 0) {
+                LOG.info("BulkPurge: ES reconciliation — 0 docs remaining, nothing to clean for purgeKey={}", ctx.purgeKey);
                 return;
             }
 
-            // Log progress
-            JsonNode taskStatus = taskNode.path("task").path("status");
-            long esDeleted = taskStatus.path("deleted").asLong();
-            long esTotal = taskStatus.path("total").asLong();
-            LOG.debug("BulkPurge: ES cleanup in progress for purgeKey={}, deleted={}/{}",
-                    ctx.purgeKey, esDeleted, esTotal);
+            LOG.info("BulkPurge: ES reconciliation — {} docs remain after graph phase for purgeKey={}, " +
+                    "reconciling against JanusGraph", remaining, ctx.purgeKey);
+
+            reconcileESOrphans(esClient, ctx);
+
+        } catch (Exception e) {
+            LOG.error("BulkPurge: ES reconciliation failed for purgeKey={}. Manual cleanup may be needed.", ctx.purgeKey, e);
+        }
+    }
+
+    /**
+     * Scroll remaining ES docs and for each:
+     * - If vertex is gone from graph: delete the ES doc (index lag orphan)
+     * - If vertex still in graph: retry graph deletion, then delete ES doc
+     *
+     * Uses the normal (non-bulk-loading) graph instance for retry deletes, which
+     * has proper locking and index mutation guarantees.
+     */
+    private void reconcileESOrphans(RestClient esClient, PurgeContext ctx) throws Exception {
+        String scrollTimeout = SCROLL_TIMEOUT_MINUTES + "m";
+        String scrollQuery = buildScrollQuery(ctx.esQuery, ES_PAGE_SIZE);
+
+        String endpoint = "/" + VERTEX_INDEX_NAME + "/_search?scroll=" + scrollTimeout;
+        Request searchRequest = new Request("POST", endpoint);
+        searchRequest.setEntity(new NStringEntity(scrollQuery, ContentType.APPLICATION_JSON));
+
+        Response response = esClient.performRequest(searchRequest);
+        String responseBody = readResponseBody(response);
+        JsonNode root = MAPPER.readTree(responseBody);
+
+        String scrollId = root.get("_scroll_id").asText();
+        JsonNode hits = root.get("hits").get("hits");
+
+        int totalOrphansDeleted = 0;
+        int totalRetryDeleted = 0;
+        int totalRetryFailed = 0;
+        int totalCheckErrors = 0;
+
+        try {
+            while (hits != null && hits.size() > 0 && !ctx.cancelRequested) {
+                // Collect ES doc IDs from this scroll page
+                List<String> esDocIds = new ArrayList<>(hits.size());
+                for (JsonNode hit : hits) {
+                    esDocIds.add(hit.get("_id").asText());
+                }
+
+                // Check each against JanusGraph
+                List<String> orphanDocIds = new ArrayList<>();
+                List<String> retryVertexIds = new ArrayList<>();
+
+                for (String esDocId : esDocIds) {
+                    if (ctx.cancelRequested) break;
+
+                    try {
+                        String vertexId = String.valueOf(LongEncoding.decode(esDocId));
+                        AtlasVertex vertex = graph.getVertex(vertexId);
+                        if (vertex == null) {
+                            // Vertex gone from JanusGraph — ES doc is an index lag orphan
+                            orphanDocIds.add(esDocId);
+                        } else {
+                            // Vertex still in graph — graph deletion failed or was never attempted
+                            retryVertexIds.add(vertexId);
+                        }
+                    } catch (Exception e) {
+                        LOG.debug("BulkPurge: ES reconciliation — could not verify vertex for ES doc {}", esDocId, e);
+                        totalCheckErrors++;
+                    }
+                }
+
+                // Delete orphan ES docs (vertex already gone from graph)
+                if (!orphanDocIds.isEmpty()) {
+                    deleteESDocsByIds(esClient, orphanDocIds);
+                    totalOrphansDeleted += orphanDocIds.size();
+                }
+
+                // Retry graph deletion for vertices that survived the main phase.
+                // Uses the normal graph (not bulk-loading) for proper locking + index mutations.
+                if (!retryVertexIds.isEmpty() && !ctx.cancelRequested) {
+                    int[] result = retryGraphDeletion(retryVertexIds);
+                    totalRetryDeleted += result[0];
+                    totalRetryFailed += result[1];
+                }
+
+                if (ctx.cancelRequested) break;
+
+                // Scroll next page
+                Request scrollRequest = new Request("POST", "/_search/scroll");
+                String scrollBody = MAPPER.writeValueAsString(
+                        MAPPER.createObjectNode()
+                                .put("scroll", scrollTimeout)
+                                .put("scroll_id", scrollId));
+                scrollRequest.setEntity(new NStringEntity(scrollBody, ContentType.APPLICATION_JSON));
+
+                response = esClient.performRequest(scrollRequest);
+                responseBody = readResponseBody(response);
+                root = MAPPER.readTree(responseBody);
+                scrollId = root.get("_scroll_id").asText();
+                hits = root.get("hits").get("hits");
+            }
+        } finally {
+            clearScroll(esClient, scrollId);
         }
 
-        LOG.warn("BulkPurge: ES cleanup async task {} did not complete within {}ms for purgeKey={}. " +
-                "Task continues in background.", taskId, maxWaitMs, ctx.purgeKey);
+        // Refresh so deletions (from both orphan cleanup and retry graph commits) are visible
+        refreshEsIndex(esClient);
+
+        LOG.info("BulkPurge: ES reconciliation completed for purgeKey={}: orphansDeleted={}, " +
+                        "retryDeleted={}, retryFailed={}, checkErrors={}",
+                ctx.purgeKey, totalOrphansDeleted, totalRetryDeleted, totalRetryFailed, totalCheckErrors);
+
+        // Update totalDeleted/totalFailed counters so status reflects final state
+        if (totalRetryDeleted > 0) {
+            ctx.totalDeleted.addAndGet(totalRetryDeleted);
+        }
+        // retryFailed vertices were already counted in totalFailed during the main phase,
+        // so don't double-count them here.
+    }
+
+    /**
+     * Retry graph deletion for vertices that survived the main parallel phase.
+     * Uses the normal graph instance (with proper locking) and commits per batch.
+     * JanusGraph's MixedIndex will handle ES deletion on commit.
+     *
+     * @return int[2]: [successCount, failureCount]
+     */
+    private int[] retryGraphDeletion(List<String> vertexIds) {
+        int deleted = 0;
+        int failed = 0;
+
+        for (String vertexId : vertexIds) {
+            try {
+                AtlasVertex vertex = graph.getVertex(vertexId);
+                if (vertex == null) {
+                    // Already gone (race with another cleanup) — count as success
+                    deleted++;
+                    continue;
+                }
+
+                // Remove edges then vertex, same as processBatch
+                Iterable<AtlasEdge> edges = vertex.getEdges(AtlasEdgeDirection.BOTH);
+                for (AtlasEdge edge : edges) {
+                    graph.removeEdge(edge);
+                }
+                graph.removeVertex(vertex);
+                graph.commit();
+                deleted++;
+            } catch (Exception e) {
+                LOG.warn("BulkPurge: Retry graph deletion failed for vertex {}", vertexId, e);
+                failed++;
+                try {
+                    graph.rollback();
+                } catch (Exception re) {
+                    LOG.debug("BulkPurge: Rollback failed after retry deletion failure", re);
+                }
+            }
+        }
+
+        if (deleted > 0 || failed > 0) {
+            LOG.info("BulkPurge: Retry graph deletion batch: deleted={}, failed={}", deleted, failed);
+        }
+        return new int[]{deleted, failed};
+    }
+
+    /**
+     * Delete a batch of ES documents by their _id field using _delete_by_query with a terms filter.
+     */
+    private void deleteESDocsByIds(RestClient esClient, List<String> docIds) throws Exception {
+        // Build: {"query":{"terms":{"_id":["id1","id2",...]}}}
+        ObjectNode query = MAPPER.createObjectNode();
+        ObjectNode queryBody = MAPPER.createObjectNode();
+        ObjectNode terms = MAPPER.createObjectNode();
+        terms.set("_id", MAPPER.valueToTree(docIds));
+        queryBody.set("terms", terms);
+        query.set("query", queryBody);
+
+        String endpoint = "/" + VERTEX_INDEX_NAME + "/_delete_by_query?conflicts=proceed&refresh=false";
+
+        Request request = new Request("POST", endpoint);
+        request.setEntity(new NStringEntity(MAPPER.writeValueAsString(query), ContentType.APPLICATION_JSON));
+        esClient.performRequest(request);
     }
 
     private void refreshEsIndex(RestClient esClient) {
@@ -1205,27 +1349,6 @@ public class BulkPurgeService {
             esClient.performRequest(refreshRequest);
         } catch (Exception e) {
             LOG.warn("BulkPurge: ES index refresh failed (verification count may be stale)", e);
-        }
-    }
-
-    /**
-     * P6: Fire an async ES _delete_by_query to clean up already-committed batches incrementally.
-     * Non-blocking, idempotent (conflicts=proceed), runs in background.
-     */
-    private void triggerIncrementalEsCleanup(PurgeContext ctx) {
-        try {
-            RestClient esClient = getEsClient();
-            String endpoint = "/" + VERTEX_INDEX_NAME + "/_delete_by_query?conflicts=proceed&wait_for_completion=false&requests_per_second=5000";
-
-            Request request = new Request("POST", endpoint);
-            request.setEntity(new NStringEntity(ctx.esQuery, ContentType.APPLICATION_JSON));
-
-            Response response = esClient.performRequest(request);
-            String responseBody = readResponseBody(response);
-            LOG.info("BulkPurge: Incremental ES cleanup submitted for purgeKey={}, batches={}, response={}",
-                    ctx.purgeKey, ctx.completedBatches.get(), responseBody);
-        } catch (Exception e) {
-            LOG.warn("BulkPurge: Incremental ES cleanup failed for purgeKey={}", ctx.purgeKey, e);
         }
     }
 
@@ -1280,7 +1403,7 @@ public class BulkPurgeService {
             LOG.info("BulkPurge: Connection entity deleted for purgeKey={}", ctx.purgeKey);
 
             // Delete the Connection entity's ES document.
-            // The main esCleanup uses prefix "connectionQN/" which only matches children,
+            // The main ES reconciliation uses prefix "connectionQN/" which only matches children,
             // not the Connection entity itself (its __qualifiedNameHierarchy has no trailing "/").
             deleteConnectionFromES(ctx, connGuid);
         } catch (Exception e) {
