@@ -182,3 +182,20 @@ jobs:
         run: |
           echo "Integration tests failed with exit code ${{ steps.tests.outputs.exit_code }}"
           exit 1
+
+  # Rollup job for branch protection - provides a single check name
+  integration-tests-status:
+    name: integration-tests
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    if: always()
+    steps:
+      - name: Check matrix job results
+        run: |
+          if [ "${{ needs.integration-tests.result }}" == "success" ] || [ "${{ needs.integration-tests.result }}" == "skipped" ]; then
+            echo "All integration tests passed or were skipped"
+            exit 0
+          else
+            echo "Integration tests failed: ${{ needs.integration-tests.result }}"
+            exit 1
+          fi
