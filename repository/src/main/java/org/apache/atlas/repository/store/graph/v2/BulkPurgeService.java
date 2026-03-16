@@ -1235,9 +1235,65 @@ public class BulkPurgeService {
             }
             refreshEsIndex(esClient);
 
+<<<<<<< HEAD
             long remaining = getEntityCount(ctx.esQuery);
             if (remaining <= 0) {
                 LOG.info("BulkPurge: ES reconciliation — 0 docs remaining, nothing to clean for purgeKey={}", ctx.purgeKey);
+=======
+    private void esCleanupSync(RestClient esClient, PurgeContext ctx) throws Exception {
+        String endpoint = "/" + VERTEX_INDEX_NAME + "/_delete_by_query?conflicts=proceed&refresh=false&requests_per_second=5000";
+
+        Request request = new Request("POST", endpoint);
+        request.setEntity(new NStringEntity(ctx.esQuery, ContentType.APPLICATION_JSON));
+
+        Response response = esClient.performRequest(request);
+        String responseBody = readResponseBody(response);
+        LOG.info("BulkPurge: ES cleanup completed (sync) for purgeKey={}, response={}", ctx.purgeKey, responseBody);
+    }
+
+    private void esCleanupAsync(RestClient esClient, PurgeContext ctx) throws Exception {
+        // Submit as async task — ES returns immediately with a task ID
+        String endpoint = "/" + VERTEX_INDEX_NAME + "/_delete_by_query?conflicts=proceed&wait_for_completion=false&requests_per_second=5000";
+
+        Request request = new Request("POST", endpoint);
+        request.setEntity(new NStringEntity(ctx.esQuery, ContentType.APPLICATION_JSON));
+
+        Response response = esClient.performRequest(request);
+        String responseBody = readResponseBody(response);
+        JsonNode root = MAPPER.readTree(responseBody);
+
+        String taskId = root.has("task") ? root.get("task").asText() : null;
+        if (taskId == null) {
+            LOG.warn("BulkPurge: ES delete_by_query did not return task ID, response={}", responseBody);
+            return;
+        }
+
+        LOG.info("BulkPurge: ES cleanup submitted as async task={} for purgeKey={}", taskId, ctx.purgeKey);
+
+        // Poll task status until complete (with timeout)
+        long maxWaitMs = 5 * 60 * 1000; // 5 minutes max
+        long deadline = System.currentTimeMillis() + maxWaitMs;
+        int pollIntervalMs = 2000;
+
+        while (System.currentTimeMillis() < deadline) {
+            Thread.sleep(pollIntervalMs);
+
+            Request taskRequest = new Request("GET", "/_tasks/" + taskId);
+            Response taskResponse = esClient.performRequest(taskRequest);
+            String taskBody = readResponseBody(taskResponse);
+            JsonNode taskNode = MAPPER.readTree(taskBody);
+
+            boolean completed = taskNode.has("completed") && taskNode.get("completed").asBoolean();
+            if (completed) {
+                JsonNode taskResponseNode = taskNode.path("response");
+                long deleted = taskResponseNode.path("deleted").asLong();
+                long failures = taskResponseNode.path("failures").size();
+                LOG.info("BulkPurge: ES cleanup completed (async) for purgeKey={}, deleted={}, failures={}",
+                        ctx.purgeKey, deleted, failures);
+
+                // Refresh index so subsequent _count verification sees the deletions
+                refreshEsIndex(esClient);
+>>>>>>> bab28327cc918250283e0276f193f82d990e9115
                 return;
             }
 
@@ -1433,6 +1489,30 @@ public class BulkPurgeService {
     }
 
     /**
+<<<<<<< HEAD
+=======
+     * P6: Fire an async ES _delete_by_query to clean up already-committed batches incrementally.
+     * Non-blocking, idempotent (conflicts=proceed), runs in background.
+     */
+    private void triggerIncrementalEsCleanup(PurgeContext ctx) {
+        try {
+            RestClient esClient = getEsClient();
+            String endpoint = "/" + VERTEX_INDEX_NAME + "/_delete_by_query?conflicts=proceed&wait_for_completion=false&requests_per_second=5000";
+
+            Request request = new Request("POST", endpoint);
+            request.setEntity(new NStringEntity(ctx.esQuery, ContentType.APPLICATION_JSON));
+
+            Response response = esClient.performRequest(request);
+            String responseBody = readResponseBody(response);
+            LOG.info("BulkPurge: Incremental ES cleanup submitted for purgeKey={}, batches={}, response={}",
+                    ctx.purgeKey, ctx.completedBatches.get(), responseBody);
+        } catch (Exception e) {
+            LOG.warn("BulkPurge: Incremental ES cleanup failed for purgeKey={}", ctx.purgeKey, e);
+        }
+    }
+
+    /**
+>>>>>>> bab28327cc918250283e0276f193f82d990e9115
      * P2: Interrupt worker threads to unblock them from stuck operations.
      */
     private void interruptWorkers(PurgeContext ctx) {
