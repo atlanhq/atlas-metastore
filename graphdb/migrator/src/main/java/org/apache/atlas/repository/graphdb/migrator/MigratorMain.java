@@ -116,6 +116,10 @@ public class MigratorMain {
                                           CassandraTargetWriter writer) throws Exception {
         metrics.start();
 
+        // Source baseline collector — captures stats during Phase 1 scan at zero extra cost
+        SourceBaselineCollector baselineCollector = new SourceBaselineCollector(
+            config.getSuperVertexThreshold(), config.getSuperVertexTopN());
+
         // Start progress reporter — logs every 10 seconds
         ScheduledExecutorService reporter = Executors.newSingleThreadScheduledExecutor();
         reporter.scheduleAtFixedRate(metrics::logProgress, 10, 10, TimeUnit.SECONDS);
@@ -127,12 +131,14 @@ public class MigratorMain {
             LOG.info("  Source: {}.{}", config.getSourceCassandraKeyspace(), config.getSourceEdgestoreTable());
             LOG.info("  Target keyspace: {}", config.getTargetCassandraKeyspace());
             LOG.info("  Scanner threads: {}, Writer threads: {}", config.getScannerThreads(), config.getWriterThreads());
+            LOG.info("  Source baseline collection: ENABLED (super vertex threshold={})", config.getSuperVertexThreshold());
             LOG.info("========================================");
 
             writer.startWriters();
 
             LOG.info("Initializing JanusGraph schema resolution...");
             JanusGraphScanner scanner = new JanusGraphScanner(config, metrics, sourceSession);
+            scanner.setBaselineCollector(baselineCollector);
             LOG.info("JanusGraph schema resolution ready. Starting CQL token-range scan...");
 
             scanner.scanAll(
@@ -146,6 +152,25 @@ public class MigratorMain {
             writer.awaitCompletion();
             scanner.close();
             writer.close();
+
+            // Save source baseline for Phase 3 comparison
+            baselineCollector.saveBaseline(stateStore);
+            SourceBaselineCollector.BaselineSnapshot baseline = baselineCollector.buildSnapshot();
+            LOG.info("Source baseline: vertices={}, edges={}, maxEdgeCount={}, types={}",
+                     baseline.totalVertices, baseline.totalEdges, baseline.maxEdgeCount,
+                     baseline.typeVertexCounts != null ? baseline.typeVertexCounts.size() : 0);
+
+            // Log source super vertices from Phase 1
+            SuperVertexReport sourceSvReport = baselineCollector.buildSuperVertexReport(
+                (long) metrics.getElapsedSeconds() * 1000);
+            if (sourceSvReport.getTotalSuperVertexCount() > 0) {
+                LOG.info("Source super vertices (from scan): {} found, max edges={}",
+                         sourceSvReport.getTotalSuperVertexCount(), sourceSvReport.getMaxEdgeCount());
+                for (SuperVertexReport.SuperVertexEntry entry : sourceSvReport.getTopSuperVertices()) {
+                    LOG.info("  Super vertex: id={}, type={}, edges={}", entry.getVertexId(),
+                             entry.getTypeName(), String.format("%,d", entry.getEdgeCount()));
+                }
+            }
 
             LOG.info("========================================");
             LOG.info("Phase 1 complete: {}", metrics.summary());
@@ -174,23 +199,32 @@ public class MigratorMain {
 
             // ========== Phase 3: Validation ==========
             LOG.info("========================================");
-            LOG.info("=== Phase 3/3: Validation ===");
+            LOG.info("=== Phase 3/3: Post-Migration Validation ===");
             LOG.info("========================================");
 
             MigrationValidator validator = new MigrationValidator(config, targetSession, stateStore);
-            boolean valid = validator.validateAll();
+            validator.setSourceBaseline(baseline);
+            ValidationReport report = validator.validateAll();
 
             // Final summary
             LOG.info("========================================");
-            LOG.info("========================================");
             LOG.info("  {}", metrics.summary());
-            LOG.info("  Validation: {}", valid ? "PASSED" : "FAILED — review warnings above");
-            LOG.info("========================================");
             LOG.info("========================================");
 
-            if (!valid) {
-                LOG.warn("Migration completed with validation warnings. Review logs before cutover.");
+            if (!report.isOverallPassed()) {
+                LOG.error("========================================");
+                LOG.error("  MIGRATION FAILED VALIDATION");
+                LOG.error("  Migration data is written but NOT safe for cutover.");
+                LOG.error("  Review the validation report above and fix issues before re-running.");
+                LOG.error("========================================");
+                System.exit(1);
             }
+
+            LOG.info("========================================");
+            LOG.info("  MIGRATION COMPLETED SUCCESSFULLY");
+            LOG.info("  All {} validation checks PASSED.", report.getChecks().size());
+            LOG.info("  Review the validation report above before proceeding with cutover.");
+            LOG.info("========================================");
         } finally {
             reporter.shutdownNow();
         }
@@ -212,10 +246,26 @@ public class MigratorMain {
                                        MigrationStateStore stateStore) {
         LOG.info("=== Validation Only Mode ===");
 
-        MigrationValidator validator = new MigrationValidator(config, targetSession, stateStore);
-        boolean valid = validator.validateAll();
+        // Try to load source baseline from a previous migration run
+        SourceBaselineCollector.BaselineSnapshot baseline =
+            SourceBaselineCollector.loadBaseline(stateStore);
 
-        LOG.info("Validation: {}", valid ? "PASSED" : "FAILED");
+        MigrationValidator validator = new MigrationValidator(config, targetSession, stateStore);
+        if (baseline != null) {
+            validator.setSourceBaseline(baseline);
+        }
+
+        ValidationReport report = validator.validateAll();
+
+        if (!report.isOverallPassed()) {
+            LOG.error("VALIDATION FAILED. Migration is NOT safe for cutover.");
+            System.exit(1);
+        }
+
+        LOG.info("========================================");
+        LOG.info("  VALIDATION PASSED");
+        LOG.info("  All {} checks passed. Migration is safe for cutover.", report.getChecks().size());
+        LOG.info("========================================");
     }
 
     /**

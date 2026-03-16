@@ -59,6 +59,9 @@ public class JanusGraphScanner implements AutoCloseable {
     private final EdgeSerializer       edgeSerializer;
     private final ThreadLocal<StandardJanusGraphTx> threadLocalTx;
 
+    // Source baseline collector (captures stats during scan for Phase 3 comparison)
+    private volatile SourceBaselineCollector baselineCollector;
+
     /** Prefix used by Atlas for JanusGraph properties in atlas-application.properties */
     private static final String ATLAS_GRAPH_PREFIX = "atlas.graph.";
 
@@ -89,6 +92,14 @@ public class JanusGraphScanner implements AutoCloseable {
                 .vertexCacheSize(200)
                 .start()
         );
+    }
+
+    /**
+     * Set a baseline collector to capture source-side statistics during scan.
+     * Must be called before {@link #scanAll}.
+     */
+    public void setBaselineCollector(SourceBaselineCollector collector) {
+        this.baselineCollector = collector;
     }
 
     /**
@@ -302,6 +313,9 @@ public class JanusGraphScanner implements AutoCloseable {
                         if (shouldSkipVertex(decoded)) {
                             metrics.incrVerticesSkipped();
                         } else {
+                            if (baselineCollector != null) {
+                                baselineCollector.recordVertex(decoded);
+                            }
                             consumer.accept(decoded);
                             rangeVertices++;
                             rangeEdges += decoded.getOutEdges().size();

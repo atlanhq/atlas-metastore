@@ -23,7 +23,6 @@ public class MigrationStateStore {
     private final String keyspace;
 
     private PreparedStatement insertStmt;
-    private PreparedStatement selectCompletedStmt;
     private PreparedStatement selectPhaseStmt;
 
     public MigrationStateStore(CqlSession session, String keyspace) {
@@ -48,10 +47,6 @@ public class MigrationStateStore {
             "INSERT INTO " + keyspace + ".migration_state " +
             "(phase, token_range_start, token_range_end, status, vertices_processed, edges_processed, last_updated) " +
             "VALUES (?, ?, ?, ?, ?, ?, ?)");
-
-        selectCompletedStmt = session.prepare(
-            "SELECT token_range_start FROM " + keyspace + ".migration_state " +
-            "WHERE phase = ? AND status = 'COMPLETED' ALLOW FILTERING");
 
         selectPhaseStmt = session.prepare(
             "SELECT token_range_start, status, vertices_processed, edges_processed " +
@@ -83,9 +78,11 @@ public class MigrationStateStore {
      */
     public Set<Long> getCompletedRanges(String phase) {
         Set<Long> completed = new HashSet<>();
-        ResultSet rs = session.execute(selectCompletedStmt.bind(phase));
+        ResultSet rs = session.execute(selectPhaseStmt.bind(phase));
         for (Row row : rs) {
-            completed.add(row.getLong("token_range_start"));
+            if ("COMPLETED".equals(row.getString("status"))) {
+                completed.add(row.getLong("token_range_start"));
+            }
         }
         LOG.info("Phase '{}': found {} completed token ranges from previous run", phase, completed.size());
         return completed;
