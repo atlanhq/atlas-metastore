@@ -279,6 +279,20 @@ public class CassandraGraphQuery implements AtlasGraphQuery<CassandraVertex, Cas
             return scanVertexCache();
         }
 
+        // 2b. TASK_GUID lookup (task vertex)
+        String taskGuidValue = hasPreds.get(Constants.TASK_GUID);
+        if (taskGuidValue != null) {
+            String vertexId = graph.getIndexRepository().lookupVertex(Constants.TASK_GUID + "_idx", taskGuidValue);
+            if (vertexId != null) {
+                AtlasVertex<CassandraVertex, CassandraEdge> vertex = graph.getVertex(vertexId);
+                if (vertex != null) {
+                    return Collections.singletonList(vertex);
+                }
+            }
+            // Fallback: scan vertex cache for uncommitted task vertices
+            return scanVertexCache();
+        }
+
         // 3. VERTEX_TYPE + TYPENAME lookup (TypeDef vertex by name)
         //    Pattern: has("__type", "typeSystem").has("__type.name"/"__type_name", name)
         //    Uses dedicated TypeDefCache for O(1) in-memory lookup.
