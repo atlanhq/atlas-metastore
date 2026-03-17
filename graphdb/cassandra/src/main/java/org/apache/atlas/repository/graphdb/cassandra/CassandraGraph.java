@@ -1130,6 +1130,15 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     private static final int    ES_SYNC_MAX_RETRIES  = 3;
     private static final long[] ES_SYNC_RETRY_DELAYS = {100, 300, 1000}; // ms
 
+    // Tag denormalized attributes managed via ClassificationAssociator — excluded from general vertex sync
+    private static final Set<String> TAG_DENORM_ATTRIBUTES = new HashSet<>(Arrays.asList(
+            Constants.TRAIT_NAMES_PROPERTY_KEY,
+            Constants.PROPAGATED_TRAIT_NAMES_PROPERTY_KEY,
+            Constants.CLASSIFICATION_TEXT_KEY,
+            Constants.CLASSIFICATION_NAMES_KEY,
+            Constants.PROPAGATED_CLASSIFICATION_NAMES_KEY
+    ));
+
     private void syncVerticesToElasticsearch(List<CassandraVertex> newVertices,
                                              List<CassandraVertex> dirtyVertices,
                                              List<CassandraVertex> removedVertices) {
@@ -1438,6 +1447,13 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             if (key.equals("endDef1") || key.equals("endDef2") ||
                 key.equals("relationshipCategory") || key.equals("relationshipLabel") ||
                 key.equals("tagPropagation")) {
+                continue;
+            }
+
+            // Skip tag denormalized attributes — these are managed separately via the
+            // classification propagation path (TagDeNormAttributesUtil / ClassificationAssociator)
+            // and must not be overwritten by the general vertex sync, which may carry stale values.
+            if (TAG_DENORM_ATTRIBUTES.contains(key)) {
                 continue;
             }
 
