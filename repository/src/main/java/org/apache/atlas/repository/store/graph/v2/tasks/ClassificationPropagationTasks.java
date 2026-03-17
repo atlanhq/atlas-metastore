@@ -17,6 +17,7 @@
  */
 package org.apache.atlas.repository.store.graph.v2.tasks;
 
+import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.repository.metrics.TaskMetricsService;
 import org.apache.atlas.model.instance.AtlasRelationship;
@@ -48,6 +49,8 @@ public class ClassificationPropagationTasks {
 
             int assetsAffected = entityGraphMapper.propagateClassificationV2_Optimised(parameters, entityGuid, tagTypeName, parentEntityGuid, toEntityGuid);
             context.incrementAssetsAffected(assetsAffected);
+            context.addCassandraCount(assetsAffected);
+            context.addEsSuccessCount(RequestContext.get().getTagDenormEsSuccessCount());
         }
     }
 
@@ -63,6 +66,8 @@ public class ClassificationPropagationTasks {
 
             int totalUpdated = entityGraphMapper.updateClassificationTextPropagationV2(entityGuid, tagTypeName);
             context.incrementAssetsAffected(totalUpdated);
+            context.addCassandraCount(totalUpdated);
+            context.addEsSuccessCount(RequestContext.get().getTagDenormEsSuccessCount());
         }
     }
 
@@ -80,6 +85,8 @@ public class ClassificationPropagationTasks {
 
             int totalDeleted = entityGraphMapper.deleteClassificationPropagationV2(entityGuid, sourceVertexId, parentEntityGuid, tagTypeName);
             context.incrementAssetsAffected(totalDeleted);
+            context.addCassandraCount(totalDeleted);
+            context.addEsSuccessCount(RequestContext.get().getTagDenormEsSuccessCount());
         }
     }
 
@@ -96,6 +103,8 @@ public class ClassificationPropagationTasks {
 
             int affected = entityGraphMapper.classificationRefreshPropagationV2_new(parameters, parentEntityGuid, sourceEntity, classificationTypeName);
             context.incrementAssetsAffected(affected);
+            context.addCassandraCount(affected);
+            context.addEsSuccessCount(RequestContext.get().getTagDenormEsSuccessCount());
         }
     }
 
