@@ -1311,10 +1311,16 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         }
     }
 
+    private static final int OUTBOX_WRITE_MAX_ATTEMPTS = 5;
+    private static final long OUTBOX_WRITE_BACKOFF_BASE_MS = 2000L; // 2s, 4s, 8s, 16s, 32s
+
     /**
      * Writes outbox entries to Cassandra for all vertices that need ES sync.
      * These entries act as a durable record so the background ESOutboxProcessor
      * can retry any that fail during synchronous sync.
+     *
+     * Retries each batch up to 5 times with exponential backoff (2s, 4s, 8s, 16s, 32s)
+     * to handle transient Cassandra timeouts.
      */
     private void writeOutboxEntries(Map<String, CassandraVertex> vertexMap,
                                      Map<String, String> vertexJsonMap,
@@ -1339,7 +1345,23 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 for (int j = i; j < end; j++) {
                     outboxBatch.addStatement(statements.get(j));
                 }
-                session.execute(outboxBatch.build());
+
+                for (int attempt = 0; attempt < OUTBOX_WRITE_MAX_ATTEMPTS; attempt++) {
+                    try {
+                        session.execute(outboxBatch.build());
+                        break;
+                    } catch (Exception ex) {
+                        if (attempt < OUTBOX_WRITE_MAX_ATTEMPTS - 1) {
+                            long backoff = OUTBOX_WRITE_BACKOFF_BASE_MS * (1L << attempt);
+                            LOG.warn("writeOutboxEntries: batch failed on attempt {}/{}, retrying in {}ms: {}",
+                                    attempt + 1, OUTBOX_WRITE_MAX_ATTEMPTS, backoff, ex.getMessage());
+                            Thread.sleep(backoff);
+                        } else {
+                            LOG.error("writeOutboxEntries: batch failed after {} attempts: {}",
+                                    OUTBOX_WRITE_MAX_ATTEMPTS, ex.getMessage(), ex);
+                        }
+                    }
+                }
             }
 
             LOG.info("writeOutboxEntries: wrote {} index + {} delete outbox entries",

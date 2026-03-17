@@ -181,7 +181,9 @@ public class ESOutboxProcessor {
                     continue;
                 }
 
-                // Exponential backoff: skip entries whose backoff window hasn't elapsed.
+                // Exponential backoff via time-based skipping (not Thread.sleep).
+                // Entries stay in PENDING and are re-evaluated on the next 2s poll cycle.
+                // This avoids blocking the processor thread so other entries can still be processed.
                 // First attempt (attemptCount=0) has no backoff — retried immediately.
                 if (entry.attemptCount > 0 && !isBackoffElapsed(entry)) {
                     skippedBackoff++;
