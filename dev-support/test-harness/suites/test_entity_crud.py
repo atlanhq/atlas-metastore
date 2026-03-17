@@ -71,7 +71,14 @@ class EntityCrudSuite:
 
     @test("create_entity_missing_required", tags=["crud"], order=4)
     def test_create_entity_missing_required(self, client, ctx):
-        # POST entity without qualifiedName -> expect 400/422
+        """POST /entity without qualifiedName -> expect 400/404/422.
+
+        API: POST /api/meta/entity
+        Payload: {"entity": {"typeName": "DataSet", "attributes": {"name": "<random>"}}}
+        Note: qualifiedName is intentionally MISSING to test server validation.
+        Expected: Server should return 400/404 (ATLAS-404-00-007) for missing mandatory attribute.
+        Known issue (preprod): Server hangs >120s instead of fast-failing validation.
+        """
         entity = {
             "typeName": "DataSet",
             "attributes": {
@@ -79,9 +86,17 @@ class EntityCrudSuite:
                 # qualifiedName intentionally missing
             },
         }
-        # Atlas returns 404 with ATLAS-404-00-007 for missing mandatory attributes
-        # Longer timeout: preprod gateway can be slow even for error responses
+        import time as _time
+        _start = _time.time()
+        print(f"  [API] POST /entity — typeName=DataSet, qualifiedName=MISSING (negative test)")
         resp = client.post("/entity", json_data={"entity": entity}, timeout=120)
+        elapsed = _time.time() - _start
+        if resp.status_code == 408:
+            print(f"  [TIMEOUT] POST /entity (missing QN) timed out after {elapsed:.0f}s — "
+                  f"server did not return validation error within 120s. "
+                  f"Expected: 400/404 with ATLAS-404-00-007 (mandatory field missing)")
+        else:
+            print(f"  [API] POST /entity returned {resp.status_code} in {elapsed:.0f}s")
         assert_status_in(resp, [400, 404, 422])
         body = resp.json()
         if isinstance(body, dict):
