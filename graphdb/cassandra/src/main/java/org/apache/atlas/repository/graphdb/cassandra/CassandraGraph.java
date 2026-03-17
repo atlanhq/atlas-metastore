@@ -14,6 +14,7 @@ import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.repository.graphdb.elasticsearch.AtlasElasticsearchDatabase;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
+import org.apache.http.nio.entity.NStringEntity;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.ResponseException;
@@ -557,14 +558,53 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
     @Override
     public void createOrUpdateESAlias(ESAliasRequestBuilder aliasRequestBuilder) throws AtlasBaseException {
-        // TODO: implement ES alias management
-        LOG.debug("createOrUpdateESAlias called - delegating to ES client");
+        String aliasRequest = aliasRequestBuilder.build();
+
+        NStringEntity entity = new NStringEntity(aliasRequest, ContentType.APPLICATION_JSON);
+        Request request = new Request("POST", Constants.ES_API_ALIASES);
+        request.setEntity(entity);
+
+        try {
+            RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
+            Response  response = client.performRequest(request);
+            int statusCode = response.getStatusLine().getStatusCode();
+
+            if (statusCode != 200) {
+                throw new AtlasBaseException(AtlasErrorCode.INDEX_ALIAS_FAILED, "creating/updating", "Status code " + statusCode);
+            }
+        } catch (AtlasBaseException e) {
+            throw e;
+        } catch (Exception e) {
+            LOG.error("Failed to create/update ES alias: {}", e.getMessage(), e);
+            throw new AtlasBaseException(AtlasErrorCode.INDEX_ALIAS_FAILED, "creating/updating", e.getMessage());
+        }
     }
 
     @Override
     public void deleteESAlias(String indexName, String aliasName) throws AtlasBaseException {
-        // TODO: implement ES alias deletion
-        LOG.debug("deleteESAlias called for index={}, alias={}", indexName, aliasName);
+        ESAliasRequestBuilder builder = new ESAliasRequestBuilder();
+        builder.addAction(ESAliasRequestBuilder.ESAliasAction.REMOVE, new ESAliasRequestBuilder.AliasAction(indexName, aliasName));
+
+        String aliasRequest = builder.build();
+
+        NStringEntity entity = new NStringEntity(aliasRequest, ContentType.APPLICATION_JSON);
+        Request request = new Request("POST", Constants.ES_API_ALIASES);
+        request.setEntity(entity);
+
+        try {
+            RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
+            Response  response = client.performRequest(request);
+            int statusCode = response.getStatusLine().getStatusCode();
+
+            if (statusCode != 200) {
+                throw new AtlasBaseException(AtlasErrorCode.INDEX_ALIAS_FAILED, "deleting", "Status code " + statusCode);
+            }
+        } catch (AtlasBaseException e) {
+            throw e;
+        } catch (Exception e) {
+            LOG.error("Failed to delete ES alias: {}", e.getMessage(), e);
+            throw new AtlasBaseException(AtlasErrorCode.INDEX_ALIAS_FAILED, "deleting", e.getMessage());
+        }
     }
 
     @Override

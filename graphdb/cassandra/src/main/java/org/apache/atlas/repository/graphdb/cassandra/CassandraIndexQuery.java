@@ -407,7 +407,7 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
 
     private String performDirectIndexQuery(String query, boolean source) throws AtlasBaseException, IOException {
         HttpEntity entity = new NStringEntity(query, ContentType.APPLICATION_JSON);
-        String endPoint = source ? index + "/_search" : index + "/_search?_source=false";
+        String endPoint = source ? index + "/_search?ignore_unavailable=true" : index + "/_search?ignore_unavailable=true&_source=false";
 
         Request request = new Request("GET", endPoint);
         request.setEntity(entity);
@@ -607,8 +607,8 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
         CompletableFuture<AsyncQueryResult> future = new CompletableFuture<>();
         HttpEntity entity = new NStringEntity(searchParams.getQuery(), ContentType.APPLICATION_JSON);
         String endPoint = searchParams.isIncludeSourceInResults()
-                ? index + "/_async_search"
-                : index + "/_async_search?_source=false";
+                ? index + "/_async_search?ignore_unavailable=true"
+                : index + "/_async_search?ignore_unavailable=true&_source=false";
 
         Request request = new Request("POST", endPoint);
         request.setEntity(entity);
