@@ -40,11 +40,18 @@ import org.apache.commons.cli.ParseException;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.configuration.PropertiesConfiguration;
 import org.apache.commons.lang.StringUtils;
+import org.elasticsearch.action.admin.indices.settings.get.GetSettingsRequest;
+import org.elasticsearch.action.admin.indices.settings.get.GetSettingsResponse;
+import org.elasticsearch.action.admin.indices.settings.put.UpdateSettingsRequest;
+import org.elasticsearch.action.ingest.GetPipelineRequest;
+import org.elasticsearch.action.ingest.GetPipelineResponse;
+import org.elasticsearch.action.ingest.PutPipelineRequest;
 import org.elasticsearch.action.support.master.AcknowledgedResponse;
 import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.client.RestHighLevelClient;
 import org.elasticsearch.client.indices.IndexTemplatesExistRequest;
 import org.elasticsearch.client.indices.PutIndexTemplateRequest;
+import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.xcontent.XContentType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -346,14 +353,107 @@ public final class Atlas {
         // Create the primary template for the configured index prefix (e.g., janusgraph_vertex_index).
         // This MUST succeed — Atlas cannot start without correct ES mappings/analyzers.
         String vertexIndex = INDEX_PREFIX + VERTEX_INDEX;
-        createESTemplateIfNotExists(esClient, "atlan-template", Arrays.asList(vertexIndex), settingsJson, mappingsJson, true);
 
         // Also create a template for atlas_graph_* pattern so the Cassandra graph backend
         // gets the same analyzers, normalizers, and dynamic templates when its index is created.
         // This is best-effort — failure does not block startup.
-        if (!INDEX_PREFIX.equals("atlas_graph_")) {
-            createESTemplateIfNotExists(esClient, "atlas-graph-template",
-                    Arrays.asList("atlas_graph_*"), settingsJson, mappingsJson, false);
+        if (INDEX_PREFIX.equals("atlas_graph_")) {
+            //createESTemplateIfNotExists(esClient, "atlas-graph-template",
+            //        Arrays.asList("atlas_graph_*"), settingsJson, mappingsJson, false);
+            ensureRemoveNullFieldsPipeline(esClient, vertexIndex);
+        } else {
+            createESTemplateIfNotExists(esClient, "atlan-template", Arrays.asList(vertexIndex), settingsJson, mappingsJson, true);
+        }
+    }
+
+    private static final String REMOVE_NULL_FIELDS_PIPELINE      = "remove_null_fields";
+    private static final String REMOVE_NULL_FIELDS_PIPELINE_BODY =
+            "{\"description\":\"Remove fields with null values before indexing\"," +
+            "\"processors\":[{\"script\":{\"lang\":\"painless\"," +
+            "\"source\":\"ctx.entrySet().removeIf(entry -> entry.getValue() == null);\"}}]}";
+
+    /**
+     * Ensures the {@value #REMOVE_NULL_FIELDS_PIPELINE} ingest pipeline exists and is set as the
+     * {@code index.default_pipeline} for {@code indexName}. All failures are best-effort — logged
+     * as warnings but do not block Atlas startup.
+     *
+     * <p>Logic:
+     * <ol>
+     *   <li>If the pipeline does not exist → create it.</li>
+     *   <li>If the pipeline already exists → skip creation.</li>
+     *   <li>If {@code index.default_pipeline} is not yet set to the pipeline → set it.</li>
+     *   <li>If already set → do nothing.</li>
+     * </ol>
+     */
+    private static void ensureRemoveNullFieldsPipeline(RestHighLevelClient esClient, String indexName) {
+        // --- Step 1: Check / create the ingest pipeline ---
+        boolean pipelineExists = false;
+        try {
+            GetPipelineResponse pipelineResponse = esClient.ingest()
+                    .getPipeline(new GetPipelineRequest(REMOVE_NULL_FIELDS_PIPELINE), RequestOptions.DEFAULT);
+            pipelineExists = pipelineResponse.isFound();
+        } catch (Exception e) {
+            LOG.warn("ensureRemoveNullFieldsPipeline: error checking pipeline '{}': {}",
+                    REMOVE_NULL_FIELDS_PIPELINE, e.getMessage());
+        }
+
+        if (!pipelineExists) {
+            try {
+                PutPipelineRequest putPipelineRequest = new PutPipelineRequest(
+                        REMOVE_NULL_FIELDS_PIPELINE,
+                        new BytesArray(REMOVE_NULL_FIELDS_PIPELINE_BODY.getBytes(StandardCharsets.UTF_8)),
+                        XContentType.JSON);
+                AcknowledgedResponse putResp = esClient.ingest().putPipeline(putPipelineRequest, RequestOptions.DEFAULT);
+                if (putResp.isAcknowledged()) {
+                    LOG.info("ensureRemoveNullFieldsPipeline: pipeline '{}' created", REMOVE_NULL_FIELDS_PIPELINE);
+                } else {
+                    LOG.warn("ensureRemoveNullFieldsPipeline: pipeline '{}' creation not acknowledged — skipping index setting",
+                            REMOVE_NULL_FIELDS_PIPELINE);
+                    return;
+                }
+            } catch (Exception e) {
+                LOG.warn("ensureRemoveNullFieldsPipeline: failed to create pipeline '{}': {}",
+                        REMOVE_NULL_FIELDS_PIPELINE, e.getMessage());
+                return;
+            }
+        } else {
+            LOG.info("ensureRemoveNullFieldsPipeline: pipeline '{}' already exists", REMOVE_NULL_FIELDS_PIPELINE);
+        }
+
+        // --- Step 2: Check / set index.default_pipeline on the index ---
+        try {
+            GetSettingsRequest getSettingsRequest = new GetSettingsRequest()
+                    .indices(indexName)
+                    .names("index.default_pipeline");
+            GetSettingsResponse getSettingsResponse = esClient.indices()
+                    .getSettings(getSettingsRequest, RequestOptions.DEFAULT);
+            String currentPipeline = getSettingsResponse.getSetting(indexName, "index.default_pipeline");
+            if (REMOVE_NULL_FIELDS_PIPELINE.equals(currentPipeline)) {
+                LOG.info("ensureRemoveNullFieldsPipeline: index '{}' already has default_pipeline='{}'",
+                        indexName, REMOVE_NULL_FIELDS_PIPELINE);
+                return;
+            }
+        } catch (Exception e) {
+            LOG.warn("ensureRemoveNullFieldsPipeline: error reading settings for index '{}': {}",
+                    indexName, e.getMessage());
+        }
+
+        try {
+            UpdateSettingsRequest updateSettingsRequest = new UpdateSettingsRequest(indexName);
+            updateSettingsRequest.settings(
+                    "{\"index.default_pipeline\":\"" + REMOVE_NULL_FIELDS_PIPELINE + "\"}",
+                    XContentType.JSON);
+            AcknowledgedResponse updateResp = esClient.indices()
+                    .putSettings(updateSettingsRequest, RequestOptions.DEFAULT);
+            if (updateResp.isAcknowledged()) {
+                LOG.info("ensureRemoveNullFieldsPipeline: set default_pipeline='{}' on index '{}'",
+                        REMOVE_NULL_FIELDS_PIPELINE, indexName);
+            } else {
+                LOG.warn("ensureRemoveNullFieldsPipeline: putSettings not acknowledged for index '{}'", indexName);
+            }
+        } catch (Exception e) {
+            LOG.warn("ensureRemoveNullFieldsPipeline: failed to set default_pipeline on index '{}': {}",
+                    indexName, e.getMessage());
         }
     }
 
