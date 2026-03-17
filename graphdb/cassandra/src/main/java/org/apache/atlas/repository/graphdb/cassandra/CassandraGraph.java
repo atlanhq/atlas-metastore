@@ -1052,6 +1052,14 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                     String.valueOf(vertexType) + ":" + String.valueOf(typeDefName), vertex.getIdString()));
         }
 
+        // Index by TASK_GUID (task vertex lookup)
+        Object taskGuid = vertex.getProperty(Constants.TASK_GUID, String.class);
+        if (taskGuid != null) {
+            String taskGuidStr = String.valueOf(taskGuid);
+            uniqueEntries.add(new IndexRepository.IndexEntry(Constants.TASK_GUID + "_idx", taskGuidStr, vertex.getIdString()));
+            LOG.info("buildIndexEntries: {} [{}] -> vertexId [{}]", Constants.TASK_GUID + "_idx", taskGuidStr, vertex.getIdString());
+        }
+
         // ---- 1:N property indexes (vertex_property_index table) ----
 
         // Index by VERTEX_TYPE + TYPE_CATEGORY (for findTypeVerticesByCategory / getAll)
@@ -1061,7 +1069,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                     String.valueOf(vertexType) + ":" + String.valueOf(typeCategory), vertex.getIdString()));
         }
 
-        if (guid == null && qn == null && vertexType == null) {
+        if (guid == null && qn == null && vertexType == null && taskGuid == null) {
             LOG.warn("buildIndexEntries: vertex [{}] has no indexable properties! Keys: {}",
                     vertex.getIdString(), vertex.getPropertyKeys());
         }
@@ -1135,7 +1143,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
             int skipped = 0;
             for (CassandraVertex v : newVertices) {
-                if (isEntityVertex(v)) {
+                if (shouldSyncToES(v)) {
                     vertexMap.put(v.getIdString(), v);
                     vertexJsonMap.put(v.getIdString(), AtlasType.toJson(filterPropertiesForES(v.getProperties())));
                     LOG.info("syncVerticesToElasticsearch: NEW vertex _id='{}', __typeName='{}', propCount={}",
@@ -1147,7 +1155,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             }
 
             for (CassandraVertex v : dirtyVertices) {
-                if (isEntityVertex(v)) {
+                if (shouldSyncToES(v)) {
                     vertexMap.put(v.getIdString(), v);
                     vertexJsonMap.put(v.getIdString(), AtlasType.toJson(filterPropertiesForES(v.getProperties())));
                     LOG.info("syncVerticesToElasticsearch: DIRTY vertex _id='{}', __typeName='{}', propCount={}",
@@ -1479,9 +1487,11 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
      * System vertices (patches, index recovery) lack both __typeName and __type
      * and are also excluded.
      */
-    private boolean isEntityVertex(CassandraVertex v) {
+    private boolean shouldSyncToES(CassandraVertex v) {
         Object typeName = v.getProperty(Constants.ENTITY_TYPE_PROPERTY_KEY, String.class);
-        return typeName != null;
+        if (typeName != null) return true;
+        Object taskType = v.getProperty(Constants.TASK_TYPE_PROPERTY_KEY, String.class);
+        return taskType != null;
     }
 
     // ---- Reindex (repair) operations ----
@@ -1535,7 +1545,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 continue;
             }
 
-            if (!isEntityVertex(vertex)) {
+            if (!shouldSyncToES(vertex)) {
                 notEntity++;
                 continue;
             }
