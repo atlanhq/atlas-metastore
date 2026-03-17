@@ -28,7 +28,7 @@ on:
       - ms-635
       - ms-664-fix-audit-search
       - hotfix-reindex-refresh
-      - GOV-695/fix-apostrophe-in-link-url-validation
+      - gov-695-fix-apostrophe-link-url
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
