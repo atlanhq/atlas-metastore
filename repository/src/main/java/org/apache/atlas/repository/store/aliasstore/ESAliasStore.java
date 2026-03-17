@@ -63,7 +63,7 @@ import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_SUB_CAT
 import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_SERVICE_NAME_ABAC;
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_FILTER_CRITERIA;
 import static org.apache.atlas.repository.util.AccessControlUtils.getConnectionQualifiedNameFromPolicyAssets;
-import static org.apache.atlas.repository.util.AccessControlUtils.getESAliasName;
+import static org.apache.atlas.repository.util.AccessControlUtils.getESAliasIndexName;
 import static org.apache.atlas.repository.util.AccessControlUtils.getIsAllowPolicy;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPolicies;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPolicyActions;
@@ -391,7 +391,7 @@ public class ESAliasStore implements IndexAliasStore {
     }
 
     private String getAliasName(AtlasEntity entity) {
-        return getESAliasName(entity);
+        return getESAliasIndexName(entity);
     }
 
     private void addPurposeMetadataFilterClauses(List<String> tags, List<Map<String, Object>> clauseList) {

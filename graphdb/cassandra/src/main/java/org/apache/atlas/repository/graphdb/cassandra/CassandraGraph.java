@@ -14,6 +14,7 @@ import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.repository.graphdb.elasticsearch.AtlasElasticsearchDatabase;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
+import org.apache.http.nio.entity.NStringEntity;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.ResponseException;
@@ -557,14 +558,53 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
     @Override
     public void createOrUpdateESAlias(ESAliasRequestBuilder aliasRequestBuilder) throws AtlasBaseException {
-        // TODO: implement ES alias management
-        LOG.debug("createOrUpdateESAlias called - delegating to ES client");
+        String aliasRequest = aliasRequestBuilder.build();
+
+        NStringEntity entity = new NStringEntity(aliasRequest, ContentType.APPLICATION_JSON);
+        Request request = new Request("POST", Constants.ES_API_ALIASES);
+        request.setEntity(entity);
+
+        try {
+            RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
+            Response  response = client.performRequest(request);
+            int statusCode = response.getStatusLine().getStatusCode();
+
+            if (statusCode != 200) {
+                throw new AtlasBaseException(AtlasErrorCode.INDEX_ALIAS_FAILED, "creating/updating", "Status code " + statusCode);
+            }
+        } catch (AtlasBaseException e) {
+            throw e;
+        } catch (Exception e) {
+            LOG.error("Failed to create/update ES alias: {}", e.getMessage(), e);
+            throw new AtlasBaseException(AtlasErrorCode.INDEX_ALIAS_FAILED, "creating/updating", e.getMessage());
+        }
     }
 
     @Override
     public void deleteESAlias(String indexName, String aliasName) throws AtlasBaseException {
-        // TODO: implement ES alias deletion
-        LOG.debug("deleteESAlias called for index={}, alias={}", indexName, aliasName);
+        ESAliasRequestBuilder builder = new ESAliasRequestBuilder();
+        builder.addAction(ESAliasRequestBuilder.ESAliasAction.REMOVE, new ESAliasRequestBuilder.AliasAction(indexName, aliasName));
+
+        String aliasRequest = builder.build();
+
+        NStringEntity entity = new NStringEntity(aliasRequest, ContentType.APPLICATION_JSON);
+        Request request = new Request("POST", Constants.ES_API_ALIASES);
+        request.setEntity(entity);
+
+        try {
+            RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
+            Response  response = client.performRequest(request);
+            int statusCode = response.getStatusLine().getStatusCode();
+
+            if (statusCode != 200) {
+                throw new AtlasBaseException(AtlasErrorCode.INDEX_ALIAS_FAILED, "deleting", "Status code " + statusCode);
+            }
+        } catch (AtlasBaseException e) {
+            throw e;
+        } catch (Exception e) {
+            LOG.error("Failed to delete ES alias: {}", e.getMessage(), e);
+            throw new AtlasBaseException(AtlasErrorCode.INDEX_ALIAS_FAILED, "deleting", e.getMessage());
+        }
     }
 
     @Override
@@ -1012,6 +1052,14 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                     String.valueOf(vertexType) + ":" + String.valueOf(typeDefName), vertex.getIdString()));
         }
 
+        // Index by TASK_GUID (task vertex lookup)
+        Object taskGuid = vertex.getProperty(Constants.TASK_GUID, String.class);
+        if (taskGuid != null) {
+            String taskGuidStr = String.valueOf(taskGuid);
+            uniqueEntries.add(new IndexRepository.IndexEntry(Constants.TASK_GUID + "_idx", taskGuidStr, vertex.getIdString()));
+            LOG.info("buildIndexEntries: {} [{}] -> vertexId [{}]", Constants.TASK_GUID + "_idx", taskGuidStr, vertex.getIdString());
+        }
+
         // ---- 1:N property indexes (vertex_property_index table) ----
 
         // Index by VERTEX_TYPE + TYPE_CATEGORY (for findTypeVerticesByCategory / getAll)
@@ -1021,7 +1069,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                     String.valueOf(vertexType) + ":" + String.valueOf(typeCategory), vertex.getIdString()));
         }
 
-        if (guid == null && qn == null && vertexType == null) {
+        if (guid == null && qn == null && vertexType == null && taskGuid == null) {
             LOG.warn("buildIndexEntries: vertex [{}] has no indexable properties! Keys: {}",
                     vertex.getIdString(), vertex.getPropertyKeys());
         }
@@ -1095,7 +1143,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
             int skipped = 0;
             for (CassandraVertex v : newVertices) {
-                if (isEntityVertex(v)) {
+                if (shouldSyncToES(v)) {
                     vertexMap.put(v.getIdString(), v);
                     vertexJsonMap.put(v.getIdString(), AtlasType.toJson(filterPropertiesForES(v.getProperties())));
                     LOG.info("syncVerticesToElasticsearch: NEW vertex _id='{}', __typeName='{}', propCount={}",
@@ -1107,7 +1155,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             }
 
             for (CassandraVertex v : dirtyVertices) {
-                if (isEntityVertex(v)) {
+                if (shouldSyncToES(v)) {
                     vertexMap.put(v.getIdString(), v);
                     vertexJsonMap.put(v.getIdString(), AtlasType.toJson(filterPropertiesForES(v.getProperties())));
                     LOG.info("syncVerticesToElasticsearch: DIRTY vertex _id='{}', __typeName='{}', propCount={}",
@@ -1439,9 +1487,11 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
      * System vertices (patches, index recovery) lack both __typeName and __type
      * and are also excluded.
      */
-    private boolean isEntityVertex(CassandraVertex v) {
+    private boolean shouldSyncToES(CassandraVertex v) {
         Object typeName = v.getProperty(Constants.ENTITY_TYPE_PROPERTY_KEY, String.class);
-        return typeName != null;
+        if (typeName != null) return true;
+        Object taskType = v.getProperty(Constants.TASK_TYPE_PROPERTY_KEY, String.class);
+        return taskType != null;
     }
 
     // ---- Reindex (repair) operations ----
@@ -1495,7 +1545,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 continue;
             }
 
-            if (!isEntityVertex(vertex)) {
+            if (!shouldSyncToES(vertex)) {
                 notEntity++;
                 continue;
             }
