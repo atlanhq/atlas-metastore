@@ -30,12 +30,16 @@ import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.model.instance.EntityMutations.EntityOperation;
+import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.aliasstore.ESAliasStore;
 import org.apache.atlas.repository.store.aliasstore.IndexAliasStore;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
+import org.apache.atlas.type.AtlasEntityType;
+import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.lang.StringUtils;
@@ -325,21 +329,51 @@ public class AuthPolicyPreProcessor implements PreProcessor {
         AtlasObjectId objectId = (AtlasObjectId) entity.getRelationshipAttribute(REL_ATTR_ACCESS_CONTROL);
         if (objectId != null) {
             try {
-                ret = entityRetriever.toAtlasEntityWithExtInfo(objectId);
+                // Load the parent (Persona/Purpose) entity WITHOUT deep relationship attribute mapping.
+                // The default toAtlasEntityWithExtInfo triggers mapRelationshipAttributes for every
+                // relationship on the parent, which for a Persona with N policies costs O(N * attrs)
+                // JanusGraph + Cassandra reads.  Using ignoreRelationshipAttr=true skips that entirely.
+                EntityGraphRetriever noRelAttrRetriever = new EntityGraphRetriever(entityRetriever, true);
+                AtlasVertex parentVertex = entityRetriever.getEntityVertex(objectId);
+                AtlasEntity parentEntity = noRelAttrRetriever.toAtlasEntity(parentVertex);
+                ret = new AtlasEntityWithExtInfo(parentEntity);
+
+                // Traverse the graph edges for the 'policies' relationship directly instead of going
+                // through the full relationship-attribute mapping stack.  This avoids the N+1 pattern
+                // (one findByGuid per policy) and skips the expensive mapVertexToRelationshipAttribute
+                // call chain that was responsible for ~97% of the total request latency.
+                AtlasEntityType parentType = typeRegistry.getEntityTypeByName(parentEntity.getTypeName());
+                Map<String, AtlasAttribute> policiesAttrMap = parentType != null
+                        ? parentType.getRelationshipAttributes().get(REL_ATTR_POLICIES)
+                        : null;
+                AtlasAttribute policiesAttr = (policiesAttrMap != null && !policiesAttrMap.isEmpty())
+                        ? policiesAttrMap.values().iterator().next()
+                        : null;
+
+                List<AtlasObjectId> policyObjectIds = new ArrayList<>();
+                if (policiesAttr != null) {
+                    List<AtlasEdge> policyEdges = GraphHelper.getActiveCollectionElementsUsingRelationship(
+                            parentVertex, policiesAttr, policiesAttr.getRelationshipEdgeLabel());
+                    for (AtlasEdge edge : policyEdges) {
+                        // Pick the vertex that is NOT the parent (Persona/Purpose)
+                        AtlasVertex outV       = edge.getOutVertex();
+                        AtlasVertex policyVertex = outV.getIdForDisplay().equals(parentVertex.getIdForDisplay())
+                                ? edge.getInVertex() : outV;
+                        AtlasEntity policyEntity = noRelAttrRetriever.toAtlasEntity(policyVertex);
+                        ret.addReferredEntity(policyEntity);
+                        policyObjectIds.add(new AtlasObjectId(policyEntity.getGuid(), policyEntity.getTypeName()));
+                    }
+                }
+                // Populate REL_ATTR_POLICIES on the parent entity so that getPolicies() in
+                // ESAliasStore (which reads this relationship attribute) continues to work.
+                parentEntity.setRelationshipAttribute(REL_ATTR_POLICIES, policyObjectIds);
+
             } catch (AtlasBaseException abe) {
                 AtlasErrorCode code = abe.getAtlasErrorCode();
 
                 if (INSTANCE_BY_UNIQUE_ATTRIBUTE_NOT_FOUND != code && INSTANCE_GUID_NOT_FOUND != code) {
                     throw abe;
                 }
-            }
-        }
-
-        if (ret != null) {
-            List<AtlasObjectId> policies = (List<AtlasObjectId>) ret.getEntity().getRelationshipAttribute(REL_ATTR_POLICIES);
-
-            for (AtlasObjectId policy : policies) {
-                ret.addReferredEntity(entityRetriever.toAtlasEntity(policy));
             }
         }
 
