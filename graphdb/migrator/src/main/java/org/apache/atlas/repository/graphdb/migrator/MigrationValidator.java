@@ -17,6 +17,8 @@ import org.elasticsearch.client.RestClientBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.FileWriter;
+import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -38,6 +40,9 @@ public class MigrationValidator {
     private final CqlSession         targetSession;
     private final MigrationStateStore stateStore;
 
+    // Source session (for direct source-side counting in --validate-only mode)
+    private CqlSession sourceSession;
+
     // Source baseline (may be null if --validate-only without prior run)
     private SourceBaselineCollector.BaselineSnapshot sourceBaseline;
 
@@ -46,6 +51,10 @@ public class MigrationValidator {
         this.config        = config;
         this.targetSession = targetSession;
         this.stateStore    = stateStore;
+    }
+
+    public void setSourceSession(CqlSession sourceSession) {
+        this.sourceSession = sourceSession;
     }
 
     public void setSourceBaseline(SourceBaselineCollector.BaselineSnapshot baseline) {
@@ -62,12 +71,22 @@ public class MigrationValidator {
         ValidationReport report = new ValidationReport(config.getValidationTenantId());
         report.setSourceBaseline(sourceBaseline);
 
+        // Set source/target metadata for display
+        report.setSourceKeyspace(config.getSourceCassandraKeyspace());
+        report.setSourceEsIndex(config.getSourceEsIndex());
+        report.setTargetKeyspace(config.getTargetCassandraKeyspace());
+        report.setTargetEsIndex(config.getTargetEsIndex());
+
         LOG.info("=== Starting Enhanced Post-Migration Validation ===");
-        LOG.info("  Keyspace: {}", ks);
+        LOG.info("  Source: {} (Cassandra) | {} (ES)", config.getSourceCassandraKeyspace(), config.getSourceEsIndex());
+        LOG.info("  Target: {} (Cassandra) | {} (ES)", config.getTargetCassandraKeyspace(), config.getTargetEsIndex());
         LOG.info("  Vertex sample: {}, Edge sample: {}, Index sample: {}",
                  config.getValidationVertexSampleSize(),
                  config.getValidationEdgeSampleSize(),
                  config.getValidationIndexSampleSize());
+
+        // --- Source-side counts (direct query, independent of baseline) ---
+        runSourceCounts(report);
 
         // --- Check 1: Vertex count + groupBy type ---
         runVertexCountCheck(ks, report);
@@ -106,15 +125,18 @@ public class MigrationValidator {
 
         report.complete();
 
-        // Log the full report
-        LOG.info("========================================");
-        if (report.isOverallPassed()) {
-            LOG.info("=== VALIDATION PASSED ===");
-        } else {
-            LOG.error("=== VALIDATION FAILED — Migration cannot proceed ===");
+        // Print beautified report to console
+        System.out.println(report.toPrettyString());
+
+        // Write full JSON report to file for programmatic use
+        String jsonFile = "validation-report-" + config.getValidationTenantId() + ".json";
+        try (FileWriter fw = new FileWriter(jsonFile)) {
+            fw.write(report.toJson());
+            LOG.info("Full JSON report written to: {}", jsonFile);
+        } catch (IOException e) {
+            LOG.warn("Failed to write JSON report to file: {}", e.getMessage());
+            LOG.info("Validation Report (JSON):\n{}", report.toJson());
         }
-        LOG.info("Validation Report:\n{}", report.toJson());
-        LOG.info("========================================");
 
         return report;
     }
@@ -667,47 +689,63 @@ public class MigrationValidator {
     // ========================================================================
 
     private void runEsCountCheck(ValidationReport report) {
-        LOG.info("ES count check: comparing ES docs vs Cassandra vertices...");
+        LOG.info("ES count check: comparing source ES index vs target Cassandra vertices...");
 
         RestClient esClient = null;
         try {
             esClient = createEsClient();
-            String esIndex = config.getTargetEsIndex();
 
-            Request countReq = new Request("GET", "/" + esIndex + "/_count");
-            Response resp = esClient.performRequest(countReq);
-            String body = EntityUtils.toString(resp.getEntity());
+            // Count source ES index (the original JanusGraph index — the ground truth)
+            String sourceIndex = config.getSourceEsIndex();
+            long sourceEsCount = getEsIndexCount(esClient, sourceIndex);
 
-            @SuppressWarnings("unchecked")
-            Map<String, Object> parsed = MAPPER.readValue(body, Map.class);
-            long esCount = ((Number) parsed.get("count")).longValue();
+            // Count target ES index (may not exist yet if migration hasn't run Phase 2)
+            String targetIndex = config.getTargetEsIndex();
+            long targetEsCount = getEsIndexCount(esClient, targetIndex);
 
             long cassandraCount = report.getVertexCount();
-            report.setEsDocCount(esCount);
+            report.setEsDocCount(sourceEsCount);
 
-            // ES count should be a reasonable proportion of Cassandra count
-            // (not all vertices are indexed — typeSystem vertices, patches, etc. are skipped)
-            double ratio = cassandraCount > 0 ? (double) esCount / cassandraCount : 0;
-            boolean passed = ratio > 0.5;
-            ValidationCheckResult.Severity severity =
-                ratio > 0.9 ? ValidationCheckResult.Severity.PASS :
-                ratio > 0.5 ? ValidationCheckResult.Severity.WARN :
-                              ValidationCheckResult.Severity.FAIL;
+            LOG.info("ES counts: source_index({})={}, target_index({})={}, cassandra_vertices={}",
+                     sourceIndex, sourceEsCount, targetIndex, targetEsCount, cassandraCount);
+
+            // Primary comparison: source ES vs target Cassandra
+            // Cassandra should have >= source ES docs (it also includes system vertices)
+            boolean passed;
+            String message;
+            ValidationCheckResult.Severity severity;
+
+            if (sourceEsCount == 0) {
+                passed = false;
+                severity = ValidationCheckResult.Severity.FAIL;
+                message = String.format("source_es(%s)=0 — cannot validate", sourceIndex);
+            } else {
+                double cassandraVsSourceRatio = (double) cassandraCount / sourceEsCount;
+                passed = cassandraVsSourceRatio >= 1.0;
+                severity = cassandraVsSourceRatio >= 1.0 ? ValidationCheckResult.Severity.PASS :
+                           cassandraVsSourceRatio > 0.9  ? ValidationCheckResult.Severity.WARN :
+                                                            ValidationCheckResult.Severity.FAIL;
+                message = String.format(
+                    "source_es(%s)=%d, target_cassandra=%d, ratio=%.2f%%; target_es(%s)=%d",
+                    sourceIndex, sourceEsCount, cassandraCount,
+                    cassandraVsSourceRatio * 100, targetIndex, targetEsCount);
+            }
 
             ValidationCheckResult result = new ValidationCheckResult(
                 "es_vertex_count",
-                "ES document count vs Cassandra vertex count",
-                passed, severity,
-                String.format("es=%d, cassandra=%d, ratio=%.2f%%", esCount, cassandraCount, ratio * 100));
-            result.addDetail("es_count", esCount);
+                "Source ES doc count vs target Cassandra vertex count",
+                passed, severity, message);
+            result.addDetail("source_es_index", sourceIndex);
+            result.addDetail("source_es_count", sourceEsCount);
+            result.addDetail("target_es_index", targetIndex);
+            result.addDetail("target_es_count", targetEsCount);
             result.addDetail("cassandra_count", cassandraCount);
-            result.addDetail("ratio", String.format("%.4f", ratio));
             report.addCheck(result);
         } catch (Exception e) {
             LOG.warn("ES count check failed (non-blocking): {}", e.getMessage());
             ValidationCheckResult result = new ValidationCheckResult(
                 "es_vertex_count",
-                "ES document count vs Cassandra vertex count",
+                "Source ES doc count vs target Cassandra vertex count",
                 true, ValidationCheckResult.Severity.WARN,
                 "Skipped: " + e.getMessage());
             report.addCheck(result);
@@ -715,6 +753,20 @@ public class MigrationValidator {
             if (esClient != null) {
                 try { esClient.close(); } catch (Exception ignored) {}
             }
+        }
+    }
+
+    private long getEsIndexCount(RestClient esClient, String indexName) {
+        try {
+            Request countReq = new Request("GET", "/" + indexName + "/_count");
+            Response resp = esClient.performRequest(countReq);
+            String body = EntityUtils.toString(resp.getEntity());
+            @SuppressWarnings("unchecked")
+            Map<String, Object> parsed = MAPPER.readValue(body, Map.class);
+            return ((Number) parsed.get("count")).longValue();
+        } catch (Exception e) {
+            LOG.warn("Failed to count ES index '{}': {}", indexName, e.getMessage());
+            return -1;
         }
     }
 
@@ -812,6 +864,53 @@ public class MigrationValidator {
         result.addDetail("vertices_over_1m", svReport.getVerticesOver1mEdges());
         result.addDetail("scan_duration_ms", svReport.getScanDurationMs());
         report.addCheck(result);
+    }
+
+    // ========================================================================
+    // Source-side counting (direct query against source Cassandra/ES)
+    // ========================================================================
+
+    private void runSourceCounts(ValidationReport report) {
+        if (sourceSession == null) {
+            LOG.info("Source session not available — skipping source-side counts.");
+            return;
+        }
+
+        String sourceKs = config.getSourceCassandraKeyspace();
+        String edgestoreTable = config.getSourceEdgestoreTable();
+
+        // Count source edgestore rows
+        long sourceEdgestoreCount = -1;
+        try {
+            ResultSet rs = sourceSession.execute(
+                "SELECT count(*) FROM " + sourceKs + "." + edgestoreTable);
+            Row row = rs.one();
+            sourceEdgestoreCount = row != null ? row.getLong(0) : -1;
+            LOG.info("Source edgestore rows ({}.{}): {}", sourceKs, edgestoreTable,
+                     String.format("%,d", sourceEdgestoreCount));
+        } catch (Exception e) {
+            LOG.warn("Failed to count source edgestore ({}.{}): {}",
+                     sourceKs, edgestoreTable, e.getMessage());
+        }
+        report.setSourceEdgestoreCount(sourceEdgestoreCount);
+
+        // Count source ES docs (janusgraph_vertex_index)
+        long sourceEsDocCount = -1;
+        RestClient esClient = null;
+        try {
+            esClient = createEsClient();
+            String sourceIndex = config.getSourceEsIndex();
+            sourceEsDocCount = getEsIndexCount(esClient, sourceIndex);
+            LOG.info("Source ES docs ({}): {}", sourceIndex,
+                     String.format("%,d", sourceEsDocCount));
+        } catch (Exception e) {
+            LOG.warn("Failed to count source ES index: {}", e.getMessage());
+        } finally {
+            if (esClient != null) {
+                try { esClient.close(); } catch (Exception ignored) {}
+            }
+        }
+        report.setSourceEsDocCount(sourceEsDocCount);
     }
 
     // ========================================================================

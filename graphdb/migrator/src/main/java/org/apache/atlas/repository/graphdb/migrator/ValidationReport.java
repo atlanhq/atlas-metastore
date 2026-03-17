@@ -3,6 +3,7 @@ package org.apache.atlas.repository.graphdb.migrator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -35,6 +36,16 @@ public class ValidationReport {
 
     // Full groupBy type_name counts from target vertices table
     private Map<String, Long> vertexCountByType = new LinkedHashMap<>();
+
+    // Source/target metadata for display
+    private String sourceKeyspace;
+    private String sourceEsIndex;
+    private String targetKeyspace;
+    private String targetEsIndex;
+
+    // Source-side counters (direct query, independent of baseline)
+    private long sourceEdgestoreCount = -1;
+    private long sourceEsDocCount = -1;
 
     // Summary counters (target)
     private long vertexCount;
@@ -101,6 +112,231 @@ public class ValidationReport {
     public Map<String, Long> getVertexCountByType()            { return vertexCountByType; }
     public void setVertexCountByType(Map<String, Long> counts) { this.vertexCountByType = counts; }
 
+    public long getSourceEdgestoreCount()           { return sourceEdgestoreCount; }
+    public void setSourceEdgestoreCount(long c)     { this.sourceEdgestoreCount = c; }
+
+    public long getSourceEsDocCount()               { return sourceEsDocCount; }
+    public void setSourceEsDocCount(long c)         { this.sourceEsDocCount = c; }
+
+    public void setSourceKeyspace(String s)  { this.sourceKeyspace = s; }
+    public void setSourceEsIndex(String s)   { this.sourceEsIndex = s; }
+    public void setTargetKeyspace(String s)  { this.targetKeyspace = s; }
+    public void setTargetEsIndex(String s)   { this.targetEsIndex = s; }
+
+    /**
+     * Beautified console output for human readability.
+     */
+    public String toPrettyString() {
+        StringBuilder sb = new StringBuilder();
+        String LINE = "════════════════════════════════════════════════════════════════════════════════";
+        String THIN = "────────────────────────────────────────────────────────────────────────────────";
+
+        // Header
+        sb.append("\n").append(LINE).append("\n");
+        sb.append("  MIGRATION VALIDATION REPORT\n");
+        sb.append(LINE).append("\n\n");
+
+        // Metadata
+        sb.append("  Tenant:       ").append(tenantId).append("\n");
+        if (sourceKeyspace != null) {
+            sb.append("  Source:       ").append(sourceKeyspace).append(" (Cassandra)");
+            if (sourceEsIndex != null) sb.append("  |  ").append(sourceEsIndex).append(" (ES)");
+            sb.append("\n");
+        }
+        if (targetKeyspace != null) {
+            sb.append("  Target:       ").append(targetKeyspace).append(" (Cassandra)");
+            if (targetEsIndex != null) sb.append("  |  ").append(targetEsIndex).append(" (ES)");
+            sb.append("\n");
+        }
+        sb.append("  Started:      ").append(startTime).append("\n");
+        if (endTime != null) {
+            Duration d = Duration.between(startTime, endTime);
+            sb.append("  Duration:     ").append(formatDuration(d)).append("\n");
+        }
+        String resultStr = overallPassed ? "PASSED" : "FAILED";
+        sb.append("  Result:       ").append(resultStr).append("\n");
+        sb.append("\n");
+
+        // Source section (direct query against old data)
+        if (sourceEdgestoreCount >= 0 || sourceEsDocCount >= 0) {
+            sb.append(THIN).append("\n");
+            sb.append("  SOURCE (Old Data)\n");
+            sb.append(THIN).append("\n\n");
+            if (sourceEdgestoreCount >= 0) {
+                sb.append(String.format("  %-36s %,12d\n",
+                    "Edgestore Rows (" + (sourceKeyspace != null ? sourceKeyspace : "JanusGraph") + ")",
+                    sourceEdgestoreCount));
+            }
+            if (sourceEsDocCount >= 0) {
+                sb.append(String.format("  %-36s %,12d\n",
+                    "ES Docs (" + (sourceEsIndex != null ? sourceEsIndex : "source") + ")",
+                    sourceEsDocCount));
+            }
+            if (sourceBaseline != null) {
+                sb.append(String.format("  %-36s %,12d\n", "Baseline: Vertices (from scan)", sourceBaseline.totalVertices));
+                sb.append(String.format("  %-36s %,12d\n", "Baseline: Edges (from scan)", sourceBaseline.totalEdges));
+            }
+            sb.append("\n");
+        } else if (sourceBaseline != null) {
+            sb.append(THIN).append("\n");
+            sb.append("  SOURCE (Baseline from prior scan)\n");
+            sb.append(THIN).append("\n\n");
+            sb.append(String.format("  %-36s %,12d\n", "Baseline: Vertices", sourceBaseline.totalVertices));
+            sb.append(String.format("  %-36s %,12d\n", "Baseline: Edges", sourceBaseline.totalEdges));
+            sb.append("\n");
+        }
+
+        // Target counts summary
+        sb.append(THIN).append("\n");
+        sb.append("  TARGET (New Data)\n");
+        sb.append(THIN).append("\n\n");
+        sb.append(String.format("  %-36s %,12d\n", "Vertices", vertexCount));
+        sb.append(String.format("  %-36s %,12d\n", "Edges OUT", edgeOutCount));
+        sb.append(String.format("  %-36s %,12d\n", "Edges IN", edgeInCount));
+        sb.append(String.format("  %-36s %,12d\n", "Edges BY_ID", edgeByIdCount));
+        sb.append(String.format("  %-36s %,12d\n", "ES Docs (target index)", esDocCount));
+        sb.append(String.format("  %-36s %,12d\n", "TypeDefs", typeDefCount));
+        sb.append(String.format("  %-36s %,12d\n", "TypeDefs (by category)", typeDefByCategoryCount));
+        sb.append("\n");
+
+        // Validation checks table
+        sb.append(THIN).append("\n");
+        sb.append("  VALIDATION CHECKS (").append(checks.size()).append(")\n");
+        sb.append(THIN).append("\n\n");
+        sb.append(String.format("  %-4s %-8s %-30s %s\n", "#", "Status", "Check", "Message"));
+        sb.append(String.format("  %-4s %-8s %-30s %s\n", "──", "──────", "─────", "───────"));
+
+        int idx = 1;
+        for (ValidationCheckResult c : checks) {
+            String icon;
+            switch (c.getSeverity()) {
+                case PASS: icon = "PASS"; break;
+                case WARN: icon = "WARN"; break;
+                case FAIL: icon = "FAIL"; break;
+                default:   icon = "????"; break;
+            }
+            // Truncate message for display (keep first 80 chars)
+            String msg = c.getMessage();
+            if (msg != null && msg.length() > 80) {
+                msg = msg.substring(0, 77) + "...";
+            }
+            sb.append(String.format("  %-4d %-8s %-30s %s\n", idx, icon, c.getCheckName(), msg));
+
+            // Show sample failures if any
+            if (!c.getSampleFailures().isEmpty()) {
+                for (String f : c.getSampleFailures()) {
+                    String fTrunc = f.length() > 90 ? f.substring(0, 87) + "..." : f;
+                    sb.append(String.format("  %4s %8s %-30s   -> %s\n", "", "", "", fTrunc));
+                }
+            }
+            idx++;
+        }
+        sb.append("\n");
+
+        // Vertex count by type (top 20)
+        if (!vertexCountByType.isEmpty()) {
+            sb.append(THIN).append("\n");
+            sb.append("  VERTEX COUNT BY TYPE (Top 20)\n");
+            sb.append(THIN).append("\n\n");
+
+            boolean hasBaseline = sourceBaseline != null && sourceBaseline.typeVertexCounts != null;
+
+            if (hasBaseline) {
+                sb.append(String.format("  %-35s %12s %12s %10s %8s\n",
+                    "Type", "Target", "Source", "Diff", "Status"));
+                sb.append(String.format("  %-35s %12s %12s %10s %8s\n",
+                    "─────", "──────", "──────", "────", "──────"));
+            } else {
+                sb.append(String.format("  %-35s %12s\n", "Type", "Count"));
+                sb.append(String.format("  %-35s %12s\n", "─────", "─────"));
+            }
+
+            int count = 0;
+            List<Map.Entry<String, Long>> sorted = new ArrayList<>(vertexCountByType.entrySet());
+            sorted.sort(Map.Entry.<String, Long>comparingByValue().reversed());
+
+            for (Map.Entry<String, Long> e : sorted) {
+                if (count >= 20) break;
+                String type = e.getKey();
+                long tgt = e.getValue();
+
+                if (hasBaseline) {
+                    long src = sourceBaseline.typeVertexCounts.getOrDefault(type, 0L);
+                    long diff = tgt - src;
+                    String status = (src > 0 && diff < 0) ? "MISSING" : "OK";
+                    sb.append(String.format("  %-35s %,12d %,12d %,10d %8s\n",
+                        truncate(type, 35), tgt, src, diff, status));
+                } else {
+                    sb.append(String.format("  %-35s %,12d\n", truncate(type, 35), tgt));
+                }
+                count++;
+            }
+
+            int remaining = sorted.size() - 20;
+            if (remaining > 0) {
+                sb.append(String.format("  ... and %d more types\n", remaining));
+            }
+            sb.append("\n");
+        }
+
+        // Super vertex summary
+        if (superVertexReport != null && superVertexReport.getTotalSuperVertexCount() > 0) {
+            sb.append(THIN).append("\n");
+            sb.append("  SUPER VERTICES (").append(superVertexReport.getTotalSuperVertexCount()).append(" found)\n");
+            sb.append(THIN).append("\n\n");
+            sb.append(String.format("  %-40s %-20s %12s\n", "Vertex ID", "Type", "Edge Count"));
+            sb.append(String.format("  %-40s %-20s %12s\n", "─────────", "────", "──────────"));
+            for (SuperVertexReport.SuperVertexEntry entry : superVertexReport.getTopSuperVertices()) {
+                sb.append(String.format("  %-40s %-20s %,12d\n",
+                    truncate(entry.getVertexId(), 40),
+                    truncate(entry.getTypeName() != null ? entry.getTypeName() : "unknown", 20),
+                    entry.getEdgeCount()));
+            }
+            sb.append("\n");
+            sb.append(String.format("  Buckets:  >1K edges: %d  |  >10K: %d  |  >100K: %d  |  >1M: %d\n",
+                superVertexReport.getVerticesOver1kEdges(),
+                superVertexReport.getVerticesOver10kEdges(),
+                superVertexReport.getVerticesOver100kEdges(),
+                superVertexReport.getVerticesOver1mEdges()));
+            sb.append("\n");
+        }
+
+        // Final verdict
+        sb.append(LINE).append("\n");
+        if (overallPassed) {
+            long passCount = checks.stream().filter(ValidationCheckResult::isPassed).count();
+            sb.append("  RESULT: VALIDATION PASSED\n");
+            sb.append("  All ").append(passCount).append("/").append(checks.size())
+              .append(" checks passed. Migration is safe for cutover.\n");
+        } else {
+            long failCount = checks.stream().filter(c -> !c.isPassed()).count();
+            sb.append("  RESULT: VALIDATION FAILED\n");
+            sb.append("  ").append(failCount).append("/").append(checks.size())
+              .append(" checks failed. Migration is NOT safe for cutover.\n");
+            sb.append("  Failed checks:\n");
+            for (ValidationCheckResult c : checks) {
+                if (!c.isPassed()) {
+                    sb.append("    - ").append(c.getCheckName()).append(": ").append(c.getMessage()).append("\n");
+                }
+            }
+        }
+        sb.append(LINE).append("\n");
+
+        return sb.toString();
+    }
+
+    private static String truncate(String s, int max) {
+        if (s == null) return "";
+        return s.length() <= max ? s : s.substring(0, max - 3) + "...";
+    }
+
+    private static String formatDuration(Duration d) {
+        long secs = d.getSeconds();
+        if (secs < 60) return secs + "s";
+        if (secs < 3600) return String.format("%dm %ds", secs / 60, secs % 60);
+        return String.format("%dh %dm %ds", secs / 3600, (secs % 3600) / 60, secs % 60);
+    }
+
     /**
      * Serialize to a Map suitable for structured logging or future Mixpanel push.
      */
@@ -116,6 +352,14 @@ public class ValidationReport {
         m.put("edge_by_id_count", edgeByIdCount);
         m.put("es_doc_count", esDocCount);
         m.put("typedef_count", typeDefCount);
+
+        // Source-side direct counts
+        if (sourceEdgestoreCount >= 0) {
+            m.put("source_edgestore_count", sourceEdgestoreCount);
+        }
+        if (sourceEsDocCount >= 0) {
+            m.put("source_es_doc_count", sourceEsDocCount);
+        }
 
         // Source baseline comparison
         if (sourceBaseline != null) {

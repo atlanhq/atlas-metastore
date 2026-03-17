@@ -98,7 +98,7 @@ public class MigratorMain {
 
         try {
             if (validateOnly) {
-                runValidation(config, targetSession, stateStore);
+                runValidation(config, sourceSession, targetSession, stateStore);
             } else if (esOnly) {
                 runEsReindex(config, metrics, targetSession);
             } else {
@@ -242,8 +242,8 @@ public class MigratorMain {
         LOG.info("ES re-indexing complete: {} docs", metrics.getEsDocsIndexed());
     }
 
-    private static void runValidation(MigratorConfig config, CqlSession targetSession,
-                                       MigrationStateStore stateStore) {
+    private static void runValidation(MigratorConfig config, CqlSession sourceSession,
+                                       CqlSession targetSession, MigrationStateStore stateStore) {
         LOG.info("=== Validation Only Mode ===");
 
         // Try to load source baseline from a previous migration run
@@ -251,6 +251,7 @@ public class MigratorMain {
             SourceBaselineCollector.loadBaseline(stateStore);
 
         MigrationValidator validator = new MigrationValidator(config, targetSession, stateStore);
+        validator.setSourceSession(sourceSession);
         if (baseline != null) {
             validator.setSourceBaseline(baseline);
         }
