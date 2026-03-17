@@ -21,6 +21,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasEntity;
@@ -38,10 +39,13 @@ import org.apache.atlas.model.Tag;
 import org.apache.atlas.repository.store.graph.v2.tags.PaginatedTagResult;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
-import org.apache.atlas.service.config.DynamicConfigStore;
+import org.apache.atlas.repository.store.users.KeycloakStore;
 import org.apache.atlas.service.redis.RedisService;
 import org.apache.atlas.tasks.TaskManagement;
+import org.apache.atlas.model.TypeCategory;
+import org.apache.atlas.type.AtlasStructType;
 import org.apache.atlas.type.AtlasType;
+import org.apache.atlas.type.AtlasTypeRegistry;
 import org.janusgraph.util.encoding.LongEncoding;
 import org.apache.http.entity.ContentType;
 import org.apache.http.nio.entity.NStringEntity;
@@ -85,18 +89,20 @@ public class BulkPurgeService {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String HOSTNAME = getHostname();
 
-    // Internal defaults (not externally configurable — change here if needed)
+    // Internal defaults
     private static final int    COORDINATOR_POOL_SIZE           = 4;
     private static final int    ES_PAGE_SIZE                    = 5000;
     private static final int    COMMIT_MAX_RETRIES              = 3;
-    private static final long   COMMIT_TIMEOUT_MS               = 120_000;
-    private static final long   GET_VERTICES_TIMEOUT_MS         = 60_000;
     private static final int    HEARTBEAT_INTERVAL_MS           = 30_000;
     private static final int    SCROLL_TIMEOUT_MINUTES          = 30;
     private static final long   STALL_THRESHOLD_MS              = 900_000; // 15 minutes
-    private static final int    INCREMENTAL_ES_CLEANUP_INTERVAL = 500;
     private static final long   ORPHAN_CHECK_INTERVAL_MS        = 300_000;
     private static final int    ORPHAN_MAX_RESUBMITS            = 3;
+
+    // Configurable via ApplicationProperties (atlas.bulk.purge.*.ms)
+    private static final long   DEFAULT_COMMIT_TIMEOUT_MS       = 120_000;
+    private static final long   DEFAULT_GET_VERTICES_TIMEOUT_MS = 60_000;
+    private static final long   DEFAULT_ES_SETTLE_WAIT_MS       = 5_000;
 
     private final AtlasGraph graph;
     private final IAtlasGraphProvider graphProvider;
@@ -104,6 +110,7 @@ public class BulkPurgeService {
     private final Set<EntityAuditRepository> auditRepositories;
     private final AtlasDistributedTaskNotificationSender taskNotificationSender;
     private final TaskManagement taskManagement;
+    private final AtlasTypeRegistry typeRegistry;
 
     private final ThreadPoolExecutor coordinatorExecutor;
 
@@ -112,8 +119,12 @@ public class BulkPurgeService {
 
     // Lazily initialized ES client (cached for reuse across calls)
     private volatile RestClient esClient;
-    private volatile Boolean tagV2Override; // @VisibleForTesting: override DynamicConfigStore in tests
     private volatile TagDAO tagDAOOverride;  // @VisibleForTesting: override TagDAOCassandraImpl in tests
+
+    // Configurable timeouts (read from ApplicationProperties in constructor)
+    private final long commitTimeoutMs;
+    private final long getVerticesTimeoutMs;
+    private final long esSettleWaitMs;
 
     // Active purge tracking for cancel support
     private final ConcurrentHashMap<String, PurgeContext> activePurges = new ConcurrentHashMap<>();
@@ -127,13 +138,30 @@ public class BulkPurgeService {
                             RedisService redisService,
                             Set<EntityAuditRepository> auditRepositories,
                             AtlasDistributedTaskNotificationSender taskNotificationSender,
-                            TaskManagement taskManagement) {
+                            TaskManagement taskManagement,
+                            AtlasTypeRegistry typeRegistry) {
         this.graph = graph;
         this.graphProvider = graphProvider;
         this.redisService = redisService;
         this.auditRepositories = auditRepositories;
         this.taskNotificationSender = taskNotificationSender;
         this.taskManagement = taskManagement;
+        this.typeRegistry = typeRegistry;
+
+        // Read configurable timeouts from ApplicationProperties
+        long commitTimeout = DEFAULT_COMMIT_TIMEOUT_MS;
+        long getVerticesTimeout = DEFAULT_GET_VERTICES_TIMEOUT_MS;
+        long esSettle = DEFAULT_ES_SETTLE_WAIT_MS;
+        try {
+            commitTimeout = ApplicationProperties.get().getLong("atlas.bulk.purge.commit.timeout.ms", DEFAULT_COMMIT_TIMEOUT_MS);
+            getVerticesTimeout = ApplicationProperties.get().getLong("atlas.bulk.purge.get.vertices.timeout.ms", DEFAULT_GET_VERTICES_TIMEOUT_MS);
+            esSettle = ApplicationProperties.get().getLong("atlas.bulk.purge.es.settle.wait.ms", DEFAULT_ES_SETTLE_WAIT_MS);
+        } catch (Exception e) {
+            LOG.warn("BulkPurge: Could not read timeout config from ApplicationProperties, using defaults", e);
+        }
+        this.commitTimeoutMs = commitTimeout;
+        this.getVerticesTimeoutMs = getVerticesTimeout;
+        this.esSettleWaitMs = esSettle;
 
         this.coordinatorExecutor = new ThreadPoolExecutor(
                 COORDINATOR_POOL_SIZE, COORDINATOR_POOL_SIZE, 0L, TimeUnit.MILLISECONDS,
@@ -206,11 +234,6 @@ public class BulkPurgeService {
     @VisibleForTesting
     void setEsClient(RestClient client) {
         this.esClient = client;
-    }
-
-    @VisibleForTesting
-    void setTagV2Override(Boolean tagV2Enabled) {
-        this.tagV2Override = tagV2Enabled;
     }
 
     @VisibleForTesting
@@ -320,15 +343,28 @@ public class BulkPurgeService {
     }
 
     /**
-     * Cancel an in-progress purge. Interrupts worker threads if they are blocked.
-     */
-    /**
-     * Cancel a purge by requestId. Writes cancel signal to Redis first (durable,
-     * works cross-pod), then attempts local in-memory cancel for instant effect
-     * if this pod happens to be running the purge.
+     * Cancel a purge by requestId. Checks in-memory activePurges first (instant,
+     * no Redis round-trip), then falls back to Redis for cross-pod cancel.
      */
     public boolean cancelPurge(String requestId) {
-        // Look up purgeKey from Redis — this is the durable source of truth
+        // 1. Check in-memory first — instant cancel if this pod is running the purge
+        for (PurgeContext ctx : activePurges.values()) {
+            if (ctx.requestId.equals(requestId)) {
+                ctx.cancelRequested = true;
+                interruptWorkers(ctx);
+                // Also write Redis cancel signal for durability (survives pod crash)
+                try {
+                    int redisTtl = AtlasConfiguration.BULK_PURGE_REDIS_TTL_SECONDS.getInt();
+                    redisService.putValue(REDIS_CANCEL_PREFIX + ctx.purgeKey, "CANCEL_REQUESTED", redisTtl);
+                } catch (Exception e) {
+                    LOG.warn("BulkPurge: Failed to write Redis cancel signal for requestId={}", requestId, e);
+                }
+                LOG.info("BulkPurge: Local cancel applied for requestId={}, purgeKey={}", requestId, ctx.purgeKey);
+                return true;
+            }
+        }
+
+        // 2. Fall back to Redis — cross-pod cancel when purge runs on a different pod
         String redisValue = redisService.getValue("bulk_purge_request:" + requestId);
         if (redisValue == null) {
             return false;
@@ -341,20 +377,9 @@ public class BulkPurgeService {
                 return false;
             }
 
-            // 1. Redis first — ensures durability even if this pod crashes
             int redisTtl = AtlasConfiguration.BULK_PURGE_REDIS_TTL_SECONDS.getInt();
             redisService.putValue(REDIS_CANCEL_PREFIX + purgeKey, "CANCEL_REQUESTED", redisTtl);
             LOG.info("BulkPurge: Cancel signal written to Redis for requestId={}, purgeKey={}", requestId, purgeKey);
-
-            // 2. Local cancel — instant effect if this pod is running the purge
-            for (PurgeContext ctx : activePurges.values()) {
-                if (ctx.requestId.equals(requestId)) {
-                    ctx.cancelRequested = true;
-                    interruptWorkers(ctx);
-                    LOG.info("BulkPurge: Local cancel applied for requestId={}, purgeKey={}", requestId, purgeKey);
-                    break;
-                }
-            }
 
             return true;
         } catch (Exception e) {
@@ -476,16 +501,6 @@ public class BulkPurgeService {
             }
 
             ctx.status = "RUNNING";
-            if (tagV2Override != null) {
-                ctx.isTagV2 = tagV2Override;
-            } else {
-                try {
-                    ctx.isTagV2 = DynamicConfigStore.isTagV2Enabled();
-                } catch (Exception e) {
-                    LOG.warn("BulkPurge: Could not determine Tag V2 status, defaulting to false", e);
-                    ctx.isTagV2 = false;
-                }
-            }
             ctx.lastHeartbeat = System.currentTimeMillis();
             writeRedisStatus(ctx);
 
@@ -531,18 +546,21 @@ public class BulkPurgeService {
             } else {
                 long phaseStart = System.currentTimeMillis();
 
-                ctx.currentPhase = "ES_CLEANUP";
+                ctx.currentPhase = "ES_RECONCILIATION";
                 writeRedisStatus(ctx);
 
-                // Retry ES cleanup up to 3 times if entities remain after delete_by_query.
-                // The first attempt may fail due to transient ES issues (circuit breaker,
-                // concurrent load, shard relocation) — the exception is caught inside esCleanup().
-                int esCleanupMaxRetries = 3;
+                // Reconciliation-based ES cleanup:
+                // 1. Wait for JanusGraph's ES index mutations to settle
+                // 2. Scroll any remaining ES docs and check each against JanusGraph
+                // 3. If vertex is gone from graph → delete ES doc (index lag orphan)
+                // 4. If vertex still exists → retry graph deletion, then delete ES doc
+                // This ensures a clean final state: no orphans on either side.
+                int esReconcileMaxRetries = 3;
                 long remainingAfterEsCleanup = -1;
-                for (int esAttempt = 1; esAttempt <= esCleanupMaxRetries; esAttempt++) {
-                    esCleanup(ctx);
-                    LOG.info("BulkPurge: ES cleanup attempt {}/{} completed in {}ms for purgeKey={}",
-                            esAttempt, esCleanupMaxRetries, System.currentTimeMillis() - phaseStart, ctx.purgeKey);
+                for (int esAttempt = 1; esAttempt <= esReconcileMaxRetries; esAttempt++) {
+                    reconcileESCleanup(ctx);
+                    LOG.info("BulkPurge: ES reconciliation attempt {}/{} completed in {}ms for purgeKey={}",
+                            esAttempt, esReconcileMaxRetries, System.currentTimeMillis() - phaseStart, ctx.purgeKey);
 
                     try {
                         remainingAfterEsCleanup = getEntityCount(ctx.esQuery);
@@ -556,8 +574,8 @@ public class BulkPurgeService {
                         break;
                     }
 
-                    if (esAttempt < esCleanupMaxRetries) {
-                        LOG.warn("BulkPurge: {} entities remain after ES cleanup attempt {} for purgeKey={}, retrying...",
+                    if (esAttempt < esReconcileMaxRetries) {
+                        LOG.warn("BulkPurge: {} entities remain after ES reconciliation attempt {} for purgeKey={}, retrying...",
                                 remainingAfterEsCleanup, esAttempt, ctx.purgeKey);
                         try { Thread.sleep(2000L * esAttempt); } catch (InterruptedException ie) {
                             Thread.currentThread().interrupt();
@@ -570,9 +588,9 @@ public class BulkPurgeService {
                 writeRedisStatus(ctx);
                 ctx.remainingAfterCleanup = Math.max(0, remainingAfterEsCleanup);
                 if (remainingAfterEsCleanup > 0) {
-                    LOG.error("BulkPurge: {} entities remain after all ES cleanup attempts for purgeKey={}",
-                            remainingAfterEsCleanup, ctx.purgeKey);
-                    ctx.error = remainingAfterEsCleanup + " entities remain after cleanup";
+                    LOG.warn("BulkPurge: {} entities remain after all reconciliation attempts for purgeKey={}. " +
+                            "These may require manual cleanup.", remainingAfterEsCleanup, ctx.purgeKey);
+                    ctx.error = remainingAfterEsCleanup + " entities remain after reconciliation";
                 } else {
                     LOG.info("BulkPurge: Verification passed — 0 entities remaining for purgeKey={}", ctx.purgeKey);
                 }
@@ -603,6 +621,20 @@ public class BulkPurgeService {
                 writeRedisStatus(ctx);
                 triggerRelayPropagationRefresh(ctx);
                 LOG.info("BulkPurge: Phase RELAY_PROPAGATION_REFRESH completed in {}ms for purgeKey={}",
+                        System.currentTimeMillis() - phaseStart, ctx.purgeKey);
+
+                phaseStart = System.currentTimeMillis();
+                ctx.currentPhase = "DATAPRODUCT_PORT_CLEANUP";
+                writeRedisStatus(ctx);
+                cleanDataProductPortReferences(ctx);
+                LOG.info("BulkPurge: Phase DATAPRODUCT_PORT_CLEANUP completed in {}ms for purgeKey={}",
+                        System.currentTimeMillis() - phaseStart, ctx.purgeKey);
+
+                phaseStart = System.currentTimeMillis();
+                ctx.currentPhase = "EXTERNAL_VERTEX_REFRESH";
+                writeRedisStatus(ctx);
+                refreshExternalVertices(ctx);
+                LOG.info("BulkPurge: Phase EXTERNAL_VERTEX_REFRESH completed in {}ms for purgeKey={}",
                         System.currentTimeMillis() - phaseStart, ctx.purgeKey);
 
                 if (ctx.deleteConnection && PURGE_MODE_CONNECTION.equals(ctx.purgeMode)) {
@@ -789,8 +821,10 @@ public class BulkPurgeService {
 
     /**
      * Process a single batch: delete vertices, commit, update progress.
-     * Uses batch vertex retrieval (single round-trip) and relies on
-     * JanusGraph's AbstractVertex.remove() to handle edge cleanup internally.
+     * Uses batch vertex retrieval (single round-trip). Explicitly removes all
+     * adjacent edges before removing each vertex to ensure clean Cassandra state —
+     * this mirrors the regular delete path (DeleteHandlerV1) and prevents orphaned
+     * edge columns from keeping the vertex row alive in the storage backend.
      */
     private void processBatch(PurgeContext ctx, BatchWork work, AtlasGraph workerGraph) {
         long batchStartTime = System.nanoTime();
@@ -806,7 +840,7 @@ public class BulkPurgeService {
         Future<Set<AtlasVertex>> getVerticesFuture = null;
         try {
             getVerticesFuture = timeoutExecutor.submit(() -> workerGraph.getVertices(ids));
-            vertexSet = getVerticesFuture.get(GET_VERTICES_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            vertexSet = getVerticesFuture.get(getVerticesTimeoutMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             LOG.error("BulkPurge: getVertices TIMED OUT for batch {} (purgeKey={})", work.batchIndex, ctx.purgeKey);
             if (getVerticesFuture != null) getVerticesFuture.cancel(true);
@@ -851,10 +885,52 @@ public class BulkPurgeService {
                     collectLineageNs += (System.nanoTime() - lineageT0);
                 }
 
-                if (ctx.isTagV2) {
-                    List<String> traitNames = vertex.getMultiValuedProperty(TRAIT_NAMES_PROPERTY_KEY, String.class);
-                    if (traitNames != null && !traitNames.isEmpty()) {
-                        ctx.entitiesWithDirectTags.add(vertexId);
+                String guid = vertex.getProperty(GUID_PROPERTY_KEY, String.class);
+                if (guid != null) {
+                    ctx.deletedAssetGuids.add(guid);
+                }
+
+                List<String> traitNames = vertex.getMultiValuedProperty(TRAIT_NAMES_PROPERTY_KEY, String.class);
+                if (traitNames != null && !traitNames.isEmpty()) {
+                    ctx.entitiesWithDirectTags.add(vertexId);
+                }
+
+                // Explicitly remove all adjacent edges before removing the vertex.
+                // The regular delete path (DeleteHandlerV1.deleteVertex) does this edge-by-edge;
+                // on a bulk-loading graph, relying solely on JanusGraph's internal
+                // AbstractVertex.remove() can leave orphaned edge columns in Cassandra,
+                // causing the vertex row to survive even after commit.
+                List<AtlasVertex> structVertices = null; // lazy-init — avoids allocation when no structs (common case)
+
+                Iterable<AtlasEdge> edges = vertex.getEdges(AtlasEdgeDirection.BOTH);
+                for (AtlasEdge edge : edges) {
+                    try {
+                        AtlasVertex other = edge.getOutVertex().getId().equals(vertex.getId())
+                                ? edge.getInVertex() : edge.getOutVertex();
+                        if (isExternalVertex(ctx, other)) {
+                            ctx.externalVertexIds.add(other.getId().toString());
+                        } else if (isStructVertex(other)) {
+                            if (structVertices == null) structVertices = new ArrayList<>(4);
+                            structVertices.add(other);
+                        }
+                    } catch (Exception e) {
+                        LOG.debug("BulkPurge: Could not check status for edge endpoint", e);
+                    }
+                    workerGraph.removeEdge(edge);
+                }
+
+                // Clean up struct vertices (now orphaned — their parent edge was just removed)
+                if (structVertices != null) {
+                    for (AtlasVertex sv : structVertices) {
+                        try {
+                            Iterable<AtlasEdge> structEdges = sv.getEdges(AtlasEdgeDirection.BOTH);
+                            for (AtlasEdge sEdge : structEdges) {
+                                workerGraph.removeEdge(sEdge);
+                            }
+                            workerGraph.removeVertex(sv);
+                        } catch (Exception e) {
+                            LOG.debug("BulkPurge: Failed to remove struct vertex {}", sv.getId(), e);
+                        }
                     }
                 }
 
@@ -910,11 +986,6 @@ public class BulkPurgeService {
         if (batches % 10 == 0) {
             writeRedisStatus(ctx);
         }
-
-        // P6: Incremental ES cleanup every N committed batches
-        if (INCREMENTAL_ES_CLEANUP_INTERVAL > 0 && batches % INCREMENTAL_ES_CLEANUP_INTERVAL == 0 && committed) {
-            triggerIncrementalEsCleanup(ctx);
-        }
     }
 
     private boolean commitWithRetry(AtlasGraph workerGraph, int batchIndex) {
@@ -923,11 +994,11 @@ public class BulkPurgeService {
             try {
                 // P1: Commit with timeout to prevent indefinite blocking
                 commitFuture = timeoutExecutor.submit(() -> workerGraph.commit());
-                commitFuture.get(COMMIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                commitFuture.get(commitTimeoutMs, TimeUnit.MILLISECONDS);
                 return true;
             } catch (TimeoutException e) {
                 LOG.error("BulkPurge: Commit TIMED OUT for batch {} (attempt {}/{}, timeout={}ms)",
-                        batchIndex, attempt, COMMIT_MAX_RETRIES, COMMIT_TIMEOUT_MS);
+                        batchIndex, attempt, COMMIT_MAX_RETRIES, commitTimeoutMs);
                 // Cancel the still-running commit to prevent race with rollback
                 if (commitFuture != null) commitFuture.cancel(true);
                 // Don't retry on timeout — Cassandra is likely under pressure
@@ -1005,6 +1076,25 @@ public class BulkPurgeService {
             // The ES query uses purgeKey as prefix. For CONNECTION mode the prefix has a trailing "/",
             // but for QN_PREFIX mode it may not. Use startsWith on the raw purgeKey.
             return !otherQNH.startsWith(ctx.purgeKey);
+        }
+    }
+
+    /**
+     * Check if a vertex is a struct vertex (composite attribute container).
+     * Struct vertices have __typeName but no __guid (entity vertices always have __guid).
+     * The __guid fast-path eliminates 99.9% of candidates with a single cheap property read.
+     */
+    private boolean isStructVertex(AtlasVertex vertex) {
+        if (vertex.getProperty(GUID_PROPERTY_KEY, String.class) != null) {
+            return false; // entity vertices always have __guid
+        }
+        String typeName = vertex.getProperty(ENTITY_TYPE_PROPERTY_KEY, String.class);
+        if (typeName == null) return false;
+        try {
+            AtlasType type = typeRegistry.getType(typeName);
+            return type.getTypeCategory() == TypeCategory.STRUCT;
+        } catch (AtlasBaseException e) {
+            return false;
         }
     }
 
@@ -1111,92 +1201,226 @@ public class BulkPurgeService {
     // ======================== POST-PURGE PHASE ========================
 
     /**
-     * Phase 3a: ES delete_by_query as safety-net cleanup.
-     * Uses wait_for_completion=false for large purges to avoid blocking on a
-     * slow single-node ES. Falls back to synchronous mode if async submission fails.
+     * Phase 3a: Reconciliation-based ES cleanup.
+     *
+     * Instead of a blanket _delete_by_query (which deletes ALL entities matching the prefix,
+     * even those whose graph deletion was never attempted or failed), this method:
+     *
+     * 1. Waits for JanusGraph's ES index mutations to settle (refresh + short delay)
+     * 2. Counts remaining ES docs matching the prefix query
+     * 3. If 0: done — JanusGraph's MixedIndex handled everything during commit
+     * 4. If any remain, scrolls through them and checks each against JanusGraph:
+     *    a. Vertex GONE from graph → index lag orphan. Delete ES doc directly.
+     *    b. Vertex STILL in graph → graph deletion failed/was never attempted.
+     *       Retry the graph deletion (edges + vertex), commit, then delete ES doc.
+     *
+     * This achieves a clean final state — no orphans on either side — without the
+     * dangerous blanket _delete_by_query that caused ES/Graph desync on crash recovery.
+     *
+     * Performance: In the normal path, JanusGraph index mutations already cleaned ES
+     * during commit, so step 2 count is 0 — fast exit. In crash/failure recovery,
+     * the scroll + graph check is O(remaining) with ~1-5ms per Cassandra point-read.
      */
-    private void esCleanup(PurgeContext ctx) {
+    private void reconcileESCleanup(PurgeContext ctx) {
         try {
             RestClient esClient = getEsClient();
 
-            if (ctx.totalDiscovered > 10_000) {
-                // Large purge: run async to avoid blocking the coordinator thread
-                esCleanupAsync(esClient, ctx);
-            } else {
-                // Small purge: synchronous is fine
-                esCleanupSync(esClient, ctx);
+            // Wait for JanusGraph's ES index mutations to settle.
+            // After bulk-loading graph commits, the MixedIndex mutations may still be
+            // in-flight to ES. A refresh + short delay ensures they are visible.
+            refreshEsIndex(esClient);
+            try { Thread.sleep(esSettleWaitMs); } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return;
             }
-        } catch (Exception e) {
-            LOG.error("BulkPurge: ES cleanup failed for purgeKey={}. Manual cleanup may be needed.", ctx.purgeKey, e);
-        }
-    }
+            refreshEsIndex(esClient);
 
-    private void esCleanupSync(RestClient esClient, PurgeContext ctx) throws Exception {
-        String endpoint = "/" + VERTEX_INDEX_NAME + "/_delete_by_query?conflicts=proceed&refresh=false&requests_per_second=5000";
-
-        Request request = new Request("POST", endpoint);
-        request.setEntity(new NStringEntity(ctx.esQuery, ContentType.APPLICATION_JSON));
-
-        Response response = esClient.performRequest(request);
-        String responseBody = readResponseBody(response);
-        LOG.info("BulkPurge: ES cleanup completed (sync) for purgeKey={}, response={}", ctx.purgeKey, responseBody);
-    }
-
-    private void esCleanupAsync(RestClient esClient, PurgeContext ctx) throws Exception {
-        // Submit as async task — ES returns immediately with a task ID
-        String endpoint = "/" + VERTEX_INDEX_NAME + "/_delete_by_query?conflicts=proceed&wait_for_completion=false&requests_per_second=5000";
-
-        Request request = new Request("POST", endpoint);
-        request.setEntity(new NStringEntity(ctx.esQuery, ContentType.APPLICATION_JSON));
-
-        Response response = esClient.performRequest(request);
-        String responseBody = readResponseBody(response);
-        JsonNode root = MAPPER.readTree(responseBody);
-
-        String taskId = root.has("task") ? root.get("task").asText() : null;
-        if (taskId == null) {
-            LOG.warn("BulkPurge: ES delete_by_query did not return task ID, response={}", responseBody);
-            return;
-        }
-
-        LOG.info("BulkPurge: ES cleanup submitted as async task={} for purgeKey={}", taskId, ctx.purgeKey);
-
-        // Poll task status until complete (with timeout)
-        long maxWaitMs = 5 * 60 * 1000; // 5 minutes max
-        long deadline = System.currentTimeMillis() + maxWaitMs;
-        int pollIntervalMs = 2000;
-
-        while (System.currentTimeMillis() < deadline) {
-            Thread.sleep(pollIntervalMs);
-
-            Request taskRequest = new Request("GET", "/_tasks/" + taskId);
-            Response taskResponse = esClient.performRequest(taskRequest);
-            String taskBody = readResponseBody(taskResponse);
-            JsonNode taskNode = MAPPER.readTree(taskBody);
-
-            boolean completed = taskNode.has("completed") && taskNode.get("completed").asBoolean();
-            if (completed) {
-                JsonNode taskResponseNode = taskNode.path("response");
-                long deleted = taskResponseNode.path("deleted").asLong();
-                long failures = taskResponseNode.path("failures").size();
-                LOG.info("BulkPurge: ES cleanup completed (async) for purgeKey={}, deleted={}, failures={}",
-                        ctx.purgeKey, deleted, failures);
-
-                // Refresh index so subsequent _count verification sees the deletions
-                refreshEsIndex(esClient);
+            long remaining = getEntityCount(ctx.esQuery);
+            if (remaining <= 0) {
+                LOG.info("BulkPurge: ES reconciliation — 0 docs remaining, nothing to clean for purgeKey={}", ctx.purgeKey);
                 return;
             }
 
-            // Log progress
-            JsonNode taskStatus = taskNode.path("task").path("status");
-            long esDeleted = taskStatus.path("deleted").asLong();
-            long esTotal = taskStatus.path("total").asLong();
-            LOG.debug("BulkPurge: ES cleanup in progress for purgeKey={}, deleted={}/{}",
-                    ctx.purgeKey, esDeleted, esTotal);
+            LOG.info("BulkPurge: ES reconciliation — {} docs remain after graph phase for purgeKey={}, " +
+                    "reconciling against JanusGraph", remaining, ctx.purgeKey);
+
+            reconcileESOrphans(esClient, ctx);
+
+        } catch (Exception e) {
+            LOG.error("BulkPurge: ES reconciliation failed for purgeKey={}. Manual cleanup may be needed.", ctx.purgeKey, e);
+        }
+    }
+
+    /**
+     * Scroll remaining ES docs and for each:
+     * - If vertex is gone from graph: delete the ES doc (index lag orphan)
+     * - If vertex still in graph: retry graph deletion, then delete ES doc
+     *
+     * Uses the normal (non-bulk-loading) graph instance for retry deletes, which
+     * has proper locking and index mutation guarantees.
+     */
+    private void reconcileESOrphans(RestClient esClient, PurgeContext ctx) throws Exception {
+        String scrollTimeout = SCROLL_TIMEOUT_MINUTES + "m";
+        String scrollQuery = buildScrollQuery(ctx.esQuery, ES_PAGE_SIZE);
+
+        String endpoint = "/" + VERTEX_INDEX_NAME + "/_search?scroll=" + scrollTimeout;
+        Request searchRequest = new Request("POST", endpoint);
+        searchRequest.setEntity(new NStringEntity(scrollQuery, ContentType.APPLICATION_JSON));
+
+        Response response = esClient.performRequest(searchRequest);
+        String responseBody = readResponseBody(response);
+        JsonNode root = MAPPER.readTree(responseBody);
+
+        String scrollId = root.get("_scroll_id").asText();
+        JsonNode hits = root.get("hits").get("hits");
+
+        int totalOrphansDeleted = 0;
+        int totalRetryDeleted = 0;
+        int totalRetryFailed = 0;
+        int totalCheckErrors = 0;
+
+        try {
+            while (hits != null && hits.size() > 0 && !ctx.cancelRequested) {
+                // Collect ES doc IDs from this scroll page
+                List<String> esDocIds = new ArrayList<>(hits.size());
+                for (JsonNode hit : hits) {
+                    esDocIds.add(hit.get("_id").asText());
+                }
+
+                // Check each against JanusGraph
+                List<String> orphanDocIds = new ArrayList<>();
+                List<String> retryVertexIds = new ArrayList<>();
+
+                for (String esDocId : esDocIds) {
+                    if (ctx.cancelRequested) break;
+
+                    try {
+                        String vertexId = String.valueOf(LongEncoding.decode(esDocId));
+                        AtlasVertex vertex = graph.getVertex(vertexId);
+                        if (vertex == null) {
+                            // Vertex gone from JanusGraph — ES doc is an index lag orphan
+                            orphanDocIds.add(esDocId);
+                        } else {
+                            // Vertex still in graph — graph deletion failed or was never attempted
+                            retryVertexIds.add(vertexId);
+                        }
+                    } catch (Exception e) {
+                        LOG.debug("BulkPurge: ES reconciliation — could not verify vertex for ES doc {}", esDocId, e);
+                        totalCheckErrors++;
+                    }
+                }
+
+                // Delete orphan ES docs (vertex already gone from graph)
+                if (!orphanDocIds.isEmpty()) {
+                    deleteESDocsByIds(esClient, orphanDocIds);
+                    totalOrphansDeleted += orphanDocIds.size();
+                }
+
+                // Retry graph deletion for vertices that survived the main phase.
+                // Uses the normal graph (not bulk-loading) for proper locking + index mutations.
+                if (!retryVertexIds.isEmpty() && !ctx.cancelRequested) {
+                    int[] result = retryGraphDeletion(retryVertexIds);
+                    totalRetryDeleted += result[0];
+                    totalRetryFailed += result[1];
+                }
+
+                if (ctx.cancelRequested) break;
+
+                // Scroll next page
+                Request scrollRequest = new Request("POST", "/_search/scroll");
+                String scrollBody = MAPPER.writeValueAsString(
+                        MAPPER.createObjectNode()
+                                .put("scroll", scrollTimeout)
+                                .put("scroll_id", scrollId));
+                scrollRequest.setEntity(new NStringEntity(scrollBody, ContentType.APPLICATION_JSON));
+
+                response = esClient.performRequest(scrollRequest);
+                responseBody = readResponseBody(response);
+                root = MAPPER.readTree(responseBody);
+                scrollId = root.get("_scroll_id").asText();
+                hits = root.get("hits").get("hits");
+            }
+        } finally {
+            clearScroll(esClient, scrollId);
         }
 
-        LOG.warn("BulkPurge: ES cleanup async task {} did not complete within {}ms for purgeKey={}. " +
-                "Task continues in background.", taskId, maxWaitMs, ctx.purgeKey);
+        // Refresh so deletions (from both orphan cleanup and retry graph commits) are visible
+        refreshEsIndex(esClient);
+
+        LOG.info("BulkPurge: ES reconciliation completed for purgeKey={}: orphansDeleted={}, " +
+                        "retryDeleted={}, retryFailed={}, checkErrors={}",
+                ctx.purgeKey, totalOrphansDeleted, totalRetryDeleted, totalRetryFailed, totalCheckErrors);
+
+        // Update totalDeleted/totalFailed counters so status reflects final state
+        if (totalRetryDeleted > 0) {
+            ctx.totalDeleted.addAndGet(totalRetryDeleted);
+        }
+        // retryFailed vertices were already counted in totalFailed during the main phase,
+        // so don't double-count them here.
+    }
+
+    /**
+     * Retry graph deletion for vertices that survived the main parallel phase.
+     * Uses the normal graph instance (with proper locking) and commits per batch.
+     * JanusGraph's MixedIndex will handle ES deletion on commit.
+     *
+     * @return int[2]: [successCount, failureCount]
+     */
+    private int[] retryGraphDeletion(List<String> vertexIds) {
+        int deleted = 0;
+        int failed = 0;
+
+        for (String vertexId : vertexIds) {
+            try {
+                AtlasVertex vertex = graph.getVertex(vertexId);
+                if (vertex == null) {
+                    // Already gone (race with another cleanup) — count as success
+                    deleted++;
+                    continue;
+                }
+
+                // Remove edges then vertex, same as processBatch
+                Iterable<AtlasEdge> edges = vertex.getEdges(AtlasEdgeDirection.BOTH);
+                for (AtlasEdge edge : edges) {
+                    graph.removeEdge(edge);
+                }
+                graph.removeVertex(vertex);
+                graph.commit();
+                deleted++;
+            } catch (Exception e) {
+                LOG.warn("BulkPurge: Retry graph deletion failed for vertex {}", vertexId, e);
+                failed++;
+                try {
+                    graph.rollback();
+                } catch (Exception re) {
+                    LOG.debug("BulkPurge: Rollback failed after retry deletion failure", re);
+                }
+            }
+        }
+
+        if (deleted > 0 || failed > 0) {
+            LOG.info("BulkPurge: Retry graph deletion batch: deleted={}, failed={}", deleted, failed);
+        }
+        return new int[]{deleted, failed};
+    }
+
+    /**
+     * Delete a batch of ES documents by their _id field using _delete_by_query with a terms filter.
+     */
+    private void deleteESDocsByIds(RestClient esClient, List<String> docIds) throws Exception {
+        // Build: {"query":{"terms":{"_id":["id1","id2",...]}}}
+        ObjectNode query = MAPPER.createObjectNode();
+        ObjectNode queryBody = MAPPER.createObjectNode();
+        ObjectNode terms = MAPPER.createObjectNode();
+        terms.set("_id", MAPPER.valueToTree(docIds));
+        queryBody.set("terms", terms);
+        query.set("query", queryBody);
+
+        String endpoint = "/" + VERTEX_INDEX_NAME + "/_delete_by_query?conflicts=proceed&refresh=false";
+
+        Request request = new Request("POST", endpoint);
+        request.setEntity(new NStringEntity(MAPPER.writeValueAsString(query), ContentType.APPLICATION_JSON));
+        esClient.performRequest(request);
     }
 
     private void refreshEsIndex(RestClient esClient) {
@@ -1205,27 +1429,6 @@ public class BulkPurgeService {
             esClient.performRequest(refreshRequest);
         } catch (Exception e) {
             LOG.warn("BulkPurge: ES index refresh failed (verification count may be stale)", e);
-        }
-    }
-
-    /**
-     * P6: Fire an async ES _delete_by_query to clean up already-committed batches incrementally.
-     * Non-blocking, idempotent (conflicts=proceed), runs in background.
-     */
-    private void triggerIncrementalEsCleanup(PurgeContext ctx) {
-        try {
-            RestClient esClient = getEsClient();
-            String endpoint = "/" + VERTEX_INDEX_NAME + "/_delete_by_query?conflicts=proceed&wait_for_completion=false&requests_per_second=5000";
-
-            Request request = new Request("POST", endpoint);
-            request.setEntity(new NStringEntity(ctx.esQuery, ContentType.APPLICATION_JSON));
-
-            Response response = esClient.performRequest(request);
-            String responseBody = readResponseBody(response);
-            LOG.info("BulkPurge: Incremental ES cleanup submitted for purgeKey={}, batches={}, response={}",
-                    ctx.purgeKey, ctx.completedBatches.get(), responseBody);
-        } catch (Exception e) {
-            LOG.warn("BulkPurge: Incremental ES cleanup failed for purgeKey={}", ctx.purgeKey, e);
         }
     }
 
@@ -1266,8 +1469,11 @@ public class BulkPurgeService {
                 return;
             }
 
-            // Capture the GUID before deleting the graph vertex — needed for ES cleanup
+            // Capture the GUID before deleting the graph vertex — needed for ES and policy cleanup
             String connGuid = connVertex.getProperty(GUID_PROPERTY_KEY, String.class);
+
+            // Clean up bootstrap auth policies and Keycloak role BEFORE removing the connection vertex
+            cleanConnectionPoliciesAndRole(ctx, connGuid);
 
             // removeVertex() handles edge removal internally via JanusGraph's
             // AbstractVertex.remove() — no need for explicit edge iteration
@@ -1280,7 +1486,7 @@ public class BulkPurgeService {
             LOG.info("BulkPurge: Connection entity deleted for purgeKey={}", ctx.purgeKey);
 
             // Delete the Connection entity's ES document.
-            // The main esCleanup uses prefix "connectionQN/" which only matches children,
+            // The main ES reconciliation uses prefix "connectionQN/" which only matches children,
             // not the Connection entity itself (its __qualifiedNameHierarchy has no trailing "/").
             deleteConnectionFromES(ctx, connGuid);
         } catch (Exception e) {
@@ -1311,6 +1517,104 @@ public class BulkPurgeService {
             LOG.warn("BulkPurge: Failed to delete Connection ES document for purgeKey={}, guid={}. " +
                     "Document will be orphaned in ES.", ctx.purgeKey, connGuid, e);
         }
+    }
+
+    /**
+     * Delete bootstrap AuthPolicy entities and Keycloak role for a connection.
+     * Mirrors ConnectionPreProcessor.processDelete() but uses direct graph operations.
+     * Failures here are logged but do NOT block connection deletion.
+     */
+    private void cleanConnectionPoliciesAndRole(PurgeContext ctx, String connGuid) {
+        if (connGuid == null) {
+            return;
+        }
+
+        String roleName = String.format("connection_admins_%s", connGuid);
+
+        try {
+            List<String> policyVertexIds = findConnectionPolicyVertexIds(connGuid, roleName);
+
+            if (!policyVertexIds.isEmpty()) {
+                LOG.info("BulkPurge: Deleting {} bootstrap policies for connection {}", policyVertexIds.size(), connGuid);
+
+                List<String> policyEsIds = new ArrayList<>();
+                for (String vertexId : policyVertexIds) {
+                    try {
+                        AtlasVertex policyVertex = graph.getVertex(vertexId);
+                        if (policyVertex != null) {
+                            policyEsIds.add(LongEncoding.encode(Long.parseLong(vertexId)));
+
+                            Iterable<AtlasEdge> edges = policyVertex.getEdges(AtlasEdgeDirection.BOTH);
+                            for (AtlasEdge edge : edges) {
+                                graph.removeEdge(edge);
+                            }
+                            graph.removeVertex(policyVertex);
+                            graph.commit();
+                        }
+                    } catch (Exception e) {
+                        LOG.warn("BulkPurge: Failed to delete policy vertex {} for connection {}", vertexId, connGuid, e);
+                        try { graph.rollback(); } catch (Exception rbEx) { LOG.warn("BulkPurge: Rollback failed", rbEx); }
+                    }
+                }
+
+                // Belt-and-suspenders: also remove policy ES docs
+                if (!policyEsIds.isEmpty()) {
+                    deleteESDocsByIds(getEsClient(), policyEsIds);
+                }
+            } else {
+                LOG.info("BulkPurge: No bootstrap policies found for connection {}", connGuid);
+            }
+        } catch (Exception e) {
+            LOG.warn("BulkPurge: Failed to find/delete policies for connection {}", connGuid, e);
+        }
+
+        // Remove Keycloak role
+        try {
+            new KeycloakStore().removeRoleByName(roleName);
+            LOG.info("BulkPurge: Keycloak role {} removed for connection {}", roleName, connGuid);
+        } catch (Exception e) {
+            LOG.warn("BulkPurge: Failed to remove Keycloak role {} for connection {}", roleName, connGuid, e);
+        }
+    }
+
+    /**
+     * Query ES to find AuthPolicy vertex IDs for a connection's bootstrap policies.
+     */
+    private List<String> findConnectionPolicyVertexIds(String connGuid, String roleName) throws Exception {
+        RestClient esClient = getEsClient();
+
+        ObjectNode query = MAPPER.createObjectNode();
+        ObjectNode boolNode = MAPPER.createObjectNode();
+
+        boolNode.set("must", MAPPER.createArrayNode()
+                .add(MAPPER.createObjectNode().set("term", MAPPER.createObjectNode().put("__typeName.keyword", "AuthPolicy")))
+                .add(MAPPER.createObjectNode().set("prefix", MAPPER.createObjectNode().put(QUALIFIED_NAME, connGuid + "/")))
+                .add(MAPPER.createObjectNode().set("term", MAPPER.createObjectNode().put("policyRoles", roleName))));
+
+        query.set("query", MAPPER.createObjectNode().set("bool", boolNode));
+        query.put("size", 1000);
+        query.put("_source", false);
+
+        String endpoint = "/" + VERTEX_INDEX_NAME + "/_search";
+        Request request = new Request("POST", endpoint);
+        request.setEntity(new NStringEntity(query.toString(), ContentType.APPLICATION_JSON));
+
+        Response response = esClient.performRequest(request);
+        JsonNode root = MAPPER.readTree(response.getEntity().getContent());
+        JsonNode hits = root.path("hits").path("hits");
+
+        List<String> vertexIds = new ArrayList<>();
+        for (JsonNode hit : hits) {
+            String esId = hit.path("_id").asText();
+            try {
+                long vertexIdLong = LongEncoding.decode(esId);
+                vertexIds.add(String.valueOf(vertexIdLong));
+            } catch (Exception e) {
+                LOG.debug("BulkPurge: Could not decode ES _id {} for policy lookup", esId);
+            }
+        }
+
+        return vertexIds;
     }
 
     /**
@@ -1406,7 +1710,7 @@ public class BulkPurgeService {
         LOG.info("BulkPurge: Checking {} external vertices for stale propagated classifications for purgeKey={}",
                 ctx.externalLineageVertexIds.size(), ctx.purgeKey);
 
-        TagDAO tagDAO = ctx.isTagV2 ? getTagDAO() : null;
+        TagDAO tagDAO = getTagDAO();
         int cleaned = 0;
         int errors = 0;
 
@@ -1417,11 +1721,7 @@ public class BulkPurgeService {
                     continue;
                 }
 
-                if (ctx.isTagV2) {
-                    cleaned += repairPropagatedClassificationsV2(vertex, vertexId, tagDAO);
-                } else {
-                    cleaned += repairPropagatedClassificationsV1(vertex, vertexId);
-                }
+                cleaned += repairPropagatedClassificationsV2(vertex, vertexId, tagDAO);
             } catch (Exception e) {
                 LOG.warn("BulkPurge: Failed to clean propagated classifications for vertex {}", vertexId, e);
                 errors++;
@@ -1433,54 +1733,6 @@ public class BulkPurgeService {
 
         LOG.info("BulkPurge: Propagated classification cleanup complete for purgeKey={}: cleaned={}, errors={}",
                 ctx.purgeKey, cleaned, errors);
-    }
-
-    /**
-     * V1 path: Clean stale propagated classification edges on an external vertex.
-     * Uses graph classification edges to find propagated tags where the source entity no longer exists.
-     */
-    private int repairPropagatedClassificationsV1(AtlasVertex vertex, String vertexId) {
-        List<String> staleClassificationNames = new ArrayList<>();
-
-        Iterable<AtlasEdge> classEdges = vertex.getEdges(AtlasEdgeDirection.OUT, CLASSIFICATION_LABEL);
-        List<AtlasEdge> edgesToRemove = new ArrayList<>();
-
-        for (AtlasEdge edge : classEdges) {
-            Boolean isPropagated = edge.getProperty(CLASSIFICATION_EDGE_IS_PROPAGATED_PROPERTY_KEY, Boolean.class);
-            if (!Boolean.TRUE.equals(isPropagated)) {
-                continue;
-            }
-
-            AtlasVertex classificationVertex = edge.getInVertex();
-            String sourceEntityGuid = classificationVertex.getProperty(CLASSIFICATION_ENTITY_GUID, String.class);
-
-            if (sourceEntityGuid != null) {
-                AtlasVertex sourceEntity = AtlasGraphUtilsV2.findByGuid(graph, sourceEntityGuid);
-                if (sourceEntity == null) {
-                    String classificationName = edge.getProperty(CLASSIFICATION_EDGE_NAME_PROPERTY_KEY, String.class);
-                    if (classificationName != null) {
-                        staleClassificationNames.add(classificationName);
-                    }
-                    edgesToRemove.add(edge);
-                }
-            }
-        }
-
-        if (!edgesToRemove.isEmpty()) {
-            for (AtlasEdge edge : edgesToRemove) {
-                graph.removeEdge(edge);
-            }
-
-            for (String staleName : staleClassificationNames) {
-                removePropagatedTraitFromVertex(vertex, staleName);
-            }
-
-            graph.commit();
-            LOG.debug("BulkPurge: Cleaned {} stale propagated classifications (V1) from vertex {}",
-                    staleClassificationNames.size(), vertexId);
-        }
-
-        return edgesToRemove.isEmpty() ? 0 : 1;
     }
 
     /**
@@ -1542,18 +1794,14 @@ public class BulkPurgeService {
             return;
         }
 
-        TagDAO tagDAO = ctx.isTagV2 ? getTagDAO() : null;
+        TagDAO tagDAO = getTagDAO();
 
         Set<String> refreshKeys = new HashSet<>();
         List<String[]> tasksToCreate = new ArrayList<>();
 
         for (String extVertexId : ctx.externalLineageVertexIds) {
             try {
-                if (ctx.isTagV2) {
-                    collectRelaySourcesV2(extVertexId, tagDAO, refreshKeys, tasksToCreate);
-                } else {
-                    collectRelaySourcesV1(extVertexId, refreshKeys, tasksToCreate);
-                }
+                collectRelaySourcesV2(extVertexId, tagDAO, refreshKeys, tasksToCreate);
             } catch (Exception e) {
                 LOG.warn("BulkPurge: Failed to collect relay sources for vertex {}", extVertexId, e);
             }
@@ -1626,48 +1874,7 @@ public class BulkPurgeService {
     }
 
     /**
-     * V1: Collect (sourceGuid, tagTypeName) pairs from propagated classification edges on an external vertex
-     * where the source entity still exists (relay case).
-     */
-    private void collectRelaySourcesV1(String extVertexId,
-                                        Set<String> refreshKeys, List<String[]> tasksToCreate) {
-        AtlasVertex vertex = graph.getVertex(extVertexId);
-        if (vertex == null) {
-            return;
-        }
-
-        Iterable<AtlasEdge> classEdges = vertex.getEdges(AtlasEdgeDirection.OUT, CLASSIFICATION_LABEL);
-        for (AtlasEdge edge : classEdges) {
-            Boolean isPropagated = edge.getProperty(CLASSIFICATION_EDGE_IS_PROPAGATED_PROPERTY_KEY, Boolean.class);
-            if (!Boolean.TRUE.equals(isPropagated)) {
-                continue;
-            }
-
-            AtlasVertex classificationVertex = edge.getInVertex();
-            String sourceEntityGuid = classificationVertex.getProperty(CLASSIFICATION_ENTITY_GUID, String.class);
-            if (sourceEntityGuid == null) {
-                continue;
-            }
-
-            AtlasVertex sourceEntity = AtlasGraphUtilsV2.findByGuid(graph, sourceEntityGuid);
-            if (sourceEntity == null) {
-                continue; // Source deleted — already handled by repairPropagatedClassificationsV1
-            }
-
-            String classificationName = edge.getProperty(CLASSIFICATION_EDGE_NAME_PROPERTY_KEY, String.class);
-            if (classificationName == null) {
-                continue;
-            }
-
-            String key = sourceEntityGuid + "|" + classificationName;
-            if (refreshKeys.add(key)) {
-                tasksToCreate.add(new String[]{sourceEntityGuid, classificationName});
-            }
-        }
-    }
-
-    /**
-     * Phase 3c-1 (V2 only): Clean propagated tags from deleted source entities using Cassandra.
+     * Phase 3c-1: Clean propagated tags from deleted source entities using Cassandra.
      *
      * When entity A (in purged connection) has direct tag "PII" that propagated via lineage
      * to entities B, C, D (possibly in other connections and at any hop distance), this method:
@@ -1680,7 +1887,7 @@ public class BulkPurgeService {
      * per (source, tagType) — no BFS traversal needed, handles any hop distance.
      */
     private void cleanPropagatedTagsFromDeletedSources(PurgeContext ctx) {
-        if (!ctx.isTagV2 || ctx.entitiesWithDirectTags.isEmpty()) {
+        if (ctx.entitiesWithDirectTags.isEmpty()) {
             return;
         }
 
@@ -1815,6 +2022,260 @@ public class BulkPurgeService {
 
         // Clear stale classificationText — will be rebuilt on next read/reindex
         vertex.removeProperty(CLASSIFICATION_TEXT_KEY);
+    }
+
+    /**
+     * Phase: EXTERNAL_VERTEX_REFRESH
+     *
+     * When edges to external entities are removed during purge, those entities' ES documents
+     * become stale (modificationTimestamp not updated, relationship data not re-indexed).
+     * Touching modificationTimestamp triggers JanusGraph MixedIndex → ES re-index on commit.
+     */
+    private void refreshExternalVertices(PurgeContext ctx) {
+        if (ctx.externalVertexIds.isEmpty()) {
+            return;
+        }
+
+        LOG.info("BulkPurge: Refreshing {} external vertices for purgeKey={}",
+                ctx.externalVertexIds.size(), ctx.purgeKey);
+
+        // Pre-compute which types have inverse-ref attributes (usually none in standard models).
+        // Cache avoids repeated type lookups — one entry per unique typeName encountered.
+        Map<String, List<AtlasStructType.AtlasAttribute>> inverseRefCache = new HashMap<>();
+
+        int refreshed = 0;
+        int inverseCleaned = 0;
+        int errors = 0;
+        int batchCount = 0;
+
+        for (String vertexId : ctx.externalVertexIds) {
+            try {
+                AtlasVertex vertex = graph.getVertex(vertexId);
+                if (vertex == null) {
+                    continue;
+                }
+
+                AtlasGraphUtilsV2.setEncodedProperty(vertex, MODIFICATION_TIMESTAMP_PROPERTY_KEY, System.currentTimeMillis());
+
+                // Clean stale inverse-ref properties (edge IDs pointing to removed edges)
+                String typeName = vertex.getProperty(ENTITY_TYPE_PROPERTY_KEY, String.class);
+                if (typeName != null) {
+                    List<AtlasStructType.AtlasAttribute> inverseAttrs = inverseRefCache.computeIfAbsent(
+                            typeName, this::computeInverseRefAttributes);
+
+                    for (AtlasStructType.AtlasAttribute attr : inverseAttrs) {
+                        if (cleanStaleInverseProperty(vertex, attr)) {
+                            inverseCleaned++;
+                        }
+                    }
+                }
+
+                refreshed++;
+                batchCount++;
+
+                if (batchCount % 50 == 0) {
+                    try {
+                        graph.commit();
+                    } catch (Exception commitEx) {
+                        LOG.warn("BulkPurge: Commit failed during external vertex refresh", commitEx);
+                        try { graph.rollback(); } catch (Exception rbEx) { LOG.warn("BulkPurge: Rollback also failed", rbEx); }
+                    }
+                }
+            } catch (Exception e) {
+                LOG.warn("BulkPurge: Failed to refresh external vertex {}", vertexId, e);
+                errors++;
+            }
+        }
+
+        if (batchCount % 50 != 0 && batchCount > 0) {
+            try {
+                graph.commit();
+            } catch (Exception commitEx) {
+                LOG.warn("BulkPurge: Final commit failed during external vertex refresh", commitEx);
+                try { graph.rollback(); } catch (Exception rbEx) { LOG.warn("BulkPurge: Rollback also failed", rbEx); }
+            }
+        }
+
+        LOG.info("BulkPurge: External vertex refresh complete for purgeKey={}: refreshed={}, inverseCleaned={}, errors={}",
+                ctx.purgeKey, refreshed, inverseCleaned, errors);
+    }
+
+    /**
+     * Compute the list of attributes with inverse-ref constraints for a given type.
+     * Returns empty list for types with no inverse refs (the vast majority).
+     */
+    private List<AtlasStructType.AtlasAttribute> computeInverseRefAttributes(String typeName) {
+        try {
+            AtlasType type = typeRegistry.getType(typeName);
+            if (!(type instanceof AtlasStructType)) return Collections.emptyList();
+
+            List<AtlasStructType.AtlasAttribute> result = null;
+            for (AtlasStructType.AtlasAttribute attr : ((AtlasStructType) type).getAllAttributes().values()) {
+                if (attr.getInverseRefAttributeName() != null) {
+                    if (result == null) result = new ArrayList<>();
+                    result.add(attr);
+                }
+            }
+            return result != null ? result : Collections.emptyList();
+        } catch (AtlasBaseException e) {
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * Clean a stale inverse-ref property on a vertex. Inverse-ref properties store edge IDs;
+     * if the referenced edge no longer exists, the property is stale and should be removed.
+     *
+     * @return true if any stale property was cleaned
+     */
+    @SuppressWarnings("unchecked")
+    private boolean cleanStaleInverseProperty(AtlasVertex vertex, AtlasStructType.AtlasAttribute attr) {
+        String propertyName = attr.getVertexPropertyName();
+        if (propertyName == null) return false;
+
+        Object value = vertex.getProperty(propertyName, Object.class);
+        if (value == null) return false;
+
+        if (value instanceof String) {
+            // SINGLE cardinality — check if edge still exists
+            if (graph.getEdge((String) value) == null) {
+                vertex.removeProperty(propertyName);
+                return true;
+            }
+        } else if (value instanceof List) {
+            // LIST cardinality — remove stale edge IDs, keep valid ones
+            List<String> edgeIds = (List<String>) value;
+            List<String> valid = new ArrayList<>();
+            for (String edgeId : edgeIds) {
+                if (graph.getEdge(edgeId) != null) {
+                    valid.add(edgeId);
+                }
+            }
+            if (valid.size() != edgeIds.size()) {
+                if (valid.isEmpty()) {
+                    vertex.removeProperty(propertyName);
+                } else {
+                    vertex.setProperty(propertyName, valid);
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Phase: DATAPRODUCT_PORT_CLEANUP
+     *
+     * When assets are purged, DataProducts that reference them in daapOutputPortGuids/daapInputPortGuids
+     * still hold stale GUIDs. This phase queries ES in batches to find affected DataProducts,
+     * then removes the stale GUIDs from the graph properties.
+     */
+    private void cleanDataProductPortReferences(PurgeContext ctx) {
+        if (ctx.deletedAssetGuids.isEmpty()) {
+            return;
+        }
+
+        LOG.info("BulkPurge: Cleaning DataProduct port references for {} deleted assets, purgeKey={}",
+                ctx.deletedAssetGuids.size(), ctx.purgeKey);
+
+        int totalCleaned = 0;
+        List<String> guidList = new ArrayList<>(ctx.deletedAssetGuids);
+        int batchSize = 50000; // ES terms query limit
+
+        for (int i = 0; i < guidList.size(); i += batchSize) {
+            List<String> guidBatch = guidList.subList(i, Math.min(i + batchSize, guidList.size()));
+
+            try {
+                List<String> dataProductVertexIds = findDataProductsReferencingGuids(guidBatch);
+                if (dataProductVertexIds.isEmpty()) {
+                    continue;
+                }
+
+                LOG.info("BulkPurge: Found {} DataProducts with stale port references (batch {}/{})",
+                        dataProductVertexIds.size(), (i / batchSize) + 1, (guidList.size() + batchSize - 1) / batchSize);
+
+                for (String dpVertexId : dataProductVertexIds) {
+                    try {
+                        AtlasVertex dpVertex = graph.getVertex(dpVertexId);
+                        if (dpVertex == null) {
+                            continue;
+                        }
+
+                        int removed = 0;
+                        for (String deletedGuid : guidBatch) {
+                            AtlasGraphUtilsV2.removeItemFromListPropertyValue(dpVertex, "daapOutputPortGuids", deletedGuid);
+                            AtlasGraphUtilsV2.removeItemFromListPropertyValue(dpVertex, "daapInputPortGuids", deletedGuid);
+                            removed++;
+                        }
+
+                        AtlasGraphUtilsV2.setEncodedProperty(dpVertex, MODIFICATION_TIMESTAMP_PROPERTY_KEY, System.currentTimeMillis());
+                        graph.commit();
+                        totalCleaned++;
+                    } catch (Exception e) {
+                        LOG.warn("BulkPurge: Failed to clean port references on DataProduct vertex {}", dpVertexId, e);
+                        try { graph.rollback(); } catch (Exception rbEx) { LOG.warn("BulkPurge: Rollback failed", rbEx); }
+                    }
+                }
+            } catch (Exception e) {
+                LOG.warn("BulkPurge: Failed to find DataProducts referencing deleted GUIDs (batch starting at index {})", i, e);
+            }
+        }
+
+        LOG.info("BulkPurge: DataProduct port reference cleanup complete for purgeKey={}: productsUpdated={}",
+                ctx.purgeKey, totalCleaned);
+    }
+
+    /**
+     * Query ES to find DataProduct vertices that reference any of the given GUIDs
+     * in their daapOutputPortGuids or daapInputPortGuids fields.
+     */
+    private List<String> findDataProductsReferencingGuids(List<String> guids) throws Exception {
+        RestClient esClient = getEsClient();
+
+        // Build ES terms query
+        ObjectNode query = MAPPER.createObjectNode();
+        ObjectNode boolNode = MAPPER.createObjectNode();
+        ObjectNode mustNode = MAPPER.createObjectNode();
+        mustNode.set("term", MAPPER.createObjectNode().put("__typeName.keyword", "DataProduct"));
+
+        ObjectNode shouldOutput = MAPPER.createObjectNode();
+        ObjectNode outputTerms = MAPPER.createObjectNode();
+        outputTerms.set("daapOutputPortGuids", MAPPER.valueToTree(guids));
+        shouldOutput.set("terms", outputTerms);
+
+        ObjectNode shouldInput = MAPPER.createObjectNode();
+        ObjectNode inputTerms = MAPPER.createObjectNode();
+        inputTerms.set("daapInputPortGuids", MAPPER.valueToTree(guids));
+        shouldInput.set("terms", inputTerms);
+
+        boolNode.set("must", MAPPER.createArrayNode().add(mustNode));
+        boolNode.set("should", MAPPER.createArrayNode().add(shouldOutput).add(shouldInput));
+        boolNode.put("minimum_should_match", 1);
+
+        query.set("query", MAPPER.createObjectNode().set("bool", boolNode));
+        query.put("size", 10000);
+        query.put("_source", false);
+
+        String endpoint = "/" + VERTEX_INDEX_NAME + "/_search";
+        Request request = new Request("POST", endpoint);
+        request.setEntity(new NStringEntity(query.toString(), ContentType.APPLICATION_JSON));
+
+        Response response = esClient.performRequest(request);
+        JsonNode root = MAPPER.readTree(response.getEntity().getContent());
+        JsonNode hits = root.path("hits").path("hits");
+
+        List<String> vertexIds = new ArrayList<>();
+        for (JsonNode hit : hits) {
+            String esId = hit.path("_id").asText();
+            try {
+                long vertexIdLong = LongEncoding.decode(esId);
+                vertexIds.add(String.valueOf(vertexIdLong));
+            } catch (Exception e) {
+                LOG.debug("BulkPurge: Could not decode ES _id {} for DataProduct lookup", esId);
+            }
+        }
+
+        return vertexIds;
     }
 
     /**
@@ -2255,9 +2716,9 @@ public class BulkPurgeService {
         final AtomicInteger lastProcessedBatchIndex = new AtomicInteger(0);
         final AtomicLong lastProgressTimestamp = new AtomicLong(0);
         final Set<String> externalLineageVertexIds = ConcurrentHashMap.newKeySet();
+        final Set<String> externalVertexIds = ConcurrentHashMap.newKeySet();
+        final Set<String> deletedAssetGuids = ConcurrentHashMap.newKeySet();
         final Set<String> entitiesWithDirectTags = ConcurrentHashMap.newKeySet();
-        volatile boolean isTagV2;
-
         // P2: Stored for cancel/interrupt support
         volatile ExecutorService workerPool;
         volatile List<Future<?>> workerFutures;
