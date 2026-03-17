@@ -12,10 +12,12 @@ import org.elasticsearch.client.RestClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -27,8 +29,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * - Idle mode (PENDING empty):  polls every 30s — minimal Cassandra I/O
  * - Drain mode (PENDING has entries): polls every 2s with batch size 500 — fast recovery
  *
- * With 500/batch at 2s intervals, drain throughput is ~15,000 entries/min.
- * This handles 8 pods each generating 1,000 failures/min during an ES outage.
+ * Exponential backoff per entry: entries are skipped if their backoff window hasn't
+ * elapsed since the last attempt. Backoff doubles with each attempt (2s, 4s, 8s, 16s, 32s)
+ * with ±25% jitter to prevent thundering herd. Total retry window across 5 attempts
+ * is ~1 minute, covering transient ES failures. Prolonged outages are handled by the
+ * 6-hour ESReconciliationJob which reads from Cassandra source of truth.
  *
  * Poison-pill safe: each entry's JSON is validated individually before being added
  * to the bulk request. Malformed entries are marked FAILED immediately.
@@ -52,6 +57,13 @@ public class ESOutboxProcessor {
 
     // Number of consecutive empty polls before switching from drain → idle
     private static final int EMPTY_POLLS_BEFORE_IDLE = 3;
+
+    // Exponential backoff: base delay doubles per attempt (2s, 4s, 8s, 16s, 32s)
+    // Total retry window across 5 attempts: ~1 minute. Covers transient ES failures.
+    // Beyond that, entries move to FAILED for the 6-hour ESReconciliationJob to handle.
+    private static final long BACKOFF_BASE_MS = 2000L;
+    private static final long BACKOFF_MAX_MS = 32_000L; // cap at 32 seconds
+    private static final double BACKOFF_JITTER_FACTOR = 0.25; // ±25% jitter
 
     private final ESOutboxRepository outboxRepository;
     private final JobLeaseManager leaseManager;
@@ -155,9 +167,10 @@ public class ESOutboxProcessor {
 
             String indexName = Constants.VERTEX_INDEX_NAME;
 
-            // Phase 1: Triage — separate exhausted, poison, and valid entries
+            // Phase 1: Triage — separate exhausted, backing-off, poison, and valid entries
             StringBuilder bulkBody = new StringBuilder();
             Map<String, ESOutboxRepository.OutboxEntry> entryMap = new LinkedHashMap<>();
+            int skippedBackoff = 0;
 
             for (ESOutboxRepository.OutboxEntry entry : entries) {
                 // Exhausted: hit max attempts → mark FAILED, remove from batch
@@ -165,6 +178,13 @@ public class ESOutboxProcessor {
                     outboxRepository.markFailed(entry.vertexId, entry.attemptCount);
                     LOG.error("ESOutboxProcessor: marking vertex '{}' as FAILED after {} attempts",
                             entry.vertexId, entry.attemptCount);
+                    continue;
+                }
+
+                // Exponential backoff: skip entries whose backoff window hasn't elapsed.
+                // First attempt (attemptCount=0) has no backoff — retried immediately.
+                if (entry.attemptCount > 0 && !isBackoffElapsed(entry)) {
+                    skippedBackoff++;
                     continue;
                 }
 
@@ -178,6 +198,10 @@ public class ESOutboxProcessor {
                 }
 
                 entryMap.put(entry.vertexId, entry);
+            }
+
+            if (skippedBackoff > 0) {
+                LOG.debug("ESOutboxProcessor: skipped {} entries still in backoff window", skippedBackoff);
             }
 
             if (entryMap.isEmpty()) {
@@ -237,6 +261,27 @@ public class ESOutboxProcessor {
         } finally {
             leaseManager.release("es-outbox-processor");
         }
+    }
+
+    /**
+     * Computes exponential backoff with jitter and checks if enough time has elapsed
+     * since the last attempt.
+     *
+     * Backoff schedule (±25% jitter):
+     *   attempt 1: ~2s, attempt 2: ~4s, attempt 3: ~8s, attempt 4: ~16s, attempt 5: ~32s (cap)
+     *
+     * Total retry window: ~1 minute across 5 attempts.
+     */
+    private boolean isBackoffElapsed(ESOutboxRepository.OutboxEntry entry) {
+        long backoffMs = Math.min(BACKOFF_BASE_MS * (1L << (entry.attemptCount - 1)), BACKOFF_MAX_MS);
+
+        // Add jitter (±25%) to prevent thundering herd when multiple entries fail together
+        long jitterRange = (long) (backoffMs * BACKOFF_JITTER_FACTOR);
+        long jitter = jitterRange > 0 ? ThreadLocalRandom.current().nextLong(-jitterRange, jitterRange) : 0;
+        long effectiveBackoffMs = backoffMs + jitter;
+
+        long elapsedMs = Instant.now().toEpochMilli() - entry.lastAttemptedAt.toEpochMilli();
+        return elapsedMs >= effectiveBackoffMs;
     }
 
     /**
