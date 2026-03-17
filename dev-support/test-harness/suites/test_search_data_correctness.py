@@ -178,54 +178,80 @@ class SearchDataCorrectnessSuite:
                 if attempt < 2:
                     time.sleep(10)
 
-        # --- Glossary + Term assigned to Entity A (with retry) ---
+        # --- Glossary + Term assigned to Entity A ---
+        # Reuse glossary/term from glossary suite (avoids slow POST /glossary)
         self.glossary_ok = False
         self.term_guid = None
         self.term_name = None
         self.term_qn = None
 
-        for gloss_attempt in range(3):
-            if gloss_attempt > 0:
-                time.sleep(5)
-            glossary_resp = client.post("/glossary", json_data={
-                "name": unique_name("dcor-gloss"),
-                "shortDescription": "Data correctness glossary",
-            }, timeout=120)
-            if glossary_resp.status_code == 200:
-                break
-        if glossary_resp.status_code == 200:
-            glossary_guid = glossary_resp.json().get("guid")
-            ctx.register_cleanup(lambda: client.delete(f"/glossary/{glossary_guid}"))
+        glossary_guid = ctx.get_entity_guid("glossary")
+        term1_guid = ctx.get_entity_guid("term1")
 
-            self.term_name = unique_name("dcor-term")
-            for term_attempt in range(3):
-                if term_attempt > 0:
-                    time.sleep(5)
-                term_resp = client.post("/glossary/term", json_data={
-                    "name": self.term_name,
-                    "shortDescription": "Data correctness term",
-                    "anchor": {"glossaryGuid": glossary_guid},
-                }, timeout=120)
-                if term_resp.status_code == 200:
-                    break
+        if glossary_guid and term1_guid:
+            # Reuse existing term from glossary suite — just assign to entity A
+            self.term_guid = term1_guid
+            term_entry = ctx.get_entity("term1")
+            self.term_qn = term_entry.get("qualifiedName") if term_entry else None
+            # Fetch term name if needed
+            term_resp = client.get(f"/glossary/term/{term1_guid}")
             if term_resp.status_code == 200:
-                term_body = term_resp.json()
-                self.term_guid = term_body.get("guid")
-                self.term_qn = term_body.get("qualifiedName")
-                ctx.register_cleanup(
-                    lambda: client.delete(f"/glossary/term/{self.term_guid}")
-                )
+                self.term_name = term_resp.json().get("name")
 
-                for assign_attempt in range(3):
-                    if assign_attempt > 0:
+            for assign_attempt in range(3):
+                if assign_attempt > 0:
+                    time.sleep(5)
+                assign_resp = client.post(
+                    f"/glossary/terms/{self.term_guid}/assignedEntities",
+                    json_data=[{"guid": self.guid_a, "typeName": "DataSet"}],
+                )
+                if assign_resp.status_code in (200, 204):
+                    self.glossary_ok = True
+                    break
+        else:
+            # Fallback: create own glossary + term if glossary suite didn't run
+            for gloss_attempt in range(3):
+                if gloss_attempt > 0:
+                    time.sleep(5)
+                glossary_resp = client.post("/glossary", json_data={
+                    "name": unique_name("dcor-gloss"),
+                    "shortDescription": "Data correctness glossary",
+                }, timeout=120)
+                if glossary_resp.status_code == 200:
+                    break
+            if glossary_resp.status_code == 200:
+                glossary_guid = glossary_resp.json().get("guid")
+                ctx.register_cleanup(lambda: client.delete(f"/glossary/{glossary_guid}"))
+
+                self.term_name = unique_name("dcor-term")
+                for term_attempt in range(3):
+                    if term_attempt > 0:
                         time.sleep(5)
-                    assign_resp = client.post(
-                        f"/glossary/terms/{self.term_guid}/assignedEntities",
-                        json_data=[{"guid": self.guid_a, "typeName": "DataSet"}],
-                    )
-                    if assign_resp.status_code in (200, 204):
-                        self.glossary_ok = True
+                    term_resp = client.post("/glossary/term", json_data={
+                        "name": self.term_name,
+                        "shortDescription": "Data correctness term",
+                        "anchor": {"glossaryGuid": glossary_guid},
+                    }, timeout=120)
+                    if term_resp.status_code == 200:
                         break
+                if term_resp.status_code == 200:
+                    term_body = term_resp.json()
+                    self.term_guid = term_body.get("guid")
+                    self.term_qn = term_body.get("qualifiedName")
+                    ctx.register_cleanup(
+                        lambda: client.delete(f"/glossary/term/{self.term_guid}")
+                    )
+
+                    for assign_attempt in range(3):
+                        if assign_attempt > 0:
+                            time.sleep(5)
+                        assign_resp = client.post(
+                            f"/glossary/terms/{self.term_guid}/assignedEntities",
+                            json_data=[{"guid": self.guid_a, "typeName": "DataSet"}],
+                        )
+                        if assign_resp.status_code in (200, 204):
+                            self.glossary_ok = True
+                            break
 
         # Single ES sync wait after all setup
         time.sleep(max(es_wait, 5))
