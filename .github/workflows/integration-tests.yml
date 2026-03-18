@@ -31,6 +31,11 @@ permissions:
 
 jobs:
   integration-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [janus, cassandra]
+    name: Integration Tests (${{ matrix.backend }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -113,6 +118,7 @@ jobs:
           DOCKER_HOST: unix:///var/run/docker.sock
         run: |
           mvn test -pl webapp \
+            -Datlas.graphdb.backend=${{ matrix.backend }} \
             -Dtest="EntityCrudIntegrationTest,GlossaryIntegrationTest,GlossaryExtendedIntegrationTest,SQLAssetHierarchyIntegrationTest,ClassificationIntegrationTest,LineageIntegrationTest,SearchIntegrationTest,RelationshipIntegrationTest,BusinessMetadataIntegrationTest,DataMeshIntegrationTest,PersonaPurposeIntegrationTest,PurposeDiscoveryIntegrationTest,LabelIntegrationTest,TypeDefIntegrationTest,AsyncIngestionIntegrationTest" \
             -Drat.skip=true \
             -Dsurefire.failIfNoSpecifiedTests=false \
@@ -125,7 +131,7 @@ jobs:
         uses: dorny/test-reporter@v1
         if: always() && steps.filter.outputs.src == 'true' && steps.tests.outcome != 'skipped'
         with:
-          name: Integration Test Results
+          name: Integration Test Results (${{ matrix.backend }})
           path: webapp/target/surefire-reports/TEST-*.xml
           reporter: java-junit
           fail-on-error: false
@@ -146,15 +152,29 @@ jobs:
             echo "Report generation failed. Check artifacts for raw XML reports." >> $GITHUB_STEP_SUMMARY
           fi
 
+      - name: Collect Atlas server logs
+        if: always() && steps.filter.outputs.src == 'true' && steps.tests.outcome != 'skipped'
+        run: |
+          mkdir -p /tmp/atlas-server-logs
+          # Atlas writes logs to a temp directory; find and copy them
+          find /tmp -maxdepth 3 -name "*.log" -path "*/atlas-test-*/logs/*" -exec cp {} /tmp/atlas-server-logs/ \; 2>/dev/null || true
+          find /tmp -maxdepth 3 -name "*.out" -path "*/atlas-test-*/logs/*" -exec cp {} /tmp/atlas-server-logs/ \; 2>/dev/null || true
+          # Grab the Atlas application.log (FILE appender — has all LOG.info/LOG.error output)
+          cp webapp/target/logs/application.log /tmp/atlas-server-logs/application.log 2>/dev/null || true
+          # Also grab surefire test output files (contain server stdout/stderr)
+          find webapp/target/surefire-reports -name "*-output.txt" -exec cp {} /tmp/atlas-server-logs/ \; 2>/dev/null || true
+          ls -la /tmp/atlas-server-logs/ || echo "No Atlas server logs found"
+
       - name: Upload test reports
         uses: actions/upload-artifact@v4
         if: always() && steps.filter.outputs.src == 'true' && steps.tests.outcome != 'skipped'
         with:
-          name: integration-test-reports-${{ github.run_id }}
+          name: integration-test-reports-${{ matrix.backend }}-${{ github.run_id }}
           path: |
             webapp/target/surefire-reports/
             webapp/target/site/test-report.html
             test-output.log
+            /tmp/atlas-server-logs/
           retention-days: 14
 
       - name: Fail if tests failed
