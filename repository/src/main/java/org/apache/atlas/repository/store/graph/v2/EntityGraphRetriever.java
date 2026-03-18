@@ -18,8 +18,6 @@
 package org.apache.atlas.repository.store.graph.v2;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
@@ -158,19 +156,6 @@ public class EntityGraphRetriever {
     private final ExecutorService executorService = Executors.newFixedThreadPool(AtlasConfiguration.GRAPH_TRAVERSAL_PARALLELISM.getInt(), threadFactory);;
 
     private static final TypeReference<List<TimeBoundary>> TIME_BOUNDARIES_LIST_TYPE = new TypeReference<List<TimeBoundary>>() {};
-
-    /**
-     * Cross-request cache for reference vertex properties (Phase 3 of enrichVertexPropertiesByVertexIds).
-     * Caches properties of vertices referenced by relationship edges (e.g. Connection, Database, Schema)
-     * that are shared across many search results and change infrequently.
-     *
-     * NOTE: This cache can serve slightly stale display properties (typeName, name, qualifiedName)
-     * for referenced entities within the TTL window. Search result entities themselves are always fresh.
-     */
-    private static final Cache<String, Map<String, List<?>>> referenceVertexCache = Caffeine.newBuilder()
-            .maximumSize(AtlasConfiguration.ATLAS_INDEXSEARCH_REF_VERTEX_CACHE_MAX_SIZE.getInt())
-            .expireAfterWrite(AtlasConfiguration.ATLAS_INDEXSEARCH_REF_VERTEX_CACHE_TTL_SECONDS.getInt(), TimeUnit.SECONDS)
-            .build();
 
     private final GraphHelper graphHelper;
 
@@ -1231,11 +1216,6 @@ public class EntityGraphRetriever {
      */
     @SuppressWarnings("unchecked,rawtypes")
     private Pair<Map<String, Map<String, List<?>>>, Map<String, AtlasVertex>> getVertexPropertiesValueMap(Set<String> vertexIds, int batchSize) {
-        return getVertexPropertiesValueMap(vertexIds, batchSize, false);
-    }
-
-    @SuppressWarnings("unchecked,rawtypes")
-    private Pair<Map<String, Map<String, List<?>>>, Map<String, AtlasVertex>> getVertexPropertiesValueMap(Set<String> vertexIds, int batchSize, boolean useReferenceCache) {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("getVertexPropertiesValueMap");
         try {
             if (CollectionUtils.isEmpty(vertexIds)) {
@@ -1243,7 +1223,7 @@ public class EntityGraphRetriever {
             }
 
             if (graph instanceof CassandraGraph) {
-                return getVertexPropertiesValueMapViaAtlasApi(vertexIds, batchSize, useReferenceCache);
+                return getVertexPropertiesValueMapViaAtlasApi(vertexIds, batchSize);
             }
 
             Map<String, Map<String, List<?>>> vertexPropertyMap = new HashMap<>();
@@ -1285,53 +1265,28 @@ public class EntityGraphRetriever {
     /**
      * Atlas API-based implementation of getVertexPropertiesValueMap for non-JanusGraph backends.
      * Uses bulk getVertices() and standard AtlasVertex property accessors.
-     *
-     * @param useReferenceCache if true, check/populate the cross-request referenceVertexCache (for Phase 3 reference vertices)
      */
     @SuppressWarnings("unchecked")
-    private Pair<Map<String, Map<String, List<?>>>, Map<String, AtlasVertex>> getVertexPropertiesValueMapViaAtlasApi(
-            Set<String> vertexIds, int batchSize, boolean useReferenceCache) {
+    private Pair<Map<String, Map<String, List<?>>>, Map<String, AtlasVertex>> getVertexPropertiesValueMapViaAtlasApi(Set<String> vertexIds, int batchSize) {
         Map<String, Map<String, List<?>>> vertexPropertyMap = new HashMap<>();
         Map<String, AtlasVertex> vertexMap = new HashMap<>();
 
-        Set<String> uncachedIds = new LinkedHashSet<>(vertexIds);
+        ListUtils.partition(new ArrayList<>(vertexIds), batchSize).forEach(batch -> {
+            String[] batchIds = batch.stream().map(Object::toString).toArray(String[]::new);
+            Set<AtlasVertex> vertices = graph.getVertices(batchIds);
 
-        if (useReferenceCache) {
-            for (String vertexId : vertexIds) {
-                Map<String, List<?>> cached = referenceVertexCache.getIfPresent(vertexId);
-                if (cached != null) {
-                    vertexPropertyMap.put(vertexId, cached);
-                    uncachedIds.remove(vertexId);
-                }
-            }
-            if (!uncachedIds.isEmpty()) {
-                LOG.debug("referenceVertexCache: {} hits, {} misses out of {} IDs",
-                        vertexIds.size() - uncachedIds.size(), uncachedIds.size(), vertexIds.size());
-            }
-        }
-
-        if (!uncachedIds.isEmpty()) {
-            ListUtils.partition(new ArrayList<>(uncachedIds), batchSize).forEach(batch -> {
-                String[] batchIds = batch.stream().map(Object::toString).toArray(String[]::new);
-                Set<AtlasVertex> vertices = graph.getVertices(batchIds);
-
-                for (AtlasVertex vertex : vertices) {
-                    vertexMap.put(vertex.getIdForDisplay(), vertex);
-                    Map<String, List<?>> vertexProperties = new HashMap<>();
-                    for (String key : vertex.getPropertyKeys()) {
-                        Collection<Object> values = vertex.getPropertyValues(key, Object.class);
-                        if (values != null && !values.isEmpty()) {
-                            vertexProperties.put(key, new ArrayList<>(values));
-                        }
-                    }
-                    vertexPropertyMap.put(vertex.getIdForDisplay(), vertexProperties);
-
-                    if (useReferenceCache) {
-                        referenceVertexCache.put(vertex.getIdForDisplay(), vertexProperties);
+            for (AtlasVertex vertex : vertices) {
+                vertexMap.put(vertex.getIdForDisplay(), vertex);
+                Map<String, List<?>> vertexProperties = new HashMap<>();
+                for (String key : vertex.getPropertyKeys()) {
+                    Collection<Object> values = vertex.getPropertyValues(key, Object.class);
+                    if (values != null && !values.isEmpty()) {
+                        vertexProperties.put(key, new ArrayList<>(values));
                     }
                 }
-            });
-        }
+                vertexPropertyMap.put(vertex.getIdForDisplay(), vertexProperties);
+            }
+        });
 
         return Pair.with(vertexPropertyMap, vertexMap);
     }
@@ -1601,7 +1556,7 @@ public class EntityGraphRetriever {
            vertexIdsToProcess.removeAll(vertexIds); // Don't re-fetch vertices we already have from Phase 1
            AtlasPerfMetrics.MetricRecorder phase3Metric = RequestContext.get().startMetricRecord("enrichVertexProperties.phase3.referenceFetch");
            Pair<Map<String, Map<String, List<?>>>, Map<String, AtlasVertex>> referenceVertices =
-                   getVertexPropertiesValueMap(vertexIdsToProcess, 1000, true);
+                   getVertexPropertiesValueMap(vertexIdsToProcess, 1000);
            for (Map.Entry<String, Map<String, List<?>>> entry : referenceVertices.getValue0().entrySet()) {
                String vertexId = entry.getKey();
                Map<String, List<?>> properties = entry.getValue();
