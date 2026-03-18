@@ -36,6 +36,9 @@ public class SourceBaselineCollector {
     // Top-N super vertices by edge count (synchronized access)
     private final PriorityQueue<SuperVertexReport.SuperVertexEntry> topSuperVertices;
 
+    // Actual count of super vertices (not capped by topN heap)
+    private final AtomicLong superVertexCount = new AtomicLong(0);
+
     // Distribution counters
     private final AtomicLong verticesOver1k   = new AtomicLong(0);
     private final AtomicLong verticesOver10k  = new AtomicLong(0);
@@ -81,6 +84,7 @@ public class SourceBaselineCollector {
 
         // Track top-N super vertices
         if (edgeCount >= superVertexThreshold) {
+            superVertexCount.incrementAndGet();
             Map<String, Long> labelCounts = new LinkedHashMap<>();
             for (DecodedEdge edge : vertex.getOutEdges()) {
                 labelCounts.merge(edge.getLabel(), 1L, Long::sum);
@@ -111,10 +115,10 @@ public class SourceBaselineCollector {
         report.setVerticesOver100kEdges(verticesOver100k.get());
         report.setVerticesOver1mEdges(verticesOver1m.get());
 
-        // Count super vertices and extract top-N in descending order
+        // Use actual counter (not heap size which is capped at topN)
+        report.setTotalSuperVertexCount((int) superVertexCount.get());
         List<SuperVertexReport.SuperVertexEntry> topList;
         synchronized (topSuperVertices) {
-            report.setTotalSuperVertexCount(topSuperVertices.size());
             topList = new ArrayList<>(topSuperVertices);
         }
         topList.sort(Comparator.comparingLong(
@@ -150,8 +154,10 @@ public class SourceBaselineCollector {
         try {
             BaselineSnapshot snap = buildSnapshot();
             String json = MAPPER.writeValueAsString(snap.toMap());
-            // Use token_range_start=0 as a sentinel for baseline data
+            // Persist totals in migration_state for backward compatibility
             stateStore.markRangeCompleted(BASELINE_PHASE, 0L, 0L, snap.totalVertices, snap.totalEdges);
+            // Persist full JSON (including typeVertexCounts) in migration_metadata
+            stateStore.saveMetadata(BASELINE_PHASE, json);
 
             LOG.info("Source baseline saved: vertices={}, edges={}, types={}, maxEdgeCount={}",
                      snap.totalVertices, snap.totalEdges, snap.typeVertexCounts.size(), snap.maxEdgeCount);
@@ -164,8 +170,37 @@ public class SourceBaselineCollector {
      * Load baseline from migration_state table (from a previous run).
      * Returns null if no baseline exists.
      */
+    @SuppressWarnings("unchecked")
     public static BaselineSnapshot loadBaseline(MigrationStateStore stateStore) {
         try {
+            // Try loading full JSON first (includes typeVertexCounts)
+            String json = stateStore.loadMetadata(BASELINE_PHASE);
+            if (json != null) {
+                Map<String, Object> map = MAPPER.readValue(json, Map.class);
+                BaselineSnapshot snap = new BaselineSnapshot();
+                snap.totalVertices  = ((Number) map.getOrDefault("total_vertices", 0)).longValue();
+                snap.totalEdges     = ((Number) map.getOrDefault("total_edges", 0)).longValue();
+                snap.maxEdgeCount   = ((Number) map.getOrDefault("max_edge_count", 0)).longValue();
+                snap.verticesOver1k   = ((Number) map.getOrDefault("vertices_over_1k", 0)).longValue();
+                snap.verticesOver10k  = ((Number) map.getOrDefault("vertices_over_10k", 0)).longValue();
+                snap.verticesOver100k = ((Number) map.getOrDefault("vertices_over_100k", 0)).longValue();
+                snap.verticesOver1m   = ((Number) map.getOrDefault("vertices_over_1m", 0)).longValue();
+
+                Object typeCounts = map.get("type_vertex_counts");
+                if (typeCounts instanceof Map) {
+                    snap.typeVertexCounts = new LinkedHashMap<>();
+                    for (Map.Entry<String, Object> e : ((Map<String, Object>) typeCounts).entrySet()) {
+                        snap.typeVertexCounts.put(e.getKey(), ((Number) e.getValue()).longValue());
+                    }
+                }
+
+                LOG.info("Loaded source baseline (full): vertices={}, edges={}, types={}",
+                         snap.totalVertices, snap.totalEdges,
+                         snap.typeVertexCounts != null ? snap.typeVertexCounts.size() : 0);
+                return snap;
+            }
+
+            // Fall back to legacy format (totals only)
             long[] summary = stateStore.getPhaseSummary(BASELINE_PHASE);
             if (summary[0] == 0) {
                 LOG.info("No source baseline found from previous run");
@@ -174,7 +209,7 @@ public class SourceBaselineCollector {
             BaselineSnapshot snap = new BaselineSnapshot();
             snap.totalVertices = summary[1];
             snap.totalEdges    = summary[2];
-            LOG.info("Loaded source baseline: vertices={}, edges={}", snap.totalVertices, snap.totalEdges);
+            LOG.info("Loaded source baseline (legacy): vertices={}, edges={}", snap.totalVertices, snap.totalEdges);
             return snap;
         } catch (Exception e) {
             LOG.warn("Failed to load source baseline: {}", e.getMessage());

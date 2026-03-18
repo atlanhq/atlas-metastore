@@ -853,7 +853,8 @@ public class MigratorIntegrationTest {
         Map<String, Object> map = validationReport.toMap();
         assertNotNull(map, "toMap() should not return null");
         assertEquals(map.get("tenant_id"), "integration-test");
-        assertTrue((Boolean) map.get("overall_passed") || !((Boolean) map.get("overall_passed")),
+        assertNotNull(map.get("overall_passed"), "overall_passed should not be null");
+        assertTrue(map.get("overall_passed") instanceof Boolean,
                 "overall_passed should be a boolean");
 
         LOG.info("Validation report structure verified");

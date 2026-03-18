@@ -169,7 +169,6 @@ public class MigrationValidator {
 
         ValidationCheckResult result = new ValidationCheckResult(
             "vertex_count", "Target has vertices matching source baseline",
-            passed,
             passed ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.FAIL,
             message);
         result.addDetail("vertex_count", vertexCount);
@@ -259,7 +258,6 @@ public class MigrationValidator {
         ValidationCheckResult outInCheck = new ValidationCheckResult(
             "edge_out_in_consistency",
             "edges_out count matches edges_in count",
-            outInMatch,
             outInMatch ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.FAIL,
             String.format("edges_out=%d, edges_in=%d, diff=%d",
                           edgeOutCount, edgeInCount, Math.abs(edgeOutCount - edgeInCount)));
@@ -272,7 +270,6 @@ public class MigrationValidator {
         ValidationCheckResult byIdCheck = new ValidationCheckResult(
             "edge_by_id_consistency",
             "edges_by_id count matches edges_out count",
-            byIdMatch,
             byIdMatch ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.WARN,
             String.format("edges_by_id=%d, edges_out=%d, diff=%d",
                           edgeByIdCount, edgeOutCount, Math.abs(edgeByIdCount - edgeOutCount)));
@@ -338,12 +335,10 @@ public class MigrationValidator {
             }
         }
 
-        boolean passed = missing == 0;
         ValidationCheckResult result = new ValidationCheckResult(
             "guid_index_sample",
             "GUID index completeness (sampled)",
-            passed,
-            passed ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.FAIL,
+            missing == 0 ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.FAIL,
             String.format("checked=%d, found=%d, missing=%d", checked, found, missing));
         result.addDetail("checked", checked);
         result.addDetail("found", found);
@@ -365,17 +360,16 @@ public class MigrationValidator {
 
         boolean countMatch = typeDefCount == typeDefByCatCount;
         boolean nonEmpty   = typeDefCount > 0;
-        boolean passed     = countMatch && nonEmpty;
 
         ValidationCheckResult.Severity severity;
-        if (passed) severity = ValidationCheckResult.Severity.PASS;
-        else if (nonEmpty) severity = ValidationCheckResult.Severity.WARN;
-        else severity = ValidationCheckResult.Severity.FAIL;
+        if (countMatch && nonEmpty) severity = ValidationCheckResult.Severity.PASS;
+        else if (nonEmpty)          severity = ValidationCheckResult.Severity.WARN;
+        else                        severity = ValidationCheckResult.Severity.FAIL;
 
         ValidationCheckResult result = new ValidationCheckResult(
             "typedef_consistency",
             "type_definitions and type_definitions_by_category are consistent and non-empty",
-            passed, severity,
+            severity,
             String.format("type_definitions=%d, type_definitions_by_category=%d", typeDefCount, typeDefByCatCount));
         result.addDetail("type_definitions_count", typeDefCount);
         result.addDetail("type_definitions_by_category_count", typeDefByCatCount);
@@ -546,12 +540,11 @@ public class MigrationValidator {
         }
 
         boolean passed = malformedJson == 0 && guidIndexMismatch == 0 &&
-                          edgeEndpointMissing == 0 && edgeTripleMissing == 0;
+                          qnIndexMismatch == 0 && edgeEndpointMissing == 0 && edgeTripleMissing == 0;
 
         ValidationCheckResult result = new ValidationCheckResult(
             "deep_vertex_correctness",
             "Deep validation of sampled vertices (properties, indexes, edges, endpoints)",
-            passed,
             passed ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.FAIL,
             String.format("checked=%d, valid=%d (entity=%d, system=%d), malformedJson=%d, " +
                           "guidMismatch=%d, qnMismatch=%d, edgeTripleMissing=%d, edgeEndpointMissing=%d",
@@ -613,12 +606,10 @@ public class MigrationValidator {
             }
         }
 
-        boolean passed = orphanIndexEntries == 0;
         ValidationCheckResult result = new ValidationCheckResult(
             "cross_table_integrity",
             "vertex_index entries point to existing vertices",
-            passed,
-            passed ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.WARN,
+            orphanIndexEntries == 0 ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.WARN,
             String.format("checked=%d, found=%d, orphan=%d", checked, found, orphanIndexEntries));
         result.addDetail("checked", checked);
         result.addDetail("found", found);
@@ -671,12 +662,10 @@ public class MigrationValidator {
             }
         }
 
-        boolean passed = corrupted == 0;
         ValidationCheckResult result = new ValidationCheckResult(
             "property_corruption",
             "No __type.Asset.* / __type.Referenceable.* corrupted property names",
-            passed,
-            passed ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.FAIL,
+            corrupted == 0 ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.FAIL,
             String.format("checked=%d, corrupted=%d", checked, corrupted));
         result.addDetail("checked", checked);
         result.addDetail("corrupted", corrupted);
@@ -711,17 +700,14 @@ public class MigrationValidator {
 
             // Primary comparison: source ES vs target Cassandra
             // Cassandra should have >= source ES docs (it also includes system vertices)
-            boolean passed;
             String message;
             ValidationCheckResult.Severity severity;
 
             if (sourceEsCount == 0) {
-                passed = false;
                 severity = ValidationCheckResult.Severity.FAIL;
                 message = String.format("source_es(%s)=0 — cannot validate", sourceIndex);
             } else {
                 double cassandraVsSourceRatio = (double) cassandraCount / sourceEsCount;
-                passed = cassandraVsSourceRatio >= 1.0;
                 severity = cassandraVsSourceRatio >= 1.0 ? ValidationCheckResult.Severity.PASS :
                            cassandraVsSourceRatio > 0.9  ? ValidationCheckResult.Severity.WARN :
                                                             ValidationCheckResult.Severity.FAIL;
@@ -734,7 +720,7 @@ public class MigrationValidator {
             ValidationCheckResult result = new ValidationCheckResult(
                 "es_vertex_count",
                 "Source ES doc count vs target Cassandra vertex count",
-                passed, severity, message);
+                severity, message);
             result.addDetail("source_es_index", sourceIndex);
             result.addDetail("source_es_count", sourceEsCount);
             result.addDetail("target_es_index", targetIndex);
@@ -742,12 +728,12 @@ public class MigrationValidator {
             result.addDetail("cassandra_count", cassandraCount);
             report.addCheck(result);
         } catch (Exception e) {
-            LOG.warn("ES count check failed (non-blocking): {}", e.getMessage());
+            LOG.warn("ES count check failed: {}", e.getMessage());
             ValidationCheckResult result = new ValidationCheckResult(
                 "es_vertex_count",
                 "Source ES doc count vs target Cassandra vertex count",
-                true, ValidationCheckResult.Severity.WARN,
-                "Skipped: " + e.getMessage());
+                ValidationCheckResult.Severity.FAIL,
+                "ES unreachable: " + e.getMessage());
             report.addCheck(result);
         } finally {
             if (esClient != null) {
@@ -810,12 +796,10 @@ public class MigrationValidator {
             }
         }
 
-        boolean passed = orphanEdges == 0;
         ValidationCheckResult result = new ValidationCheckResult(
             "orphan_edge_detection",
             "Both endpoints of sampled edges exist in vertices table",
-            passed,
-            passed ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.FAIL,
+            orphanEdges == 0 ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.FAIL,
             String.format("checked=%d, orphan=%d", checked, orphanEdges));
         result.addDetail("checked", checked);
         result.addDetail("orphan_edges", orphanEdges);
@@ -850,7 +834,7 @@ public class MigrationValidator {
         ValidationCheckResult result = new ValidationCheckResult(
             "super_vertex_detection",
             "Super vertex detection completed",
-            true, ValidationCheckResult.Severity.PASS,
+            ValidationCheckResult.Severity.PASS,
             String.format("found=%d super vertices (threshold=%d), max_edges=%d, scanned=%d vertices",
                           svReport.getTotalSuperVertexCount(),
                           config.getSuperVertexThreshold(),
@@ -919,7 +903,11 @@ public class MigrationValidator {
 
     private long countTable(String table) {
         try {
-            ResultSet rs = targetSession.execute("SELECT count(*) FROM " + table);
+            ResultSet rs = targetSession.execute(
+                SimpleStatement.builder("SELECT count(*) FROM " + table)
+                    .setTimeout(java.time.Duration.ofSeconds(120))
+                    .setPageSize(5000)
+                    .build());
             Row row = rs.one();
             return row != null ? row.getLong(0) : 0;
         } catch (Exception e) {

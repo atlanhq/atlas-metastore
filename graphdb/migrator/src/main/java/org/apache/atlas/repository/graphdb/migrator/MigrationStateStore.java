@@ -24,6 +24,8 @@ public class MigrationStateStore {
 
     private PreparedStatement insertStmt;
     private PreparedStatement selectPhaseStmt;
+    private PreparedStatement insertBlobStmt;
+    private PreparedStatement selectBlobStmt;
 
     public MigrationStateStore(CqlSession session, String keyspace) {
         this.session  = session;
@@ -43,6 +45,13 @@ public class MigrationStateStore {
             "  PRIMARY KEY ((phase), token_range_start)" +
             ")");
 
+        session.execute(
+            "CREATE TABLE IF NOT EXISTS " + keyspace + ".migration_metadata (" +
+            "  key text PRIMARY KEY," +
+            "  value text," +
+            "  last_updated timestamp" +
+            ")");
+
         insertStmt = session.prepare(
             "INSERT INTO " + keyspace + ".migration_state " +
             "(phase, token_range_start, token_range_end, status, vertices_processed, edges_processed, last_updated) " +
@@ -51,6 +60,12 @@ public class MigrationStateStore {
         selectPhaseStmt = session.prepare(
             "SELECT token_range_start, status, vertices_processed, edges_processed " +
             "FROM " + keyspace + ".migration_state WHERE phase = ?");
+
+        insertBlobStmt = session.prepare(
+            "INSERT INTO " + keyspace + ".migration_metadata (key, value, last_updated) VALUES (?, ?, ?)");
+
+        selectBlobStmt = session.prepare(
+            "SELECT value FROM " + keyspace + ".migration_metadata WHERE key = ?");
     }
 
     public void markRangeCompleted(String phase, long rangeStart, long rangeEnd,
@@ -102,6 +117,18 @@ public class MigrationStateStore {
             }
         }
         return new long[]{completedRanges, totalVertices, totalEdges};
+    }
+
+    /** Save a JSON blob by key */
+    public void saveMetadata(String key, String json) {
+        session.execute(insertBlobStmt.bind(key, json, Instant.now()));
+    }
+
+    /** Load a JSON blob by key. Returns null if not found. */
+    public String loadMetadata(String key) {
+        ResultSet rs = session.execute(selectBlobStmt.bind(key));
+        Row row = rs.one();
+        return row != null ? row.getString("value") : null;
     }
 
     /** Clear state for a fresh migration */

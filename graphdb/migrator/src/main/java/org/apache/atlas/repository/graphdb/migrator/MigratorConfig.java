@@ -75,7 +75,6 @@ public class MigratorConfig {
     private final int     validationEdgeSampleSize;
     private final int     validationIndexSampleSize;
     private final int     validationTokenProbes;
-    private final int     validationRowsPerProbe;
     private final int     superVertexThreshold;
     private final int     superVertexTopN;
     private final boolean skipSuperVertexDetection;
@@ -151,7 +150,6 @@ public class MigratorConfig {
         this.validationEdgeSampleSize    = getInt("validation.edge.sample.size", 500);
         this.validationIndexSampleSize   = getInt("validation.index.sample.size", 500);
         this.validationTokenProbes       = getInt("validation.token.probes", 5);
-        this.validationRowsPerProbe      = getInt("validation.rows.per.probe", 200);
         this.superVertexThreshold        = getInt("validation.super.vertex.threshold", 100000);
         this.superVertexTopN             = getInt("validation.super.vertex.topn", 100);
         this.skipSuperVertexDetection    = getBoolean("validation.skip.super.vertex.detection", false);
@@ -224,7 +222,6 @@ public class MigratorConfig {
     public int     getValidationEdgeSampleSize()    { return validationEdgeSampleSize; }
     public int     getValidationIndexSampleSize()   { return validationIndexSampleSize; }
     public int     getValidationTokenProbes()       { return validationTokenProbes; }
-    public int     getValidationRowsPerProbe()      { return validationRowsPerProbe; }
     public int     getSuperVertexThreshold()        { return superVertexThreshold; }
     public int     getSuperVertexTopN()             { return superVertexTopN; }
     public boolean isSkipSuperVertexDetection()     { return skipSuperVertexDetection; }

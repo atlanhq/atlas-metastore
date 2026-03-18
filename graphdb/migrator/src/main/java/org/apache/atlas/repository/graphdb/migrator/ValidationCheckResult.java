@@ -15,17 +15,14 @@ public class ValidationCheckResult {
     private final String checkName;
     private final String description;
     private final Severity severity;
-    private final boolean passed;
     private final String message;
     private final Map<String, Object> details;
     private final List<String> sampleFailures;
 
     public ValidationCheckResult(String checkName, String description,
-                                 boolean passed, Severity severity,
-                                 String message) {
+                                 Severity severity, String message) {
         this.checkName   = checkName;
         this.description = description;
-        this.passed      = passed;
         this.severity    = severity;
         this.message     = message;
         this.details     = new LinkedHashMap<>();
@@ -42,7 +39,7 @@ public class ValidationCheckResult {
         }
     }
 
-    public boolean isPassed()            { return passed; }
+    public boolean isPassed()            { return severity != Severity.FAIL; }
     public Severity getSeverity()        { return severity; }
     public String getCheckName()         { return checkName; }
     public String getDescription()       { return description; }
@@ -54,7 +51,7 @@ public class ValidationCheckResult {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("check_name", checkName);
         m.put("description", description);
-        m.put("passed", passed);
+        m.put("passed", isPassed());
         m.put("severity", severity.name());
         m.put("message", message);
         if (!details.isEmpty()) m.put("details", details);

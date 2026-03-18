@@ -417,8 +417,8 @@ public class ValidationReport {
                     entry.put("diff", diff);
                     if (src > 0 && diff < 0) {
                         entry.put("status", "MISSING");
-                    } else if (diff == 0) {
-                        entry.put("status", "OK");
+                    } else if (src > 0 && diff > 0) {
+                        entry.put("status", "EXTRA");
                     } else {
                         entry.put("status", "OK");
                     }

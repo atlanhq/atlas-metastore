@@ -40,33 +40,32 @@ public class SuperVertexDetector {
 
     /**
      * Scan edge tables and detect super vertices.
+     * Uses a two-pass approach to limit memory:
+     *   Pass 1: Count edges per vertex (only vertex IDs + counts in memory)
+     *   Pass 2: Fetch label breakdown only for identified super vertices
      */
     public SuperVertexReport detect() {
         long startMs = System.currentTimeMillis();
 
-        // Phase 1: Count outgoing edges per vertex
-        LOG.info("Super vertex detection: scanning edges_out...");
+        // Pass 1: Count edges per vertex (no label tracking — saves memory)
+        LOG.info("Super vertex detection: pass 1 — counting edges...");
+
+        LOG.info("  Scanning edges_out...");
         Map<String, Long> outEdgeCounts = new HashMap<>();
-        Map<String, Map<String, Long>> outLabelCounts = new HashMap<>();
-        scanEdgeTable(keyspace + ".edges_out", "out_vertex_id", outEdgeCounts, outLabelCounts);
+        scanEdgeCountsOnly(keyspace + ".edges_out", "out_vertex_id", outEdgeCounts);
 
-        // Phase 2: Count incoming edges per vertex
-        LOG.info("Super vertex detection: scanning edges_in...");
+        LOG.info("  Scanning edges_in...");
         Map<String, Long> inEdgeCounts = new HashMap<>();
-        Map<String, Map<String, Long>> inLabelCounts = new HashMap<>();
-        scanEdgeTable(keyspace + ".edges_in", "in_vertex_id", inEdgeCounts, inLabelCounts);
+        scanEdgeCountsOnly(keyspace + ".edges_in", "in_vertex_id", inEdgeCounts);
 
-        // Phase 3: Merge and identify super vertices
+        // Merge and identify super vertices + compute stats
         Set<String> allVertexIds = new HashSet<>(outEdgeCounts.keySet());
         allVertexIds.addAll(inEdgeCounts.keySet());
 
         long maxEdgeCount = 0;
         int superVertexCount = 0;
         long over1k = 0, over10k = 0, over100k = 0, over1m = 0;
-
-        // Min-heap for top-N tracking
-        PriorityQueue<SuperVertexReport.SuperVertexEntry> topQueue =
-            new PriorityQueue<>(topN + 1);
+        Set<String> superVertexIds = new HashSet<>();
 
         for (String vertexId : allVertexIds) {
             long outCount = outEdgeCounts.getOrDefault(vertexId, 0L);
@@ -81,27 +80,37 @@ public class SuperVertexDetector {
 
             if (totalEdges >= superVertexThreshold) {
                 superVertexCount++;
+                superVertexIds.add(vertexId);
+            }
+        }
 
-                // Merge label counts
-                Map<String, Long> mergedLabels = new LinkedHashMap<>();
-                Map<String, Long> outLabels = outLabelCounts.get(vertexId);
-                Map<String, Long> inLabels  = inLabelCounts.get(vertexId);
-                if (outLabels != null) mergedLabels.putAll(outLabels);
-                if (inLabels != null) {
-                    for (Map.Entry<String, Long> e : inLabels.entrySet()) {
-                        mergedLabels.merge(e.getKey(), e.getValue(), Long::sum);
-                    }
-                }
+        // Free count maps — no longer needed for non-super vertices
+        long distinctVertices = allVertexIds.size();
+        allVertexIds = null; // allow GC
 
-                String typeName = lookupTypeName(vertexId);
+        // Pass 2: Fetch label breakdown only for super vertices
+        LOG.info("Super vertex detection: pass 2 — fetching labels for {} super vertices...", superVertexIds.size());
 
-                SuperVertexReport.SuperVertexEntry entry =
-                    new SuperVertexReport.SuperVertexEntry(vertexId, typeName, totalEdges, mergedLabels);
+        PriorityQueue<SuperVertexReport.SuperVertexEntry> topQueue =
+            new PriorityQueue<>(topN + 1);
 
-                topQueue.add(entry);
-                if (topQueue.size() > topN) {
-                    topQueue.poll();
-                }
+        for (String vertexId : superVertexIds) {
+            long outCount = outEdgeCounts.getOrDefault(vertexId, 0L);
+            long inCount  = inEdgeCounts.getOrDefault(vertexId, 0L);
+            long totalEdges = outCount + inCount;
+
+            Map<String, Long> mergedLabels = new LinkedHashMap<>();
+            fetchLabelCounts(keyspace + ".edges_out", "out_vertex_id", vertexId, mergedLabels);
+            fetchLabelCounts(keyspace + ".edges_in", "in_vertex_id", vertexId, mergedLabels);
+
+            String typeName = lookupTypeName(vertexId);
+
+            SuperVertexReport.SuperVertexEntry entry =
+                new SuperVertexReport.SuperVertexEntry(vertexId, typeName, totalEdges, mergedLabels);
+
+            topQueue.add(entry);
+            if (topQueue.size() > topN) {
+                topQueue.poll();
             }
         }
 
@@ -109,7 +118,7 @@ public class SuperVertexDetector {
         SuperVertexReport report = new SuperVertexReport();
         report.setTotalSuperVertexCount(superVertexCount);
         report.setMaxEdgeCount(maxEdgeCount);
-        report.setTotalVerticesScanned(allVertexIds.size());
+        report.setTotalVerticesScanned(distinctVertices);
         report.setScanDurationMs(System.currentTimeMillis() - startMs);
         report.setVerticesOver1kEdges(over1k);
         report.setVerticesOver10kEdges(over10k);
@@ -125,20 +134,19 @@ public class SuperVertexDetector {
         LOG.info("Super vertex detection complete in {}ms: {} super vertices " +
                  "(threshold={}), max edges={}, distinct vertices={}",
                  report.getScanDurationMs(), superVertexCount,
-                 superVertexThreshold, maxEdgeCount, allVertexIds.size());
+                 superVertexThreshold, maxEdgeCount, distinctVertices);
 
         return report;
     }
 
     /**
-     * Scan an edge table counting edges per partition key vertex.
-     * Only selects partition key + edge_label to minimize data transfer.
+     * Pass 1: Scan an edge table counting edges per vertex. Only selects
+     * the partition key column — no label tracking to save memory.
      */
-    private void scanEdgeTable(String table, String partitionKeyColumn,
-                               Map<String, Long> edgeCounts,
-                               Map<String, Map<String, Long>> labelCounts) {
+    private void scanEdgeCountsOnly(String table, String partitionKeyColumn,
+                                     Map<String, Long> edgeCounts) {
         SimpleStatement stmt = SimpleStatement.builder(
-                "SELECT " + partitionKeyColumn + ", edge_label FROM " + table)
+                "SELECT " + partitionKeyColumn + " FROM " + table)
             .setPageSize(5000)
             .build();
 
@@ -147,16 +155,8 @@ public class SuperVertexDetector {
 
         for (Row row : rs) {
             String vertexId = row.getString(partitionKeyColumn);
-            String edgeLabel = row.getString("edge_label");
             rowsRead++;
-
             edgeCounts.merge(vertexId, 1L, Long::sum);
-
-            if (edgeLabel != null) {
-                labelCounts
-                    .computeIfAbsent(vertexId, k -> new HashMap<>())
-                    .merge(edgeLabel, 1L, Long::sum);
-            }
 
             if (rowsRead % 1_000_000 == 0) {
                 LOG.info("  ... scanned {} rows from {}, {} distinct vertices",
@@ -166,6 +166,26 @@ public class SuperVertexDetector {
 
         LOG.info("Scan complete for {}: {} rows, {} distinct vertices",
                  table, String.format("%,d", rowsRead), edgeCounts.size());
+    }
+
+    /**
+     * Pass 2: Fetch edge labels for a single super vertex and merge into label counts.
+     */
+    private void fetchLabelCounts(String table, String partitionKeyColumn,
+                                   String vertexId, Map<String, Long> labelCounts) {
+        SimpleStatement stmt = SimpleStatement.builder(
+                "SELECT edge_label FROM " + table + " WHERE " + partitionKeyColumn + " = ?")
+            .addPositionalValue(vertexId)
+            .setPageSize(5000)
+            .build();
+
+        ResultSet rs = session.execute(stmt);
+        for (Row row : rs) {
+            String label = row.getString("edge_label");
+            if (label != null) {
+                labelCounts.merge(label, 1L, Long::sum);
+            }
+        }
     }
 
     private String lookupTypeName(String vertexId) {
