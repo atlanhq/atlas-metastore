@@ -32,6 +32,7 @@ import java.time.Duration;
 import java.util.*;
 
 import static org.testng.Assert.*;
+import static org.testng.Assert.assertNotNull;
 
 /**
  * End-to-end integration test for the JanusGraph → Cassandra migrator.
@@ -70,6 +71,10 @@ public class MigratorIntegrationTest {
     private final Map<String, String> guidToQualifiedName = new LinkedHashMap<>();
     private int expectedVertexCount = 0;
     private int expectedEdgeCount = 0;
+
+    // Source baseline captured during migration (used by validation tests)
+    private SourceBaselineCollector.BaselineSnapshot sourceBaseline;
+    private ValidationReport validationReport;
 
     // Cassandra connection details
     private String cassandraHost;
@@ -417,6 +422,18 @@ public class MigratorIntegrationTest {
             w.println("migration.scan.fetch.size=100");
             w.println("migration.queue.capacity=100");
             w.println("migration.resume=false");
+
+            // Validation settings (small for test)
+            w.println("validation.vertex.sample.size=100");
+            w.println("validation.edge.sample.size=50");
+            w.println("validation.index.sample.size=50");
+            w.println("validation.token.probes=3");
+            w.println("validation.rows.per.probe=50");
+            w.println("validation.super.vertex.threshold=5");  // low threshold to trigger detection in test
+            w.println("validation.super.vertex.topn=10");
+            w.println("validation.skip.super.vertex.detection=false");
+            w.println("validation.skip.es.count=false");
+            w.println("validation.tenant.id=integration-test");
         }
         LOG.info("Migrator config written to: {}", migratorConfigFile.getAbsolutePath());
     }
@@ -452,7 +469,12 @@ public class MigratorIntegrationTest {
 
         writer.startWriters();
 
+        // Source baseline collector — piggybacked into scanner
+        SourceBaselineCollector baselineCollector = new SourceBaselineCollector(
+                config.getSuperVertexThreshold(), config.getSuperVertexTopN());
+
         JanusGraphScanner scanner = new JanusGraphScanner(config, metrics, sourceSession);
+        scanner.setBaselineCollector(baselineCollector);
         scanner.scanAll(
                 vertex -> writer.enqueue(vertex),
                 stateStore,
@@ -464,12 +486,21 @@ public class MigratorIntegrationTest {
         scanner.close();
         writer.close();
 
+        // Save source baseline for later validation tests
+        baselineCollector.saveBaseline(stateStore);
+        this.sourceBaseline = baselineCollector.buildSnapshot();
+
         LOG.info("Migration complete: {}", metrics.summary());
+        LOG.info("Source baseline: vertices={}, edges={}", sourceBaseline.totalVertices, sourceBaseline.totalEdges);
 
         // Basic sanity checks on metrics
         assertTrue(metrics.getVerticesScanned() > 0, "Should have scanned some vertices");
         assertTrue(metrics.getVerticesWritten() > 0, "Should have written some vertices");
         assertEquals(metrics.getWriteErrors(), 0L, "Should have zero write errors");
+
+        // Source baseline should have captured data
+        assertTrue(sourceBaseline.totalVertices > 0, "Source baseline should have vertices");
+        assertTrue(sourceBaseline.totalEdges > 0, "Source baseline should have edges");
     }
 
     @Test(dependsOnMethods = "testRunMigration")
@@ -763,12 +794,238 @@ public class MigratorIntegrationTest {
         stateStore.init();
 
         MigrationValidator validator = new MigrationValidator(config, targetSession, stateStore);
-        boolean valid = validator.validateAll();
 
-        LOG.info("Validation result: {}", valid ? "PASSED" : "FAILED");
-        // The validator may report warnings for edge count mismatches
-        // (since state store tracks per-range counts which may differ slightly)
-        // The important thing is it runs without errors
+        // Pass source baseline for comparison
+        if (sourceBaseline != null) {
+            validator.setSourceBaseline(sourceBaseline);
+        }
+
+        ValidationReport report = validator.validateAll();
+        this.validationReport = report;
+
+        LOG.info("Validation result: {}", report.isOverallPassed() ? "PASSED" : "FAILED");
+        LOG.info("Validation report:\n{}", report.toJson());
+
+        // The report should have been populated
+        assertNotNull(report, "Validation report should not be null");
+        assertNotNull(report.getChecks(), "Checks list should not be null");
+        assertTrue(report.getChecks().size() >= 10,
+                "Should have at least 10 validation checks, got " + report.getChecks().size());
+
+        // Verify all checks ran and have results
+        for (ValidationCheckResult check : report.getChecks()) {
+            assertNotNull(check.getCheckName(), "Check name should not be null");
+            assertNotNull(check.getSeverity(), "Severity should not be null for check: " + check.getCheckName());
+            assertNotNull(check.getMessage(), "Message should not be null for check: " + check.getCheckName());
+            LOG.info("  Check '{}': {} - {}", check.getCheckName(), check.getSeverity(), check.getMessage());
+        }
+    }
+
+    @Test(dependsOnMethods = "testMigrationValidator")
+    public void testValidationReportStructure() {
+        assertNotNull(validationReport, "Validation report should have been set by testMigrationValidator");
+
+        // Verify tenant ID
+        assertEquals(validationReport.getTenantId(), "integration-test",
+                "Tenant ID should match config");
+
+        // Verify counters were populated
+        assertTrue(validationReport.getVertexCount() > 0, "Vertex count should be > 0");
+        assertTrue(validationReport.getEdgeOutCount() > 0, "Edge out count should be > 0");
+        assertTrue(validationReport.getEdgeInCount() > 0, "Edge in count should be > 0");
+        assertTrue(validationReport.getEdgeByIdCount() > 0, "Edge by-id count should be > 0");
+
+        // Verify edge consistency in the report
+        assertEquals(validationReport.getEdgeOutCount(), validationReport.getEdgeInCount(),
+                "Report edge_out should equal edge_in");
+
+        // ES doc count: may be 0 if the ES count check hit a transient error (WARN path)
+        // Just verify the check ran — the es_vertex_count check result is verified in testValidationCheckResults
+        LOG.info("ES doc count in report: {}", validationReport.getEsDocCount());
+
+        // Verify toJson() produces valid output
+        String json = validationReport.toJson();
+        assertNotNull(json, "toJson() should not return null");
+        assertFalse(json.contains("\"error\""), "toJson() should not contain error: " + json);
+        assertTrue(json.contains("integration-test"), "JSON should contain tenant ID");
+
+        // Verify toMap() produces a map
+        Map<String, Object> map = validationReport.toMap();
+        assertNotNull(map, "toMap() should not return null");
+        assertEquals(map.get("tenant_id"), "integration-test");
+        assertNotNull(map.get("overall_passed"), "overall_passed should not be null");
+        assertTrue(map.get("overall_passed") instanceof Boolean,
+                "overall_passed should be a boolean");
+
+        LOG.info("Validation report structure verified");
+    }
+
+    @Test(dependsOnMethods = "testMigrationValidator")
+    public void testValidationCheckResults() {
+        assertNotNull(validationReport, "Validation report should have been set");
+
+        // Find specific checks and verify them
+        Map<String, ValidationCheckResult> checksByName = new LinkedHashMap<>();
+        for (ValidationCheckResult check : validationReport.getChecks()) {
+            checksByName.put(check.getCheckName(), check);
+        }
+
+        // Check 1: vertex_count — should pass (we have data)
+        ValidationCheckResult vertexCheck = checksByName.get("vertex_count");
+        assertNotNull(vertexCheck, "vertex_count check should exist");
+        assertTrue(vertexCheck.isPassed(), "vertex_count should pass: " + vertexCheck.getMessage());
+        assertTrue(((Number) vertexCheck.getDetails().get("vertex_count")).longValue() > 0,
+                "vertex_count detail should be > 0");
+
+        // Check 2: edge_out_in_consistency
+        ValidationCheckResult edgeOutInCheck = checksByName.get("edge_out_in_consistency");
+        assertNotNull(edgeOutInCheck, "edge_out_in_consistency check should exist");
+        assertTrue(edgeOutInCheck.isPassed(),
+                "edge_out_in_consistency should pass: " + edgeOutInCheck.getMessage());
+
+        // Check 3: edge_by_id_consistency
+        ValidationCheckResult edgeByIdCheck = checksByName.get("edge_by_id_consistency");
+        assertNotNull(edgeByIdCheck, "edge_by_id_consistency check should exist");
+
+        // Check 4: guid_index_sample
+        ValidationCheckResult guidCheck = checksByName.get("guid_index_sample");
+        assertNotNull(guidCheck, "guid_index_sample check should exist");
+        assertTrue(((Number) guidCheck.getDetails().get("checked")).intValue() > 0,
+                "GUID index check should have checked some vertices");
+
+        // Check 5: typedef_consistency
+        ValidationCheckResult typedefCheck = checksByName.get("typedef_consistency");
+        assertNotNull(typedefCheck, "typedef_consistency check should exist");
+
+        // Check 6: deep_vertex_correctness — the core new check
+        ValidationCheckResult deepCheck = checksByName.get("deep_vertex_correctness");
+        assertNotNull(deepCheck, "deep_vertex_correctness check should exist");
+        assertTrue(((Number) deepCheck.getDetails().get("total_checked")).intValue() > 0,
+                "Deep check should have examined some vertices");
+        assertEquals(((Number) deepCheck.getDetails().get("malformed_json")).intValue(), 0,
+                "Should have zero malformed JSON entries");
+
+        // Check 7: cross_table_integrity
+        ValidationCheckResult crossTableCheck = checksByName.get("cross_table_integrity");
+        assertNotNull(crossTableCheck, "cross_table_integrity check should exist");
+
+        // Check 8: property_corruption
+        ValidationCheckResult corruptionCheck = checksByName.get("property_corruption");
+        assertNotNull(corruptionCheck, "property_corruption check should exist");
+        assertTrue(corruptionCheck.isPassed(),
+                "property_corruption should pass (no corrupted props): " + corruptionCheck.getMessage());
+
+        // Check 9: es_vertex_count
+        ValidationCheckResult esCheck = checksByName.get("es_vertex_count");
+        assertNotNull(esCheck, "es_vertex_count check should exist");
+
+        // Check 10: orphan_edge_detection
+        ValidationCheckResult orphanCheck = checksByName.get("orphan_edge_detection");
+        assertNotNull(orphanCheck, "orphan_edge_detection check should exist");
+
+        // Check 11: super_vertex_detection
+        ValidationCheckResult svCheck = checksByName.get("super_vertex_detection");
+        assertNotNull(svCheck, "super_vertex_detection check should exist");
+        assertTrue(svCheck.isPassed(), "super_vertex_detection is informational and should always pass");
+
+        LOG.info("All 11 validation check results verified");
+    }
+
+    @Test(dependsOnMethods = "testMigrationValidator")
+    public void testSourceBaselineComparison() {
+        assertNotNull(validationReport, "Validation report should have been set");
+        assertNotNull(sourceBaseline, "Source baseline should have been captured");
+
+        // Source baseline was passed to validator — verify it's reflected in the report
+        SourceBaselineCollector.BaselineSnapshot reportBaseline = validationReport.getSourceBaseline();
+        assertNotNull(reportBaseline, "Report should contain source baseline");
+        assertEquals(reportBaseline.totalVertices, sourceBaseline.totalVertices,
+                "Report baseline vertex count should match captured baseline");
+        assertEquals(reportBaseline.totalEdges, sourceBaseline.totalEdges,
+                "Report baseline edge count should match captured baseline");
+
+        // The target vertex count should be close to the source baseline
+        long targetVertices = validationReport.getVertexCount();
+        assertTrue(targetVertices >= sourceBaseline.totalVertices,
+                "Target vertices (" + targetVertices + ") should be >= source baseline (" +
+                sourceBaseline.totalVertices + ")");
+
+        // Verify baseline is in the JSON output
+        String json = validationReport.toJson();
+        assertTrue(json.contains("source_baseline"), "JSON should contain source_baseline section");
+
+        LOG.info("Source baseline comparison: source={}, target={}", sourceBaseline.totalVertices, targetVertices);
+    }
+
+    @Test(dependsOnMethods = "testMigrationValidator")
+    public void testSuperVertexDetection() {
+        assertNotNull(validationReport, "Validation report should have been set");
+
+        SuperVertexReport svReport = validationReport.getSuperVertexReport();
+        assertNotNull(svReport, "Super vertex report should not be null");
+
+        // With threshold=5, we should find super vertices in our test data
+        // (some vertices like schema1 have 5+ edges: 5 tables)
+        LOG.info("Super vertex detection: total={}, max_edges={}, scanned={}",
+                svReport.getTotalSuperVertexCount(), svReport.getMaxEdgeCount(),
+                svReport.getTotalVerticesScanned());
+
+        assertTrue(svReport.getTotalVerticesScanned() > 0,
+                "Should have scanned some vertices");
+        assertTrue(svReport.getScanDurationMs() >= 0,
+                "Scan duration should be >= 0");
+
+        // Verify top list is bounded and sorted descending
+        List<SuperVertexReport.SuperVertexEntry> topList = svReport.getTopSuperVertices();
+        assertNotNull(topList, "Top super vertices list should not be null");
+        if (topList.size() > 1) {
+            for (int i = 0; i < topList.size() - 1; i++) {
+                assertTrue(topList.get(i).getEdgeCount() >= topList.get(i + 1).getEdgeCount(),
+                        "Top list should be sorted descending by edge count");
+            }
+        }
+
+        // Each entry should have non-null fields
+        for (SuperVertexReport.SuperVertexEntry entry : topList) {
+            assertNotNull(entry.getVertexId(), "Super vertex entry should have vertex ID");
+            assertTrue(entry.getEdgeCount() >= 5,
+                    "Super vertex should have >= threshold edges (threshold=5)");
+            LOG.info("  Super vertex: id={}, type={}, edges={}", entry.getVertexId(),
+                    entry.getTypeName(), entry.getEdgeCount());
+        }
+
+        // Verify the report is also in the JSON
+        String json = validationReport.toJson();
+        assertTrue(json.contains("super_vertices"), "JSON should contain super_vertices section");
+    }
+
+    @Test(dependsOnMethods = "testMigrationValidator")
+    public void testPerTypeStatistics() {
+        assertNotNull(validationReport, "Validation report should have been set");
+
+        Map<String, ValidationReport.TypeStats> typeStats = validationReport.getTypeStatsMap();
+        assertNotNull(typeStats, "Type stats map should not be null");
+
+        // We should have stats for at least some of our test types
+        // (deep vertex check samples randomly, so we may not hit all types)
+        LOG.info("Per-type stats: {} types found", typeStats.size());
+        assertTrue(typeStats.size() > 0, "Should have per-type stats for at least some types");
+
+        for (Map.Entry<String, ValidationReport.TypeStats> entry : typeStats.entrySet()) {
+            String type = entry.getKey();
+            ValidationReport.TypeStats stats = entry.getValue();
+            LOG.info("  Type '{}': vertices={}, valid={}, errors={}, edges={}",
+                    type, stats.getVertexCount(), stats.getValidCount(),
+                    stats.getErrorCount(), stats.getTotalEdgeCount());
+
+            assertTrue(stats.getVertexCount() > 0,
+                    "Type " + type + " should have at least 1 vertex");
+
+            // Verify toMap() works
+            Map<String, Object> map = stats.toMap();
+            assertNotNull(map, "TypeStats.toMap() should not be null");
+            assertTrue(map.containsKey("vertex_count"), "toMap should have vertex_count");
+        }
     }
 
     @Test(dependsOnMethods = "testRunMigration")
