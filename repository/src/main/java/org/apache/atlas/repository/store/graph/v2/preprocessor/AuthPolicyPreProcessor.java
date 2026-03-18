@@ -404,7 +404,7 @@ public class AuthPolicyPreProcessor implements PreProcessor {
                     for (AtlasEdge edge : policyEdges) {
                         // Pick the vertex that is NOT the parent (Persona/Purpose)
                         AtlasVertex outV       = edge.getOutVertex();
-                        AtlasVertex policyVertex = outV.getIdForDisplay().equals(parentVertex.getIdForDisplay())
+                        AtlasVertex policyVertex = StringUtils.equals(outV.getIdForDisplay(), parentVertex.getIdForDisplay())
                                 ? edge.getInVertex() : outV;
                         AtlasEntity policyEntity = noRelAttrRetriever.toAtlasEntity(policyVertex);
                         ret.addReferredEntity(policyEntity);
