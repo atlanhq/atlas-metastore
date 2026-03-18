@@ -338,8 +338,10 @@ public class AuthPolicyPreProcessor implements PreProcessor {
         if (ret != null) {
             List<AtlasObjectId> policies = (List<AtlasObjectId>) ret.getEntity().getRelationshipAttribute(REL_ATTR_POLICIES);
 
-            for (AtlasObjectId policy : policies) {
-                ret.addReferredEntity(entityRetriever.toAtlasEntity(policy));
+            if (policies != null) {
+                for (AtlasObjectId policy : policies) {
+                    ret.addReferredEntity(entityRetriever.toAtlasEntity(policy));
+                }
             }
         }
 
