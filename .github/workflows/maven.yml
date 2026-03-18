@@ -33,6 +33,7 @@ on:
       - ms-664-fix-audit-search
       - hotfix-reindex-refresh
       - migratorValidations
+      - nb-switchable-graph-provider
 
     paths-ignore:
       - '.claude/**'
