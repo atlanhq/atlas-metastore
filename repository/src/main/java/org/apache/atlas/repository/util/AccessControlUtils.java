@@ -329,14 +329,16 @@ public final class AccessControlUtils {
     public static List<AtlasEntity> objectToEntityList(AtlasEntity.AtlasEntityWithExtInfo entityWithExtInfo, List<AtlasObjectId> policies) {
         List<AtlasEntity> ret = new ArrayList<>();
 
-        Set<String> referredGuids =  entityWithExtInfo.getReferredEntities().keySet();
-        if (policies != null) {
-            ret = policies.stream()
-                    .filter(x -> referredGuids.contains(x.getGuid()))
-                    .map(x -> entityWithExtInfo.getReferredEntity(x.getGuid()))
-                    .filter(x -> x.getStatus() == null || x.getStatus() == AtlasEntity.Status.ACTIVE)
-                    .collect(Collectors.toList());
+        if (entityWithExtInfo.getReferredEntities() == null || policies == null) {
+            return ret;
         }
+
+        Set<String> referredGuids = entityWithExtInfo.getReferredEntities().keySet();
+        ret = policies.stream()
+                .filter(x -> referredGuids.contains(x.getGuid()))
+                .map(x -> entityWithExtInfo.getReferredEntity(x.getGuid()))
+                .filter(x -> x.getStatus() == null || x.getStatus() == AtlasEntity.Status.ACTIVE)
+                .collect(Collectors.toList());
 
         return ret;
     }
