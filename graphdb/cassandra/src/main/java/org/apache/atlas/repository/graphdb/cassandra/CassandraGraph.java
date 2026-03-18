@@ -1130,6 +1130,15 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     private static final int    ES_SYNC_MAX_RETRIES  = 3;
     private static final long[] ES_SYNC_RETRY_DELAYS = {100, 300, 1000}; // ms
 
+    // Painless script that sets non-null values and removes null values from ES doc.
+    // This preserves fields not in the update (like tag attributes) while allowing field removal.
+    // Used instead of doc/doc_as_upsert because ingest pipelines do NOT run on update operations,
+    // so null removal via the remove_null_fields pipeline would be skipped for partial updates.
+    private static final String UPSERT_SCRIPT =
+            "for (entry in params.updates.entrySet()) { " +
+            "if (entry.getValue() == null) { ctx._source.remove(entry.getKey()); } " +
+            "else { ctx._source[entry.getKey()] = entry.getValue(); } }";
+
     // Tag denormalized attributes managed via ClassificationAssociator — excluded from general vertex sync
     private static final Set<String> TAG_DENORM_ATTRIBUTES = new HashSet<>(Arrays.asList(
             Constants.TRAIT_NAMES_PROPERTY_KEY,
@@ -1154,7 +1163,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             for (CassandraVertex v : newVertices) {
                 if (shouldSyncToES(v)) {
                     vertexMap.put(v.getIdString(), v);
-                    vertexJsonMap.put(v.getIdString(), AtlasType.toJson(filterPropertiesForES(v.getProperties())));
+                    vertexJsonMap.put(v.getIdString(), buildVertexUpdateDocJson(v));
                     LOG.info("syncVerticesToElasticsearch: NEW vertex _id='{}', __typeName='{}', propCount={}",
                             v.getIdString(), v.getProperty(Constants.ENTITY_TYPE_PROPERTY_KEY, String.class),
                             v.getProperties().size());
@@ -1166,7 +1175,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             for (CassandraVertex v : dirtyVertices) {
                 if (shouldSyncToES(v)) {
                     vertexMap.put(v.getIdString(), v);
-                    vertexJsonMap.put(v.getIdString(), AtlasType.toJson(filterPropertiesForES(v.getProperties())));
+                    vertexJsonMap.put(v.getIdString(), buildVertexUpdateDocJson(v));
                     LOG.info("syncVerticesToElasticsearch: DIRTY vertex _id='{}', __typeName='{}', propCount={}",
                             v.getIdString(), v.getProperty(Constants.ENTITY_TYPE_PROPERTY_KEY, String.class),
                             v.getProperties().size());
@@ -1218,7 +1227,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
                 StringBuilder bulkBody = new StringBuilder();
                 for (String vid : pendingIndexIds) {
-                    bulkBody.append("{\"index\":{\"_index\":\"").append(indexName)
+                    bulkBody.append("{\"update\":{\"_index\":\"").append(indexName)
                             .append("\",\"_id\":\"").append(vid).append("\"}}\n");
                     bulkBody.append(vertexJsonMap.get(vid)).append("\n");
                 }
@@ -1404,10 +1413,10 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         }
     }
 
-    private void appendESIndexAction(StringBuilder bulkBody, String indexName, CassandraVertex v) {
-        bulkBody.append("{\"index\":{\"_index\":\"").append(indexName)
+    private void appendESUpdateAction(StringBuilder bulkBody, String indexName, CassandraVertex v) {
+        bulkBody.append("{\"update\":{\"_index\":\"").append(indexName)
                 .append("\",\"_id\":\"").append(v.getIdString()).append("\"}}\n");
-        bulkBody.append(AtlasType.toJson(filterPropertiesForES(v.getProperties()))).append("\n");
+        bulkBody.append(buildVertexUpdateDocJson(v)).append("\n");
     }
 
     /**
@@ -1429,6 +1438,26 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
      * so ES receives the correct type. JSON object strings are NOT parsed (they're mapped
      * as "text" in ES — parsing them to Map causes mapper_parsing_exception).
      */
+    /**
+     * Returns true if the property key should be excluded from the ES document.
+     * Applied to both present values (in {@link #filterPropertiesForES}) and removed
+     * properties (in {@link #buildVertexUpdateDocJson}).
+     */
+    private static boolean isExcludedPropertyKey(String key) {
+        // Typedef attribute metadata — creates ~2500+ fields in ES
+        if (key.startsWith("__type_") || key.startsWith("__type.")) {
+            return true;
+        }
+        // Relationship typedef fields
+        if (key.equals("endDef1") || key.equals("endDef2") ||
+            key.equals("relationshipCategory") || key.equals("relationshipLabel") ||
+            key.equals("tagPropagation")) {
+            return true;
+        }
+        // Tag denormalized attributes — managed separately via ClassificationAssociator
+        return TAG_DENORM_ATTRIBUTES.contains(key);
+    }
+
     private Map<String, Object> filterPropertiesForES(Map<String, Object> props) {
         Map<String, Object> filtered = new LinkedHashMap<>(props.size());
 
@@ -1436,24 +1465,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             String key = entry.getKey();
             Object value = entry.getValue();
 
-            // --- Property name blacklist ---
-
-            // Skip typedef attribute metadata — these create ~2500+ fields in ES
-            if (key.startsWith("__type_") || key.startsWith("__type.")) {
-                continue;
-            }
-
-            // Skip relationship typedef properties
-            if (key.equals("endDef1") || key.equals("endDef2") ||
-                key.equals("relationshipCategory") || key.equals("relationshipLabel") ||
-                key.equals("tagPropagation")) {
-                continue;
-            }
-
-            // Skip tag denormalized attributes — these are managed separately via the
-            // classification propagation path (TagDeNormAttributesUtil / ClassificationAssociator)
-            // and must not be overwritten by the general vertex sync, which may carry stale values.
-            if (TAG_DENORM_ATTRIBUTES.contains(key)) {
+            if (isExcludedPropertyKey(key)) {
                 continue;
             }
 
@@ -1489,6 +1501,54 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         }
 
         return filtered;
+    }
+
+    /**
+     * Builds the ES bulk update body for a vertex using an inline Painless script:
+     * <pre>
+     * {
+     *   "script": {
+     *     "source": "&lt;UPSERT_SCRIPT&gt;",
+     *     "lang": "painless",
+     *     "params": { "updates": { &lt;current props&gt; + &lt;removed props as null&gt; } }
+     *   },
+     *   "upsert": { &lt;current props (non-null)&gt; }
+     * }
+     * </pre>
+     *
+     * <p>The {@code script} path runs when the document already exists: non-null values are
+     * set, null values are removed from {@code _source}.  The {@code upsert} path runs when
+     * the document does not yet exist (ES indexes it directly, no script).
+     *
+     * <p>We use a script instead of {@code doc}/{@code doc_as_upsert} because ES ingest
+     * pipelines do not execute on {@code update} operations — so the
+     * {@code remove_null_fields} pipeline would silently skip null removal on partial updates.
+     * The script handles null removal explicitly.
+     *
+     * <p>The name blacklist from {@link #isExcludedPropertyKey} is applied to removed keys
+     * so tag-denorm and typedef metadata are never touched.
+     */
+    private String buildVertexUpdateDocJson(CassandraVertex v) {
+        // Non-null, filtered current properties — used both in params.updates and upsert
+        Map<String, Object> currentProps = filterPropertiesForES(v.getProperties());
+
+        // params.updates = current props + removed props as explicit null
+        Map<String, Object> updates = new LinkedHashMap<>(currentProps);
+        for (String removedKey : v.getRemovedProperties()) {
+            if (!isExcludedPropertyKey(removedKey)) {
+                updates.put(removedKey, null);
+            }
+        }
+
+        Map<String, Object> script = new LinkedHashMap<>();
+        script.put("source", UPSERT_SCRIPT);
+        script.put("lang", "painless");
+        script.put("params", Collections.singletonMap("updates", updates));
+
+        Map<String, Object> updateBody = new LinkedHashMap<>();
+        updateBody.put("script", script);
+        updateBody.put("upsert", currentProps); // indexed as-is when doc doesn't exist
+        return AtlasType.toJson(updateBody);
     }
 
     /**
@@ -1594,7 +1654,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 StringBuilder bulkBody = new StringBuilder();
                 for (String vid : pendingIds) {
                     CassandraVertex v = vertexMap.get(vid);
-                    appendESIndexAction(bulkBody, indexName, v);
+                    appendESUpdateAction(bulkBody, indexName, v);
                 }
 
                 LOG.info("reindexVertices: sending bulk request to ES index '{}', {} vertices, body length={}, attempt={}",

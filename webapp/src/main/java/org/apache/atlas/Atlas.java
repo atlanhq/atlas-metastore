@@ -358,9 +358,10 @@ public final class Atlas {
         // gets the same analyzers, normalizers, and dynamic templates when its index is created.
         // This is best-effort — failure does not block startup.
         if (INDEX_PREFIX.equals("atlas_graph_")) {
-            //createESTemplateIfNotExists(esClient, "atlas-graph-template",
-            //        Arrays.asList("atlas_graph_*"), settingsJson, mappingsJson, false);
-            ensureRemoveNullFieldsPipeline(esClient, vertexIndex);
+            createESTemplateIfNotExists(esClient, "atlas-graph-template",
+                    Arrays.asList("atlas_graph_*"), settingsJson, mappingsJson, false);
+            // TODO: Commented as pipeline does not execute in case of update in ES payload, will fix later
+            //ensureRemoveNullFieldsPipeline(esClient, vertexIndex);
         } else {
             createESTemplateIfNotExists(esClient, "atlan-template", Arrays.asList(vertexIndex), settingsJson, mappingsJson, true);
         }
