@@ -47,6 +47,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.atlas.AtlasErrorCode.BAD_REQUEST;
 import static org.apache.atlas.AtlasErrorCode.OPERATION_NOT_SUPPORTED;
+import static org.apache.atlas.repository.Constants.NAME;
 import static org.apache.atlas.repository.Constants.POLICY_ENTITY_TYPE;
 import static org.apache.atlas.repository.Constants.PURPOSE_ENTITY_TYPE;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
@@ -56,10 +57,12 @@ import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_RE
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_PURPOSE_CLASSIFICATIONS;
 import static org.apache.atlas.repository.util.AccessControlUtils.REL_ATTR_POLICIES;
 import static org.apache.atlas.repository.util.AccessControlUtils.getESAliasName;
+import static org.apache.atlas.repository.util.AccessControlUtils.getEntityName;
 import static org.apache.atlas.repository.util.AccessControlUtils.getIsAccessControlEnabled;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPurposeTags;
 import static org.apache.atlas.repository.util.AccessControlUtils.getTenantId;
 import static org.apache.atlas.repository.util.AccessControlUtils.getUUID;
+import static org.apache.atlas.repository.util.AccessControlUtils.validateUniquenessByName;
 import static org.apache.atlas.repository.util.AccessControlUtils.validateUniquenessByTags;
 
 public class PurposePreProcessor extends AccessControlPreProcessor {
@@ -108,6 +111,7 @@ public class PurposePreProcessor extends AccessControlPreProcessor {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreatePurpose");
 
         validatePurpose(graph, (AtlasEntity) entity);
+        validateUniquenessByName(graph, getEntityName((AtlasEntity) entity), PURPOSE_ENTITY_TYPE);
 
         String tenantId = getTenantId(entity);
 
@@ -135,6 +139,12 @@ public class PurposePreProcessor extends AccessControlPreProcessor {
 
         String vertexQName = vertex.getProperty(QUALIFIED_NAME, String.class);
         purpose.setAttribute(QUALIFIED_NAME, vertexQName);
+
+        String currentName = vertex.getProperty(NAME, String.class);
+        String newName = getEntityName(purpose);
+        if (newName != null && !newName.equals(currentName)) {
+            validateUniquenessByName(graph, newName, PURPOSE_ENTITY_TYPE);
+        }
 
         boolean isEnabled = getIsAccessControlEnabled(purpose);
         if (getIsAccessControlEnabled(existingPurposeEntity) != isEnabled) {
