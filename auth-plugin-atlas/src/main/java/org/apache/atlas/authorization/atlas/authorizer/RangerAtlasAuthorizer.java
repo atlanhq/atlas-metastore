@@ -265,6 +265,11 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
 
     @Override
     public AtlasAccessResult isAccessAllowed(AtlasRelationshipAccessRequest request) throws AtlasAuthorizationException {
+        return isAccessAllowed(request, true);
+    }
+
+    @Override
+    public AtlasAccessResult isAccessAllowed(AtlasRelationshipAccessRequest request, boolean isAuditEnabled) throws AtlasAuthorizationException {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> isAccessAllowed(" + request + ")");
         }
@@ -322,15 +327,27 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
             rangerResource.setValue(RESOURCE_END_TWO_ENTITY_CLASSIFICATION, classificationsWithSuperTypesEnd2);
             rangerResource.setValue(RESOURCE_END_TWO_ENTITY_ID, end2EntityId);
 
-            ret = checkAccess(rangerRequest);
+            if (isAuditEnabled) {
+                ret = checkAccess(rangerRequest);
+            } else {
+                ret = checkAccess(rangerRequest, null);
+            }
 
             if (!ret.isAllowed()) { // if resource based policy access not available fallback to check tag-based access.
                 setClassificationsToRequestContext(end1Classifications, rangerRequest);
-                ret = checkAccess(rangerRequest); // tag-based check with end1 classification
+                if (isAuditEnabled) {
+                    ret = checkAccess(rangerRequest);
+                } else {
+                    ret = checkAccess(rangerRequest, null);
+                }
                 LOG.info("End1 checkAccess " + ret);
                 if (ret.isAllowed()) { //
                     setClassificationsToRequestContext(end2Classifications, rangerRequest);
-                    ret = checkAccess(rangerRequest); // tag-based check with end2 classification
+                    if (isAuditEnabled) {
+                        ret = checkAccess(rangerRequest);
+                    } else {
+                        ret = checkAccess(rangerRequest, null);
+                    }
                     LOG.info("End2 checkAccess " + ret);
                 }
             }
