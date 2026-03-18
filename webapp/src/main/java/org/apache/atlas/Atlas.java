@@ -40,12 +40,19 @@ import org.apache.commons.cli.ParseException;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.configuration.PropertiesConfiguration;
 import org.apache.commons.lang.StringUtils;
+import org.elasticsearch.action.admin.indices.settings.get.GetSettingsRequest;
+import org.elasticsearch.action.admin.indices.settings.get.GetSettingsResponse;
+import org.elasticsearch.action.admin.indices.settings.put.UpdateSettingsRequest;
+import org.elasticsearch.action.ingest.GetPipelineRequest;
+import org.elasticsearch.action.ingest.GetPipelineResponse;
+import org.elasticsearch.action.ingest.PutPipelineRequest;
 import org.elasticsearch.action.support.master.AcknowledgedResponse;
 import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.client.RestHighLevelClient;
 import org.elasticsearch.client.indices.GetIndexRequest;
 import org.elasticsearch.client.indices.IndexTemplatesExistRequest;
 import org.elasticsearch.client.indices.PutIndexTemplateRequest;
+import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.action.admin.indices.alias.IndicesAliasesRequest;
 import org.elasticsearch.action.admin.indices.alias.get.GetAliasesRequest;
 import org.elasticsearch.xcontent.XContentType;
@@ -336,44 +343,213 @@ public final class Atlas {
 
     private static void initElasticsearch() throws IOException {
         RestHighLevelClient esClient = AtlasElasticsearchDatabase.getClient();
-        IndexTemplatesExistRequest indexTemplateExistsRequest = new IndexTemplatesExistRequest("atlan-template");
+
+        String atlasHomeDir  = System.getProperty("atlas.home");
+        String elasticsearchSettingsFilePath = (org.apache.commons.lang3.StringUtils.isEmpty(atlasHomeDir) ? "." : atlasHomeDir) + File.separator + "elasticsearch" + File.separator + "es-settings.json";
+        File elasticsearchSettingsFile  = new File(elasticsearchSettingsFilePath);
+        String settingsJson  = new String(Files.readAllBytes(elasticsearchSettingsFile.toPath()), StandardCharsets.UTF_8);
+
+        String elasticsearchMappingsFilePath = (org.apache.commons.lang3.StringUtils.isEmpty(atlasHomeDir) ? "." : atlasHomeDir) + File.separator + "elasticsearch" + File.separator + "es-mappings.json";
+        File elasticsearchMappingsFile  = new File(elasticsearchMappingsFilePath);
+        String mappingsJson  = new String(Files.readAllBytes(elasticsearchMappingsFile.toPath()), StandardCharsets.UTF_8);
+
+        // Create the primary template for the configured index prefix (e.g., janusgraph_vertex_index).
+        // This MUST succeed — Atlas cannot start without correct ES mappings/analyzers.
+        String vertexIndex = INDEX_PREFIX + VERTEX_INDEX;
+
+        // Also create a template for atlas_graph_* pattern so the Cassandra graph backend
+        // gets the same analyzers, normalizers, and dynamic templates when its index is created.
+        // This is best-effort — failure does not block startup.
+        if (INDEX_PREFIX.equals("atlas_graph_")) {
+            createESTemplateIfNotExists(esClient, "atlas-graph-template",
+                    Arrays.asList("atlas_graph_*"), settingsJson, mappingsJson, false);
+            // TODO: Commented as pipeline does not execute in case of update in ES payload, will fix later
+            //ensureRemoveNullFieldsPipeline(esClient, vertexIndex);
+        } else {
+            createESTemplateIfNotExists(esClient, "atlan-template", Arrays.asList(vertexIndex), settingsJson, mappingsJson, true);
+        }
+    }
+
+    private static final String REMOVE_NULL_FIELDS_PIPELINE      = "remove_null_fields";
+    private static final String REMOVE_NULL_FIELDS_PIPELINE_BODY =
+            "{\"description\":\"Remove fields with null values before indexing\"," +
+            "\"processors\":[{\"script\":{\"lang\":\"painless\"," +
+            "\"source\":\"ctx.entrySet().removeIf(entry -> entry.getValue() == null);\"}}]}";
+
+    /**
+     * Ensures the {@value #REMOVE_NULL_FIELDS_PIPELINE} ingest pipeline exists and is set as the
+     * {@code index.default_pipeline} for {@code indexName}. All failures are best-effort — logged
+     * as warnings but do not block Atlas startup.
+     *
+     * <p>Logic:
+     * <ol>
+     *   <li>If the pipeline does not exist → create it.</li>
+     *   <li>If the pipeline already exists → skip creation.</li>
+     *   <li>If {@code index.default_pipeline} is not yet set to the pipeline → set it.</li>
+     *   <li>If already set → do nothing.</li>
+     * </ol>
+     */
+    private static void ensureRemoveNullFieldsPipeline(RestHighLevelClient esClient, String indexName) {
+        // --- Step 1: Check / create the ingest pipeline ---
+        boolean pipelineExists = false;
+        try {
+            GetPipelineResponse pipelineResponse = esClient.ingest()
+                    .getPipeline(new GetPipelineRequest(REMOVE_NULL_FIELDS_PIPELINE), RequestOptions.DEFAULT);
+            pipelineExists = pipelineResponse.isFound();
+        } catch (Exception e) {
+            LOG.warn("ensureRemoveNullFieldsPipeline: error checking pipeline '{}': {}",
+                    REMOVE_NULL_FIELDS_PIPELINE, e.getMessage());
+        }
+
+        if (!pipelineExists) {
+            try {
+                PutPipelineRequest putPipelineRequest = new PutPipelineRequest(
+                        REMOVE_NULL_FIELDS_PIPELINE,
+                        new BytesArray(REMOVE_NULL_FIELDS_PIPELINE_BODY.getBytes(StandardCharsets.UTF_8)),
+                        XContentType.JSON);
+                AcknowledgedResponse putResp = esClient.ingest().putPipeline(putPipelineRequest, RequestOptions.DEFAULT);
+                if (putResp.isAcknowledged()) {
+                    LOG.info("ensureRemoveNullFieldsPipeline: pipeline '{}' created", REMOVE_NULL_FIELDS_PIPELINE);
+                } else {
+                    LOG.warn("ensureRemoveNullFieldsPipeline: pipeline '{}' creation not acknowledged — skipping index setting",
+                            REMOVE_NULL_FIELDS_PIPELINE);
+                    return;
+                }
+            } catch (Exception e) {
+                LOG.warn("ensureRemoveNullFieldsPipeline: failed to create pipeline '{}': {}",
+                        REMOVE_NULL_FIELDS_PIPELINE, e.getMessage());
+                return;
+            }
+        } else {
+            LOG.info("ensureRemoveNullFieldsPipeline: pipeline '{}' already exists", REMOVE_NULL_FIELDS_PIPELINE);
+        }
+
+        // --- Step 2: Check / set index.default_pipeline on the index ---
+        try {
+            GetSettingsRequest getSettingsRequest = new GetSettingsRequest()
+                    .indices(indexName)
+                    .names("index.default_pipeline");
+            GetSettingsResponse getSettingsResponse = esClient.indices()
+                    .getSettings(getSettingsRequest, RequestOptions.DEFAULT);
+            String currentPipeline = getSettingsResponse.getSetting(indexName, "index.default_pipeline");
+            if (REMOVE_NULL_FIELDS_PIPELINE.equals(currentPipeline)) {
+                LOG.info("ensureRemoveNullFieldsPipeline: index '{}' already has default_pipeline='{}'",
+                        indexName, REMOVE_NULL_FIELDS_PIPELINE);
+                return;
+            }
+        } catch (Exception e) {
+            LOG.warn("ensureRemoveNullFieldsPipeline: error reading settings for index '{}': {}",
+                    indexName, e.getMessage());
+        }
+
+        try {
+            UpdateSettingsRequest updateSettingsRequest = new UpdateSettingsRequest(indexName);
+            updateSettingsRequest.settings(
+                    "{\"index.default_pipeline\":\"" + REMOVE_NULL_FIELDS_PIPELINE + "\"}",
+                    XContentType.JSON);
+            AcknowledgedResponse updateResp = esClient.indices()
+                    .putSettings(updateSettingsRequest, RequestOptions.DEFAULT);
+            if (updateResp.isAcknowledged()) {
+                LOG.info("ensureRemoveNullFieldsPipeline: set default_pipeline='{}' on index '{}'",
+                        REMOVE_NULL_FIELDS_PIPELINE, indexName);
+            } else {
+                LOG.warn("ensureRemoveNullFieldsPipeline: putSettings not acknowledged for index '{}'", indexName);
+            }
+        } catch (Exception e) {
+            LOG.warn("ensureRemoveNullFieldsPipeline: failed to set default_pipeline on index '{}': {}",
+                    indexName, e.getMessage());
+        }
+    }
+
+    private static void createESTemplateIfNotExists(RestHighLevelClient esClient, String templateName,
+                                                     List<String> patterns, String settingsJson,
+                                                     String mappingsJson, boolean failOnError) throws IOException {
         boolean exists = false;
         try {
-            exists = esClient.indices().existsTemplate(indexTemplateExistsRequest, RequestOptions.DEFAULT);
+            IndexTemplatesExistRequest existsRequest = new IndexTemplatesExistRequest(templateName);
+            exists = esClient.indices().existsTemplate(existsRequest, RequestOptions.DEFAULT);
             if (exists) {
-                LOG.info("atlan-template es index template exists!");
+                LOG.info("{} es index template exists!", templateName);
             } else {
-                LOG.info("atlan-template es index template does not exists!");
+                LOG.info("{} es index template does not exist, creating...", templateName);
             }
-        } catch (Exception es) {
-            LOG.error("Caught exception: ", es.toString());
+        } catch (Exception e) {
+            LOG.error("Error checking template {}: {}", templateName, e.toString());
+            if (failOnError) {
+                throw (e instanceof IOException) ? (IOException) e : new IOException("Failed to check ES template: " + templateName, e);
+            }
         }
-        if (!exists) {
-            String vertexIndex = INDEX_PREFIX + VERTEX_INDEX;
-            PutIndexTemplateRequest request = new PutIndexTemplateRequest("atlan-template");
-            request.patterns(Arrays.asList(vertexIndex));
-            String atlasHomeDir  = System.getProperty("atlas.home");
-            String elasticsearchSettingsFilePath = (org.apache.commons.lang3.StringUtils.isEmpty(atlasHomeDir) ? "." : atlasHomeDir) + File.separator + "elasticsearch" + File.separator + "es-settings.json";
-            File elasticsearchSettingsFile  = new File(elasticsearchSettingsFilePath);
-            String jsonString  = new String(Files.readAllBytes(elasticsearchSettingsFile.toPath()), StandardCharsets.UTF_8);
-            request.settings(jsonString, XContentType.JSON);
 
-            String elasticsearchMappingsFilePath = (org.apache.commons.lang3.StringUtils.isEmpty(atlasHomeDir) ? "." : atlasHomeDir) + File.separator + "elasticsearch" + File.separator + "es-mappings.json";
-            File elasticsearchMappingsFile  = new File(elasticsearchMappingsFilePath);
-            String mappingsJsonString  = new String(Files.readAllBytes(elasticsearchMappingsFile.toPath()), StandardCharsets.UTF_8);
-            request.mapping(mappingsJsonString, XContentType.JSON);
+        if (!exists) {
+            PutIndexTemplateRequest request = new PutIndexTemplateRequest(templateName);
+            request.patterns(patterns);
+            request.settings(settingsJson, XContentType.JSON);
+            request.mapping(mappingsJson, XContentType.JSON);
 
             try {
                 AcknowledgedResponse putTemplateResponse = esClient.indices().putTemplate(request, RequestOptions.DEFAULT);
                 if (putTemplateResponse.isAcknowledged()) {
-                    LOG.info("Atlan index template created.");
+                    LOG.info("{} index template created with patterns: {}", templateName, patterns);
                 } else {
-                    LOG.error("error creating atlan index template");
+                    LOG.error("Error creating {} index template", templateName);
                 }
             } catch (Exception e) {
-                LOG.error("Caught exception: ", e.toString());
-                throw e;
+                LOG.error("Failed to create {} index template: {}", templateName, e.toString());
+                if (failOnError) {
+                    throw (e instanceof IOException) ? (IOException) e : new IOException("Failed to create ES template: " + templateName, e);
+                }
             }
+        }
+
+        // Create a unified alias "atlas_vertex_index" pointing to the actual vertex index.
+        // This allows consumers to use a stable alias regardless of the backend-specific index name.
+        // Best-effort — failure does not block startup.
+        String vertexIndex = INDEX_PREFIX + VERTEX_INDEX;
+        createVertexIndexAliasIfNotExists(esClient, vertexIndex);
+    }
+
+    private static final String VERTEX_INDEX_ALIAS = "atlas_vertex_index";
+
+    private static void createVertexIndexAliasIfNotExists(RestHighLevelClient esClient, String vertexIndex) {
+        // Skip if the index is already named atlas_vertex_index
+        if (VERTEX_INDEX_ALIAS.equals(vertexIndex)) {
+            LOG.info("Vertex index is already named {}, skipping alias creation", VERTEX_INDEX_ALIAS);
+            return;
+        }
+
+        try {
+            // Check if the target index exists first
+            GetIndexRequest getIndexRequest = new GetIndexRequest(vertexIndex);
+            boolean indexExists = esClient.indices().exists(getIndexRequest, RequestOptions.DEFAULT);
+            if (!indexExists) {
+                LOG.info("Vertex index {} does not exist yet, skipping alias creation", vertexIndex);
+                return;
+            }
+
+            // Check if the alias already exists
+            GetAliasesRequest getAliasesRequest = new GetAliasesRequest(VERTEX_INDEX_ALIAS);
+            boolean aliasExists = esClient.indices().existsAlias(getAliasesRequest, RequestOptions.DEFAULT);
+            if (aliasExists) {
+                LOG.info("Alias {} already exists, skipping creation", VERTEX_INDEX_ALIAS);
+                return;
+            }
+
+            // Create the alias
+            IndicesAliasesRequest aliasRequest = new IndicesAliasesRequest();
+            IndicesAliasesRequest.AliasActions addAction = new IndicesAliasesRequest.AliasActions(
+                    IndicesAliasesRequest.AliasActions.Type.ADD)
+                    .index(vertexIndex)
+                    .alias(VERTEX_INDEX_ALIAS);
+            aliasRequest.addAliasAction(addAction);
+
+            AcknowledgedResponse response = esClient.indices().updateAliases(aliasRequest, RequestOptions.DEFAULT);
+            if (response.isAcknowledged()) {
+                LOG.info("Created alias {} pointing to index {}", VERTEX_INDEX_ALIAS, vertexIndex);
+            } else {
+                LOG.error("Failed to create alias {} for index {}: not acknowledged", VERTEX_INDEX_ALIAS, vertexIndex);
+            }
+        } catch (Exception e) {
+            LOG.error("Failed to create alias {} for index {}: {}", VERTEX_INDEX_ALIAS, vertexIndex, e.toString());
         }
     }
 }
