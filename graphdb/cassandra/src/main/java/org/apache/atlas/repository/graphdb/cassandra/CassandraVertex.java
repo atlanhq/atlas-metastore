@@ -116,6 +116,7 @@ public class CassandraVertex extends CassandraElement implements AtlasVertex<Cas
             set.add(value);
             properties.put(propertyName, set);
         }
+        getRemovedProperties().remove(propertyName);
         markDirty();
     }
 
@@ -135,6 +136,7 @@ public class CassandraVertex extends CassandraElement implements AtlasVertex<Cas
             list.add(value);
             properties.put(propertyName, list);
         }
+        getRemovedProperties().remove(propertyName);
         markDirty();
     }
 

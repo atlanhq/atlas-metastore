@@ -255,7 +255,11 @@ public class ESOutboxProcessor {
                 return true;
             }
 
-            // Index action — validate JSON payload
+            // Update action — the stored propertiesJson is a script-based update body:
+            // {"script":{"source":"<UPSERT_SCRIPT>","lang":"painless","params":{"updates":{...}}},"upsert":{...}}
+            // The script sets non-null fields and explicitly removes null fields from _source,
+            // replacing the old doc/doc_as_upsert approach (which relied on the remove_null_fields
+            // ingest pipeline — pipelines do not run on ES update operations).
             String json = entry.propertiesJson;
             if (json == null || json.isEmpty()) {
                 return false;
@@ -269,7 +273,7 @@ public class ESOutboxProcessor {
             // Ensure no raw newlines that would break NDJSON format
             String safeJson = json.indexOf('\n') >= 0 ? json.replace('\n', ' ') : json;
 
-            bulkBody.append("{\"index\":{\"_index\":\"").append(indexName)
+            bulkBody.append("{\"update\":{\"_index\":\"").append(indexName)
                     .append("\",\"_id\":\"").append(entry.vertexId).append("\"}}\n");
             bulkBody.append(safeJson).append("\n");
             return true;

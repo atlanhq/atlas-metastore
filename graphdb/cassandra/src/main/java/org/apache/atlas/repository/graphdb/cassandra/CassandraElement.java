@@ -10,6 +10,7 @@ import java.util.*;
 public abstract class CassandraElement implements AtlasElement {
 
     protected String id;  // non-final: eager deterministic ID rewrite may change it before commit
+    protected final Set<String> removedProperties;
     protected final Map<String, Object> properties;
     protected final CassandraGraph graph;
     protected boolean isNew;
@@ -23,6 +24,7 @@ public abstract class CassandraElement implements AtlasElement {
         this.isNew      = true;
         this.isDirty    = false;
         this.isDeleted  = false;
+        this.removedProperties = new HashSet<>();
     }
 
     protected CassandraElement(String id, Map<String, Object> properties, CassandraGraph graph) {
@@ -32,6 +34,7 @@ public abstract class CassandraElement implements AtlasElement {
         this.isNew      = false;
         this.isDirty    = false;
         this.isDeleted  = false;
+        this.removedProperties = new HashSet<>();
     }
 
     @Override
@@ -46,6 +49,10 @@ public abstract class CassandraElement implements AtlasElement {
     @Override
     public Collection<? extends String> getPropertyKeys() {
         return Collections.unmodifiableSet(properties.keySet());
+    }
+
+    public Set<String> getRemovedProperties() {
+        return removedProperties;
     }
 
     @Override
@@ -215,14 +222,17 @@ public abstract class CassandraElement implements AtlasElement {
     public void setListProperty(String propertyName, List<String> values) {
         if (values == null) {
             properties.remove(propertyName);
+            removedProperties.add(propertyName);
         } else {
             properties.put(propertyName, new ArrayList<>(values));
+            removedProperties.remove(propertyName);
         }
         markDirty();
     }
 
     @Override
     public void setPropertyFromElementsIds(String propertyName, List<AtlasElement> values) {
+        // TODO: Unused method
         if (values == null || values.isEmpty()) {
             properties.remove(propertyName);
         } else {
@@ -237,6 +247,7 @@ public abstract class CassandraElement implements AtlasElement {
 
     @Override
     public void setPropertyFromElementId(String propertyName, AtlasElement value) {
+        // TODO: Unused method
         if (value == null) {
             properties.remove(propertyName);
         } else {
@@ -248,6 +259,7 @@ public abstract class CassandraElement implements AtlasElement {
     @Override
     public void removeProperty(String propertyName) {
         properties.remove(propertyName);
+        removedProperties.add(propertyName);
         markDirty();
     }
 
@@ -256,9 +268,14 @@ public abstract class CassandraElement implements AtlasElement {
     public void removePropertyValue(String propertyName, Object propertyValue) {
         Object current = properties.get(propertyName);
         if (current instanceof Collection) {
-            ((Collection) current).remove(propertyValue);
+            Collection values = (Collection) current;
+            values.remove(propertyValue);
+            if (values.isEmpty()) {
+                removedProperties.add(propertyName);
+            }
         } else if (current != null && current.equals(propertyValue)) {
             properties.remove(propertyName);
+            removedProperties.add(propertyName);
         }
         markDirty();
     }
@@ -272,6 +289,7 @@ public abstract class CassandraElement implements AtlasElement {
         } else if (current != null && current.equals(propertyValue)) {
             properties.remove(propertyName);
         }
+        removedProperties.add(propertyName);
         markDirty();
     }
 
@@ -279,8 +297,10 @@ public abstract class CassandraElement implements AtlasElement {
     public <T> void setProperty(String propertyName, T value) {
         if (value == null) {
             properties.remove(propertyName);
+            removedProperties.add(propertyName);
         } else {
             properties.put(propertyName, value);
+            removedProperties.remove(propertyName);
         }
         markDirty();
     }
