@@ -319,7 +319,7 @@ public class MigratorMain {
 
             if (requestTimeout != null) {
                 configBuilder.withDuration(DefaultDriverOption.REQUEST_TIMEOUT, requestTimeout);
-                LOG.info("Session request timeout: {}s ", requestTimeout.getSeconds());
+                LOG.info("Session request timeout: {}s", requestTimeout.getSeconds());
             } else if (tuneForWrites) {
                 configBuilder.withDuration(DefaultDriverOption.REQUEST_TIMEOUT, Duration.ofSeconds(30));
             }
