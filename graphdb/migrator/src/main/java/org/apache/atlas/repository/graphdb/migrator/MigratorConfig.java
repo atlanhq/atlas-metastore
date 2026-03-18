@@ -66,9 +66,24 @@ public class MigratorConfig {
     private final boolean skipClassifications;
     private final boolean skipTasks;
 
+    // Auxiliary keyspace migration flags
+    private final boolean migrateConfigStore;
+    private final boolean migrateTags;
+
     // ID strategy / claim
     private final IdStrategy idStrategy;
     private final boolean claimEnabled;
+
+    // Validation settings
+    private final int     validationVertexSampleSize;
+    private final int     validationEdgeSampleSize;
+    private final int     validationIndexSampleSize;
+    private final int     validationTokenProbes;
+    private final int     superVertexThreshold;
+    private final int     superVertexTopN;
+    private final boolean skipSuperVertexDetection;
+    private final boolean skipEsCountValidation;
+    private final String  validationTenantId;
 
     public MigratorConfig(String configPath) throws IOException {
         this.props = new Properties();
@@ -130,9 +145,24 @@ public class MigratorConfig {
         this.skipClassifications = getBoolean("migration.skip.classifications", false);
         this.skipTasks           = getBoolean("migration.skip.tasks", false);
 
+        // Auxiliary keyspace migration flags
+        this.migrateConfigStore = getBoolean("migration.migrate.config.store", false);
+        this.migrateTags        = getBoolean("migration.migrate.tags", false);
+
         // ID strategy / claim
         this.idStrategy = IdStrategy.from(get("migration.id.strategy", "legacy"));
         this.claimEnabled = getBoolean("migration.claim.enabled", false);
+
+        // Validation
+        this.validationVertexSampleSize  = getInt("validation.vertex.sample.size", 1000);
+        this.validationEdgeSampleSize    = getInt("validation.edge.sample.size", 500);
+        this.validationIndexSampleSize   = getInt("validation.index.sample.size", 500);
+        this.validationTokenProbes       = getInt("validation.token.probes", 5);
+        this.superVertexThreshold        = getInt("validation.super.vertex.threshold", 100000);
+        this.superVertexTopN             = getInt("validation.super.vertex.topn", 100);
+        this.skipSuperVertexDetection    = getBoolean("validation.skip.super.vertex.detection", false);
+        this.skipEsCountValidation       = getBoolean("validation.skip.es.count", false);
+        this.validationTenantId          = get("validation.tenant.id", "unknown");
     }
 
     private String get(String key, String defaultValue) {
@@ -193,6 +223,24 @@ public class MigratorConfig {
     public boolean isSkipClassifications() { return skipClassifications; }
     public boolean isSkipTasks()           { return skipTasks; }
 
+    public boolean isMigrateConfigStore()  { return migrateConfigStore; }
+    public boolean isMigrateTags()         { return migrateTags; }
+
+    public boolean isSameCassandraCluster() {
+        return sourceCassandraHostname.equals(targetCassandraHostname)
+            && sourceCassandraPort == targetCassandraPort;
+    }
+
     public IdStrategy getIdStrategy()      { return idStrategy; }
     public boolean isClaimEnabled()        { return claimEnabled; }
+
+    public int     getValidationVertexSampleSize()  { return validationVertexSampleSize; }
+    public int     getValidationEdgeSampleSize()    { return validationEdgeSampleSize; }
+    public int     getValidationIndexSampleSize()   { return validationIndexSampleSize; }
+    public int     getValidationTokenProbes()       { return validationTokenProbes; }
+    public int     getSuperVertexThreshold()        { return superVertexThreshold; }
+    public int     getSuperVertexTopN()             { return superVertexTopN; }
+    public boolean isSkipSuperVertexDetection()     { return skipSuperVertexDetection; }
+    public boolean isSkipEsCountValidation()        { return skipEsCountValidation; }
+    public String  getValidationTenantId()          { return validationTenantId; }
 }

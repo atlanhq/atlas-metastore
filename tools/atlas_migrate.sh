@@ -58,6 +58,14 @@ ES_BULK_SIZE="${ES_BULK_SIZE:-1000}"
 ID_STRATEGY="${ID_STRATEGY:-legacy}"          # "legacy" (UUID), "hash-jg" (SHA-256 of JG ID), or "deterministic" (identity-based SHA-256)
 CLAIM_ENABLED="${CLAIM_ENABLED:-false}"       # LWT dedup claims during migration
 
+# Skip flags
+SKIP_ES_REINDEX="${SKIP_ES_REINDEX:-false}"
+SKIP_CLASSIFICATIONS="${SKIP_CLASSIFICATIONS:-false}"
+SKIP_TASKS="${SKIP_TASKS:-false}"
+
+# Validation tenant ID — auto-derive from hostname if not set
+VALIDATION_TENANT_ID="${VALIDATION_TENANT_ID:-}"
+
 # ---- Helpers ----
 
 log()  { echo "[migrator] $*"; }
@@ -167,6 +175,16 @@ read_atlas_config() {
 # ---- Generate migrator.properties ----
 
 generate_properties() {
+    # Auto-derive tenant ID if not set
+    if [ -z "$VALIDATION_TENANT_ID" ]; then
+        # Try VCLUSTER_NAME env, then hostname, then fallback
+        if [ -n "${VCLUSTER_NAME:-}" ]; then
+            VALIDATION_TENANT_ID="$VCLUSTER_NAME"
+        else
+            VALIDATION_TENANT_ID=$(hostname 2>/dev/null | sed 's/\..*$//' || echo "unknown")
+        fi
+    fi
+
     log "Generating $PROPERTIES_FILE"
 
     cat > "$PROPERTIES_FILE" << EOF
@@ -215,6 +233,14 @@ migration.resume=true
 # ID strategy / dedup
 migration.id.strategy=${ID_STRATEGY}
 migration.claim.enabled=${CLAIM_ENABLED}
+
+# Skip flags
+migration.skip.es.reindex=${SKIP_ES_REINDEX}
+migration.skip.classifications=${SKIP_CLASSIFICATIONS}
+migration.skip.tasks=${SKIP_TASKS}
+
+# Validation
+validation.tenant.id=${VALIDATION_TENANT_ID}
 EOF
 
     log "Properties written to $PROPERTIES_FILE"
@@ -271,6 +297,8 @@ run() {
     log "=========================================="
     log ""
 
+    # Use pipefail + PIPESTATUS to capture the JAR's exit code through tee
+    set +e
     java \
         -Xmx4g -Xms2g \
         --add-opens java.base/java.lang=ALL-UNNAMED \
@@ -278,9 +306,15 @@ run() {
         "$PROPERTIES_FILE" \
         $extra_args \
         2>&1 | tee "$LOG_FILE"
+    local jar_exit=${PIPESTATUS[0]}
+    set -e
 
     log ""
     log "Migration log saved to $LOG_FILE"
+
+    if [ "$jar_exit" -ne 0 ]; then
+        err "Migrator exited with code $jar_exit — validation failed or migration encountered errors. Review log at $LOG_FILE"
+    fi
 }
 
 # ---- Help ----
@@ -299,15 +333,19 @@ show_help() {
     echo "  --help             Show this help"
     echo ""
     echo "Environment overrides:"
-    echo "  SOURCE_KEYSPACE        Source JanusGraph keyspace (default: atlas)"
-    echo "  SOURCE_EDGESTORE_TABLE Edgestore table name (default: edgestore)"
-    echo "  TARGET_KEYSPACE        Target keyspace (default: atlas_graph)"
-    echo "  SOURCE_ES_INDEX        Source ES index to copy mappings from (default: janusgraph_vertex_index)"
-    echo "  TARGET_ES_INDEX        Target ES index to write docs to (default: atlas_graph_vertex_index)"
-    echo "  SCANNER_THREADS        Scanner parallelism (default: 16)"
-    echo "  WRITER_THREADS         Writer parallelism (default: 8)"
-    echo "  ID_STRATEGY            ID generation: legacy, hash-jg, or deterministic (identity-based SHA-256) (default: legacy)"
-    echo "  CLAIM_ENABLED          LWT dedup claims during migration: true/false (default: false)"
+    echo "  SOURCE_KEYSPACE          Source JanusGraph keyspace (default: atlas)"
+    echo "  SOURCE_EDGESTORE_TABLE   Edgestore table name (default: edgestore)"
+    echo "  TARGET_KEYSPACE          Target keyspace (default: atlas_graph)"
+    echo "  SOURCE_ES_INDEX          Source ES index to copy mappings from (default: janusgraph_vertex_index)"
+    echo "  TARGET_ES_INDEX          Target ES index to write docs to (default: atlas_graph_vertex_index)"
+    echo "  SCANNER_THREADS          Scanner parallelism (default: 16)"
+    echo "  WRITER_THREADS           Writer parallelism (default: 8)"
+    echo "  ID_STRATEGY              ID generation: legacy, hash-jg, or deterministic (default: legacy)"
+    echo "  CLAIM_ENABLED            LWT dedup claims during migration: true/false (default: false)"
+    echo "  SKIP_ES_REINDEX          Skip ES reindexing phase: true/false (default: false)"
+    echo "  SKIP_CLASSIFICATIONS     Skip classification vertices: true/false (default: false)"
+    echo "  SKIP_TASKS               Skip task vertices: true/false (default: false)"
+    echo "  VALIDATION_TENANT_ID     Tenant ID for validation report (default: auto-derived from hostname)"
     echo ""
     echo "Quick start (from kubectl):"
     echo "  kubectl exec -it atlas-0 -n atlas -c atlas-main -- /opt/apache-atlas/bin/atlas_migrate.sh --dry-run"

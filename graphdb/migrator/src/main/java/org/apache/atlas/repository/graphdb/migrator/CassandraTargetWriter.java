@@ -50,6 +50,7 @@ public class CassandraTargetWriter implements AutoCloseable {
     private PreparedStatement selectClaimStmt;
     private PreparedStatement insertTypeDefStmt;
     private PreparedStatement insertTypeDefByCategoryStmt;
+    private PreparedStatement insertEdgeIndexStmt;
 
     // Pipeline: scanner threads enqueue, writer threads dequeue
     private final BlockingQueue<DecodedVertex> queue;
@@ -189,6 +190,13 @@ public class CassandraTargetWriter implements AutoCloseable {
             "  PRIMARY KEY ((type_category), type_name)" +
             ") WITH CLUSTERING ORDER BY (type_name ASC)");
 
+        targetSession.execute(
+            "CREATE TABLE IF NOT EXISTS " + ks + ".edge_index (" +
+            "  index_name text," +
+            "  index_value text," +
+            "  edge_id text," +
+            "  PRIMARY KEY ((index_name, index_value)))");
+
         LOG.info("Target schema created/verified in keyspace '{}'", ks);
     }
 
@@ -232,6 +240,9 @@ public class CassandraTargetWriter implements AutoCloseable {
         insertTypeDefByCategoryStmt = targetSession.prepare(
             "INSERT INTO " + ks + ".type_definitions_by_category " +
             "(type_category, type_name, vertex_id) VALUES (?, ?, ?)");
+
+        insertEdgeIndexStmt = targetSession.prepare(
+            "INSERT INTO " + ks + ".edge_index (index_name, index_value, edge_id) VALUES (?, ?, ?)");
     }
 
     /**
@@ -454,6 +465,12 @@ public class CassandraTargetWriter implements AutoCloseable {
         stmts.add(insertEdgeByIdStmt.bind(
             edgeId, outVertexId, inVertexId,
             edge.getLabel(), edgePropsJson, state, now, now));
+
+        // Populate edge_index for relationship GUID lookups (_r__guid → edge_id)
+        Object relGuid = edge.getProperties().get("_r__guid");
+        if (relGuid != null) {
+            stmts.add(insertEdgeIndexStmt.bind("_r__guid_idx", String.valueOf(relGuid), edgeId));
+        }
     }
 
     /**
