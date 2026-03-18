@@ -55,6 +55,10 @@ public class ValidationReport {
     private long esDocCount;
     private long typeDefCount;
     private long typeDefByCategoryCount;
+    private long edgeIndexCount;
+    private long configStoreEntryCount;
+    private long tagsCount;
+    private long propagatedTagsCount;
 
     public ValidationReport(String tenantId) {
         this.tenantId  = tenantId;
@@ -100,6 +104,18 @@ public class ValidationReport {
 
     public long getTypeDefByCategoryCount()        { return typeDefByCategoryCount; }
     public void setTypeDefByCategoryCount(long c)  { this.typeDefByCategoryCount = c; }
+
+    public long getEdgeIndexCount()                { return edgeIndexCount; }
+    public void setEdgeIndexCount(long c)          { this.edgeIndexCount = c; }
+
+    public long getConfigStoreEntryCount()         { return configStoreEntryCount; }
+    public void setConfigStoreEntryCount(long c)   { this.configStoreEntryCount = c; }
+
+    public long getTagsCount()                     { return tagsCount; }
+    public void setTagsCount(long c)               { this.tagsCount = c; }
+
+    public long getPropagatedTagsCount()           { return propagatedTagsCount; }
+    public void setPropagatedTagsCount(long c)     { this.propagatedTagsCount = c; }
 
     public SuperVertexReport getSuperVertexReport()             { return superVertexReport; }
     public void setSuperVertexReport(SuperVertexReport r)       { this.superVertexReport = r; }
@@ -197,6 +213,16 @@ public class ValidationReport {
         sb.append(String.format("  %-36s %,12d\n", "ES Docs (target index)", esDocCount));
         sb.append(String.format("  %-36s %,12d\n", "TypeDefs", typeDefCount));
         sb.append(String.format("  %-36s %,12d\n", "TypeDefs (by category)", typeDefByCategoryCount));
+        sb.append(String.format("  %-36s %,12d\n", "Edge Index", edgeIndexCount));
+        if (configStoreEntryCount >= 0) {
+            sb.append(String.format("  %-36s %,12d\n", "config_store entries", configStoreEntryCount));
+        }
+        if (tagsCount >= 0) {
+            sb.append(String.format("  %-36s %,12d\n", "tags_by_id rows", tagsCount));
+        }
+        if (propagatedTagsCount >= 0) {
+            sb.append(String.format("  %-36s %,12d\n", "propagated_tags rows", propagatedTagsCount));
+        }
         sb.append("\n");
 
         // Validation checks table
@@ -352,6 +378,10 @@ public class ValidationReport {
         m.put("edge_by_id_count", edgeByIdCount);
         m.put("es_doc_count", esDocCount);
         m.put("typedef_count", typeDefCount);
+        m.put("edge_index_count", edgeIndexCount);
+        if (configStoreEntryCount >= 0) m.put("config_store_entry_count", configStoreEntryCount);
+        if (tagsCount >= 0) m.put("tags_count", tagsCount);
+        if (propagatedTagsCount >= 0) m.put("propagated_tags_count", propagatedTagsCount);
 
         // Source-side direct counts
         if (sourceEdgestoreCount >= 0) {

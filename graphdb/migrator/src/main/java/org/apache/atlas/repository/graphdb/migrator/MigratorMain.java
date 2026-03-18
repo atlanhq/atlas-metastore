@@ -69,6 +69,8 @@ public class MigratorMain {
         LOG.info("ID strategy: {}, claim enabled: {}", config.getIdStrategy(), config.isClaimEnabled());
         LOG.info("Skip flags: esReindex={}, classifications={}, tasks={}",
                  config.isSkipEsReindex(), config.isSkipClassifications(), config.isSkipTasks());
+        LOG.info("Auxiliary migration: configStore={}, tags={}, sameCluster={}",
+                 config.isMigrateConfigStore(), config.isMigrateTags(), config.isSameCassandraCluster());
 
         // Open Cassandra sessions (source gets long timeout for token-range scans)
         CqlSession sourceSession = buildCqlSession(
@@ -175,6 +177,10 @@ public class MigratorMain {
             LOG.info("========================================");
             LOG.info("Phase 1 complete: {}", metrics.summary());
             LOG.info("========================================");
+
+            // ========== Phase 1.5: Auxiliary Keyspace Migration ==========
+            AuxiliaryKeyspaceMigrator auxMigrator = new AuxiliaryKeyspaceMigrator(sourceSession, targetSession, config);
+            auxMigrator.migrate();
 
             // ========== Phase 2: ES Re-index ==========
             if (!config.isSkipEsReindex()) {

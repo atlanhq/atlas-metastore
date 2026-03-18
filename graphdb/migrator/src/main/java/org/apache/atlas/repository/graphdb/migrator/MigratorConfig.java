@@ -66,6 +66,10 @@ public class MigratorConfig {
     private final boolean skipClassifications;
     private final boolean skipTasks;
 
+    // Auxiliary keyspace migration flags
+    private final boolean migrateConfigStore;
+    private final boolean migrateTags;
+
     // ID strategy / claim
     private final IdStrategy idStrategy;
     private final boolean claimEnabled;
@@ -141,6 +145,10 @@ public class MigratorConfig {
         this.skipClassifications = getBoolean("migration.skip.classifications", false);
         this.skipTasks           = getBoolean("migration.skip.tasks", false);
 
+        // Auxiliary keyspace migration flags
+        this.migrateConfigStore = getBoolean("migration.migrate.config.store", false);
+        this.migrateTags        = getBoolean("migration.migrate.tags", false);
+
         // ID strategy / claim
         this.idStrategy = IdStrategy.from(get("migration.id.strategy", "legacy"));
         this.claimEnabled = getBoolean("migration.claim.enabled", false);
@@ -214,6 +222,14 @@ public class MigratorConfig {
     public boolean isSkipEsReindex()      { return skipEsReindex; }
     public boolean isSkipClassifications() { return skipClassifications; }
     public boolean isSkipTasks()           { return skipTasks; }
+
+    public boolean isMigrateConfigStore()  { return migrateConfigStore; }
+    public boolean isMigrateTags()         { return migrateTags; }
+
+    public boolean isSameCassandraCluster() {
+        return sourceCassandraHostname.equals(targetCassandraHostname)
+            && sourceCassandraPort == targetCassandraPort;
+    }
 
     public IdStrategy getIdStrategy()      { return idStrategy; }
     public boolean isClaimEnabled()        { return claimEnabled; }

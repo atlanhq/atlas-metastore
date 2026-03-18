@@ -25,7 +25,7 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * Enhanced post-migration validation.
  *
- * Runs 11 correctness checks against the target Cassandra (and optionally ES).
+ * Runs 14 correctness checks against the target Cassandra (and optionally ES).
  * Returns a structured {@link ValidationReport} with per-check results, per-type
  * statistics, super vertex detection, and source baseline comparison.
  *
@@ -122,6 +122,15 @@ public class MigrationValidator {
         if (!config.isSkipSuperVertexDetection()) {
             runSuperVertexDetection(ks, report);
         }
+
+        // --- Check 12: Edge index table count ---
+        runEdgeIndexCheck(ks, report);
+
+        // --- Check 13: config_store accessibility ---
+        runConfigStoreCheck(report);
+
+        // --- Check 14: tags tables accessibility ---
+        runTagsTablesCheck(report);
 
         report.complete();
 
@@ -847,6 +856,138 @@ public class MigrationValidator {
         result.addDetail("vertices_over_100k", svReport.getVerticesOver100kEdges());
         result.addDetail("vertices_over_1m", svReport.getVerticesOver1mEdges());
         result.addDetail("scan_duration_ms", svReport.getScanDurationMs());
+        report.addCheck(result);
+    }
+
+    // ========================================================================
+    // Check 12: Edge index table count
+    // ========================================================================
+
+    private void runEdgeIndexCheck(String ks, ValidationReport report) {
+        LOG.info("Edge index check: counting rows in {}.edge_index...", ks);
+
+        long edgeIndexCount = countTable(ks + ".edge_index");
+        report.setEdgeIndexCount(edgeIndexCount);
+
+        // Edge index should have at least as many entries as there are relationship edges
+        // (each edge with a __relationshipGuid gets one entry). A count of 0 is a problem
+        // if there are edges in the graph.
+        long edgeOutCount = report.getEdgeOutCount();
+        boolean passed = edgeIndexCount > 0 || edgeOutCount == 0;
+
+        String message = String.format("edge_index=%d, edges_out=%d", edgeIndexCount, edgeOutCount);
+        if (edgeOutCount > 0 && edgeIndexCount == 0) {
+            message += " [FAIL: edge_index is empty but edges exist — relationship GUID lookups will fail]";
+        }
+
+        ValidationCheckResult result = new ValidationCheckResult(
+            "edge_index_count",
+            "Edge index table populated for relationship GUID lookups",
+            passed ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.FAIL,
+            message);
+        result.addDetail("edge_index_count", edgeIndexCount);
+        result.addDetail("edges_out_count", edgeOutCount);
+        report.addCheck(result);
+    }
+
+    // ========================================================================
+    // Check 13: config_store accessibility
+    // ========================================================================
+
+    private void runConfigStoreCheck(ValidationReport report) {
+        LOG.info("config_store check: verifying accessibility on target...");
+
+        long count = -1;
+        String message;
+        ValidationCheckResult.Severity severity;
+
+        try {
+            ResultSet rs = targetSession.execute(
+                SimpleStatement.builder("SELECT count(*) FROM config_store.configs")
+                    .setTimeout(java.time.Duration.ofSeconds(30))
+                    .build());
+            Row row = rs.one();
+            count = row != null ? row.getLong(0) : 0;
+            report.setConfigStoreEntryCount(count);
+
+            severity = count > 0 ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.WARN;
+            message = String.format("config_store.configs accessible, entries=%d", count);
+            if (count == 0) {
+                message += " [WARN: config_store is empty — dynamic configs may not work]";
+            }
+        } catch (Exception e) {
+            severity = ValidationCheckResult.Severity.WARN;
+            message = "config_store.configs not accessible: " + e.getMessage();
+            LOG.warn("config_store check: {}", message);
+        }
+
+        ValidationCheckResult result = new ValidationCheckResult(
+            "config_store_accessible",
+            "config_store.configs is readable on target Cassandra",
+            severity, message);
+        if (count >= 0) result.addDetail("config_store_entry_count", count);
+        report.addCheck(result);
+    }
+
+    // ========================================================================
+    // Check 14: tags tables accessibility
+    // ========================================================================
+
+    private void runTagsTablesCheck(ValidationReport report) {
+        LOG.info("tags tables check: verifying accessibility on target...");
+
+        long tagsCount = -1;
+        long propagatedCount = -1;
+        List<String> issues = new ArrayList<>();
+
+        try {
+            ResultSet rs = targetSession.execute(
+                SimpleStatement.builder("SELECT count(*) FROM tags.tags_by_id")
+                    .setTimeout(java.time.Duration.ofSeconds(30))
+                    .build());
+            Row row = rs.one();
+            tagsCount = row != null ? row.getLong(0) : 0;
+            report.setTagsCount(tagsCount);
+        } catch (Exception e) {
+            issues.add("tags.tags_by_id not accessible: " + e.getMessage());
+            LOG.warn("tags check: tags_by_id not accessible: {}", e.getMessage());
+        }
+
+        try {
+            ResultSet rs = targetSession.execute(
+                SimpleStatement.builder("SELECT count(*) FROM tags.propagated_tags_by_source")
+                    .setTimeout(java.time.Duration.ofSeconds(30))
+                    .build());
+            Row row = rs.one();
+            propagatedCount = row != null ? row.getLong(0) : 0;
+            report.setPropagatedTagsCount(propagatedCount);
+        } catch (Exception e) {
+            issues.add("tags.propagated_tags_by_source not accessible: " + e.getMessage());
+            LOG.warn("tags check: propagated_tags_by_source not accessible: {}", e.getMessage());
+        }
+
+        ValidationCheckResult.Severity severity;
+        String message;
+
+        if (issues.isEmpty()) {
+            severity = (tagsCount > 0 || propagatedCount > 0)
+                ? ValidationCheckResult.Severity.PASS
+                : ValidationCheckResult.Severity.WARN;
+            message = String.format("tags_by_id=%d, propagated_tags_by_source=%d", tagsCount, propagatedCount);
+            if (tagsCount == 0 && propagatedCount == 0) {
+                message += " [WARN: both tags tables are empty]";
+            }
+        } else {
+            severity = ValidationCheckResult.Severity.WARN;
+            message = String.join("; ", issues);
+        }
+
+        ValidationCheckResult result = new ValidationCheckResult(
+            "tags_tables_accessible",
+            "tags keyspace tables are readable on target Cassandra",
+            severity, message);
+        if (tagsCount >= 0) result.addDetail("tags_by_id_count", tagsCount);
+        if (propagatedCount >= 0) result.addDetail("propagated_tags_count", propagatedCount);
         report.addCheck(result);
     }
 
