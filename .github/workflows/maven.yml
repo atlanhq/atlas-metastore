@@ -32,6 +32,7 @@ on:
       - switchable_graph_bug_fixes
       - ms-664-fix-audit-search
       - hotfix-reindex-refresh
+      - migratorValidations
 
     paths-ignore:
       - '.claude/**'

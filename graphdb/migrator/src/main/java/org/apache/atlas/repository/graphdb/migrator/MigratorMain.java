@@ -182,7 +182,7 @@ public class MigratorMain {
                 LOG.info("=== Phase 2/3: Elasticsearch re-indexing ===");
                 LOG.info("  Source: {}.vertices", config.getTargetCassandraKeyspace());
                 LOG.info("  Target ES index: {}", config.getTargetEsIndex());
-                LOG.info("  Bulk size: {}", config.getEsBulkSize());
+                LOG.info("  Bulk size: {} ", config.getEsBulkSize());
                 LOG.info("========================================");
 
                 ElasticsearchReindexer esReindexer = new ElasticsearchReindexer(config, metrics, targetSession);
