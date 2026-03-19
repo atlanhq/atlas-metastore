@@ -38,6 +38,8 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     /** Tracks ES indexes that have been verified/created during this JVM session. */
     private static final Set<String> VERIFIED_ES_INDEXES = ConcurrentHashMap.newKeySet();
 
+    static final Set<String> EXCLUDE_ES_INDEXES_PREFIXING = new HashSet<>(Arrays.asList("search_logs"));
+
     /**
      * Max vertices per LOGGED batch in commit(). Prevents exceeding Cassandra's
      * batch_size_fail_threshold (default 50KB). During TypeDef bootstrap, a single
@@ -626,7 +628,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         // Normalize: callers may pass unprefixed names like "search_logs" but the actual
         // ES index is prefixed (e.g. "atlas_graph_search_logs"). Must match what
         // CassandraIndexQuery.normalizeIndexName() will resolve to.
-        if (!indexName.startsWith(Constants.INDEX_PREFIX)) {
+        if (!indexName.startsWith(Constants.INDEX_PREFIX) && !EXCLUDE_ES_INDEXES_PREFIXING.contains(indexName)) {
             indexName = Constants.INDEX_PREFIX + indexName;
         }
         if (VERIFIED_ES_INDEXES.contains(indexName)) {
