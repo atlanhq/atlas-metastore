@@ -166,7 +166,7 @@ public class ElasticsearchReindexer implements AutoCloseable {
                  String.format("%,d", totalDocs), String.format("%,d", skipped));
     }
 
-    private void ensureIndexExists(String esIndex) {
+    void ensureIndexExists(String esIndex) {
         try {
             Response response = esClient.performRequest(new Request("HEAD", "/" + esIndex));
             if (response.getStatusLine().getStatusCode() == 200) {

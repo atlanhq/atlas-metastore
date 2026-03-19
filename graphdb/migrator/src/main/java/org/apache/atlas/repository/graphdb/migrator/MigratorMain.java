@@ -73,7 +73,7 @@ public class MigratorMain {
         LOG.info("ID strategy: {}, claim enabled: {}", config.getIdStrategy(), config.isClaimEnabled());
         LOG.info("Skip flags: esReindex={}, classifications={}, tasks={}",
                  config.isSkipEsReindex(), config.isSkipClassifications(), config.isSkipTasks());
-        LOG.info("ES field limit: {}, Max retries: {}", config.getEsFieldLimit(), config.getMaxRetries());
+        LOG.info("ES field limit: {}, Max retries: {}, ES parallel: {}", config.getEsFieldLimit(), config.getMaxRetries(), config.isEsParallel());
         LOG.info("Auxiliary migration: configStore={}, tags={}, sameCluster={}",
                  config.isMigrateConfigStore(), config.isMigrateTags(), config.isSameCassandraCluster());
 
@@ -159,6 +159,20 @@ public class MigratorMain {
             LOG.info("  Source baseline collection: ENABLED (super vertex threshold={})", config.getSuperVertexThreshold());
             LOG.info("========================================");
 
+            // Set up parallel ES indexer if enabled (indexes into ES during Phase 1)
+            ParallelEsIndexer parallelEsIndexer = null;
+            if (config.isEsParallel() && !config.isSkipEsReindex()) {
+                parallelEsIndexer = new ParallelEsIndexer(config, metrics);
+                // Ensure target ES index exists before we start indexing
+                ElasticsearchReindexer tempReindexer = new ElasticsearchReindexer(config, metrics, targetSession);
+                parallelEsIndexer.ensureIndex(tempReindexer);
+                tempReindexer.close();
+                // Wire into the writer pipeline
+                writer.setParallelEsIndexer(parallelEsIndexer);
+                parallelEsIndexer.start();
+                LOG.info("Parallel ES indexing ENABLED — Phase 2 will be skipped");
+            }
+
             writer.startWriters();
 
             LOG.info("Initializing JanusGraph schema resolution...");
@@ -184,6 +198,13 @@ public class MigratorMain {
 
             scanner.close();
             writer.close();
+
+            // Complete parallel ES indexing (drain remaining queue)
+            if (parallelEsIndexer != null) {
+                parallelEsIndexer.signalComplete();
+                parallelEsIndexer.awaitCompletion();
+                parallelEsIndexer.close();
+            }
 
             // Save source baseline for Phase 3 comparison
             baselineCollector.saveBaseline(stateStore);
@@ -213,7 +234,13 @@ public class MigratorMain {
             auxMigrator.migrate();
 
             // ========== Phase 2: ES Re-index ==========
-            if (!config.isSkipEsReindex()) {
+            boolean esAlreadyDone = parallelEsIndexer != null;
+            if (esAlreadyDone) {
+                LOG.info("========================================");
+                LOG.info("=== Phase 2 SKIPPED (ES indexed in parallel during Phase 1) ===");
+                LOG.info("  {} ES docs indexed during Phase 1", String.format("%,d", metrics.getEsDocsIndexed()));
+                LOG.info("========================================");
+            } else if (!config.isSkipEsReindex()) {
                 LOG.info("========================================");
                 LOG.info("=== Phase 2/3: Elasticsearch re-indexing ===");
                 LOG.info("  Source: {}.vertices", config.getTargetCassandraKeyspace());

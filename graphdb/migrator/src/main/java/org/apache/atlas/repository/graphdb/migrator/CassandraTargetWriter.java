@@ -65,6 +65,9 @@ public class CassandraTargetWriter implements AutoCloseable {
     private final AtomicLong edgeFallbackCount  = new AtomicLong(0);
     private final ConcurrentMap<Long, String> vertexIdOverrides = new ConcurrentHashMap<>();
 
+    // Optional parallel ES indexer — when set, vertices are indexed into ES during Phase 1
+    private volatile ParallelEsIndexer parallelEsIndexer;
+
     public CassandraTargetWriter(MigratorConfig config, MigrationMetrics metrics, CqlSession targetSession) {
         this.config        = config;
         this.metrics       = metrics;
@@ -82,6 +85,11 @@ public class CassandraTargetWriter implements AutoCloseable {
     public void init() {
         createSchema();
         prepareStatements();
+    }
+
+    /** Set the parallel ES indexer to pipeline ES indexing during Phase 1. */
+    public void setParallelEsIndexer(ParallelEsIndexer indexer) {
+        this.parallelEsIndexer = indexer;
     }
 
     private void createSchema() {
@@ -352,6 +360,18 @@ public class CassandraTargetWriter implements AutoCloseable {
         // Count metrics optimistically — async writes to local Cassandra nearly always succeed
         metrics.incrVerticesWritten();
         metrics.incrEdgesWritten(vertex.getOutEdges().size());
+
+        // Pipeline ES indexing: enqueue the vertex for ES bulk indexing in parallel
+        if (parallelEsIndexer != null) {
+            String vertexId = resolveVertexId(vertex);
+            String propsJson;
+            try {
+                propsJson = MAPPER.writeValueAsString(vertex.getProperties());
+            } catch (Exception e) {
+                propsJson = "{}";
+            }
+            parallelEsIndexer.enqueue(vertexId, propsJson, vertex.getTypeName(), vertex.getState());
+        }
     }
 
     /**
