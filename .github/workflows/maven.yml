@@ -36,6 +36,7 @@ on:
       - nb-switchable-graph-provider
       - ms-664-fix-audit-search
       - hotfix-reindex-refresh
+      - migrator-validations-customization
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
