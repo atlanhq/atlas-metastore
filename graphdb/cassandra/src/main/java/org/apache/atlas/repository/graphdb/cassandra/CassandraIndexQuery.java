@@ -121,7 +121,7 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
         if (indexName == null) {
             return null;
         }
-        if (!indexName.startsWith(Constants.INDEX_PREFIX)) {
+        if (!indexName.startsWith(Constants.INDEX_PREFIX) && !CassandraGraph.EXCLUDE_ES_INDEXES_PREFIXING.contains(indexName)) {
             String normalized = Constants.INDEX_PREFIX + indexName;
             LOG.debug("Normalized ES index name: '{}' -> '{}'", indexName, normalized);
             return normalized;
