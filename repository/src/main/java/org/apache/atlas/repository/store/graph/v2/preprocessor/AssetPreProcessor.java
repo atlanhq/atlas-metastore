@@ -157,7 +157,7 @@ public class AssetPreProcessor implements PreProcessor {
             return;
         }
 
-        if (domainGuids.size() > 1) {
+        if (CollectionUtils.isNotEmpty(domainGuids) && domainGuids.size() > 1) {
             throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Asset can be linked to only one domain");
         }
 
