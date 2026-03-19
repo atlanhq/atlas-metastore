@@ -12,6 +12,7 @@ import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.apache.http.util.EntityUtils;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
+import org.elasticsearch.client.ResponseException;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestClientBuilder;
 import org.slf4j.Logger;
@@ -25,7 +26,7 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * Enhanced post-migration validation.
  *
- * Runs 16 correctness checks against the target Cassandra (and optionally ES).
+ * Runs 17 correctness checks against the target Cassandra (and optionally ES).
  * Returns a structured {@link ValidationReport} with per-check results, per-type
  * statistics, super vertex detection, and source baseline comparison.
  *
@@ -35,6 +36,89 @@ public class MigrationValidator {
 
     private static final Logger LOG = LoggerFactory.getLogger(MigrationValidator.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /**
+     * The product's connector aggregation query. Sent to the target ES index to verify
+     * that the search UI will be able to load connector-based asset counts after cutover.
+     * Filters for ACTIVE assets with recognized superType/typeName, excludes internal types,
+     * and aggregates by connectorName (top 50). size=0 means no docs returned, only aggs.
+     */
+    private static final String ES_CONNECTOR_AGG_QUERY = "{\n" +
+        "  \"size\": 0,\n" +
+        "  \"query\": {\n" +
+        "    \"bool\": {\n" +
+        "      \"filter\": {\n" +
+        "        \"bool\": {\n" +
+        "          \"must\": [\n" +
+        "            {\n" +
+        "              \"bool\": {\n" +
+        "                \"should\": [\n" +
+        "                  {\n" +
+        "                    \"terms\": {\n" +
+        "                      \"__superTypeNames.keyword\": [\n" +
+        "                        \"AI\", \"SQL\", \"BI\", \"SaaS\", \"ObjectStore\", \"EventStore\",\n" +
+        "                        \"DataQuality\", \"Dbt\", \"API\", \"Airflow\", \"Spark\", \"MWAA\",\n" +
+        "                        \"GCP_Cloud_Composer\", \"Astronomer\", \"SchemaRegistry\", \"Matillion\",\n" +
+        "                        \"NoSQL\", \"MultiDimensionalDataset\", \"ERD\", \"DataModeling\", \"ADF\",\n" +
+        "                        \"model\", \"Fivetran\", \"App\", \"Custom\", \"SAP\", \"Alteryx\", \"Flow\",\n" +
+        "                        \"Sagemaker\", \"Partial\"\n" +
+        "                      ]\n" +
+        "                    }\n" +
+        "                  },\n" +
+        "                  {\n" +
+        "                    \"terms\": {\n" +
+        "                      \"__typeName.keyword\": [\n" +
+        "                        \"Query\", \"Collection\", \"AtlasGlossary\", \"AtlasGlossaryCategory\",\n" +
+        "                        \"AtlasGlossaryTerm\", \"Connection\", \"File\", \"Process\", \"DbtProcess\"\n" +
+        "                      ]\n" +
+        "                    }\n" +
+        "                  }\n" +
+        "                ],\n" +
+        "                \"must_not\": [\n" +
+        "                  {\n" +
+        "                    \"terms\": {\n" +
+        "                      \"__typeName.keyword\": [\n" +
+        "                        \"MCIncident\", \"DbtColumnProcess\", \"BIProcess\", \"MatillionComponent\",\n" +
+        "                        \"ModelVersion\", \"FlowDatasetOperation\", \"FlowFieldOperation\",\n" +
+        "                        \"FabricVisual\", \"SnowflakeTag\", \"DbtTag\", \"BigqueryTag\"\n" +
+        "                      ]\n" +
+        "                    }\n" +
+        "                  },\n" +
+        "                  {\n" +
+        "                    \"terms\": {\n" +
+        "                      \"__superTypeNames.keyword\": [\"Tag\"]\n" +
+        "                    }\n" +
+        "                  }\n" +
+        "                ],\n" +
+        "                \"minimum_should_match\": 1\n" +
+        "              }\n" +
+        "            },\n" +
+        "            {\n" +
+        "              \"term\": {\n" +
+        "                \"__state\": \"ACTIVE\"\n" +
+        "              }\n" +
+        "            }\n" +
+        "          ],\n" +
+        "          \"must_not\": [\n" +
+        "            {\n" +
+        "              \"term\": {\n" +
+        "                \"connectorName\": \"\"\n" +
+        "              }\n" +
+        "            }\n" +
+        "          ]\n" +
+        "        }\n" +
+        "      }\n" +
+        "    }\n" +
+        "  },\n" +
+        "  \"aggs\": {\n" +
+        "    \"by_connector\": {\n" +
+        "      \"terms\": {\n" +
+        "        \"field\": \"connectorName\",\n" +
+        "        \"size\": 50\n" +
+        "      }\n" +
+        "    }\n" +
+        "  }\n" +
+        "}";
 
     private final MigratorConfig     config;
     private final CqlSession         targetSession;
@@ -87,6 +171,11 @@ public class MigrationValidator {
 
         // --- Source-side counts (direct query, independent of baseline) ---
         runSourceCounts(report);
+
+        // --- Check 17: ES connector aggregation (product readiness, run early) ---
+        if (!config.isSkipEsCountValidation()) {
+            runEsConnectorAggregationCheck(report);
+        }
 
         // --- GroupBy type_name scan (runs first to get exact vertex count) ---
         runVertexCountByType(ks, report);
@@ -800,6 +889,140 @@ public class MigrationValidator {
         } catch (Exception e) {
             LOG.warn("Failed to count ES index '{}': {}", indexName, e.getMessage());
             return -1;
+        }
+    }
+
+    // ========================================================================
+    // Check 17: ES connector aggregation (product readiness)
+    // ========================================================================
+
+    private void runEsConnectorAggregationCheck(ValidationReport report) {
+        String targetIndex = config.getTargetEsIndex();
+        LOG.info("ES connector aggregation check: querying {}/{}...", targetIndex, "_search");
+
+        RestClient esClient = null;
+        try {
+            esClient = createEsClient();
+
+            Request searchReq = new Request("POST", "/" + targetIndex + "/_search");
+            searchReq.setJsonEntity(ES_CONNECTOR_AGG_QUERY);
+            Response resp = esClient.performRequest(searchReq);
+
+            int statusCode = resp.getStatusLine().getStatusCode();
+            String responseBody = EntityUtils.toString(resp.getEntity());
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> parsed = MAPPER.readValue(responseBody, Map.class);
+
+            // Extract hits.total.value
+            @SuppressWarnings("unchecked")
+            Map<String, Object> hits = (Map<String, Object>) parsed.get("hits");
+            long totalHits = 0;
+            if (hits != null) {
+                Object total = hits.get("total");
+                if (total instanceof Map) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> totalMap = (Map<String, Object>) total;
+                    totalHits = ((Number) totalMap.get("value")).longValue();
+                } else if (total instanceof Number) {
+                    totalHits = ((Number) total).longValue();
+                }
+            }
+
+            if (totalHits == 0) {
+                // FAIL: no searchable assets — product search will be empty after cutover
+                ValidationCheckResult result = new ValidationCheckResult(
+                    "es_connector_aggregation",
+                    "Product connector aggregation query returns assets from target ES",
+                    ValidationCheckResult.Severity.FAIL,
+                    "ES connector aggregation returned 0 results — product search will be empty after cutover");
+                result.addDetail("target_index", targetIndex);
+                result.addDetail("total_hits", 0);
+                report.addCheck(result);
+                return;
+            }
+
+            // PASS: extract per-connector breakdown from aggregations.by_connector.buckets
+            @SuppressWarnings("unchecked")
+            Map<String, Object> aggs = (Map<String, Object>) parsed.get("aggregations");
+            Map<String, Long> connectorCounts = new LinkedHashMap<>();
+            if (aggs != null) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> byConnector = (Map<String, Object>) aggs.get("by_connector");
+                if (byConnector != null) {
+                    @SuppressWarnings("unchecked")
+                    List<Map<String, Object>> buckets = (List<Map<String, Object>>) byConnector.get("buckets");
+                    if (buckets != null) {
+                        for (Map<String, Object> bucket : buckets) {
+                            String key = String.valueOf(bucket.get("key"));
+                            long docCount = ((Number) bucket.get("doc_count")).longValue();
+                            connectorCounts.put(key, docCount);
+                        }
+                    }
+                }
+            }
+
+            LOG.info("ES connector aggregation: total_hits={}, connectors={}", totalHits, connectorCounts.size());
+            for (Map.Entry<String, Long> entry : connectorCounts.entrySet()) {
+                LOG.info("  connector '{}': {} assets", entry.getKey(), String.format("%,d", entry.getValue()));
+            }
+
+            ValidationCheckResult result = new ValidationCheckResult(
+                "es_connector_aggregation",
+                "Product connector aggregation query returns assets from target ES",
+                ValidationCheckResult.Severity.PASS,
+                String.format("total_hits=%d, connectors=%d", totalHits, connectorCounts.size()));
+            result.addDetail("target_index", targetIndex);
+            result.addDetail("total_hits", totalHits);
+            result.addDetail("connector_count", connectorCounts.size());
+            for (Map.Entry<String, Long> entry : connectorCounts.entrySet()) {
+                result.addDetail("connector_" + entry.getKey(), entry.getValue());
+            }
+            report.addCheck(result);
+
+        } catch (ResponseException re) {
+            // HTTP error response (e.g. 400 Bad Request)
+            int statusCode = re.getResponse().getStatusLine().getStatusCode();
+            String errorBody;
+            try {
+                errorBody = EntityUtils.toString(re.getResponse().getEntity());
+            } catch (Exception ex) {
+                errorBody = re.getMessage();
+            }
+
+            String failMessage;
+            if (statusCode == 400) {
+                failMessage = String.format(
+                    "Product would not load if we pass. Request: %s. Response: %s. The above request returned 400.",
+                    ES_CONNECTOR_AGG_QUERY, errorBody);
+            } else {
+                failMessage = String.format(
+                    "ES connector aggregation returned HTTP %d. Response: %s", statusCode, errorBody);
+            }
+
+            LOG.error("ES connector aggregation check failed (HTTP {}): {}", statusCode, errorBody);
+            ValidationCheckResult result = new ValidationCheckResult(
+                "es_connector_aggregation",
+                "Product connector aggregation query returns assets from target ES",
+                ValidationCheckResult.Severity.FAIL,
+                failMessage);
+            result.addDetail("target_index", targetIndex);
+            result.addDetail("http_status", statusCode);
+            report.addCheck(result);
+
+        } catch (IOException e) {
+            LOG.error("ES connector aggregation check failed: {}", e.getMessage(), e);
+            ValidationCheckResult result = new ValidationCheckResult(
+                "es_connector_aggregation",
+                "Product connector aggregation query returns assets from target ES",
+                ValidationCheckResult.Severity.FAIL,
+                "ES connector aggregation check failed: " + e.getMessage());
+            result.addDetail("target_index", targetIndex);
+            report.addCheck(result);
+        } finally {
+            if (esClient != null) {
+                try { esClient.close(); } catch (Exception ignored) {}
+            }
         }
     }
 
