@@ -94,7 +94,7 @@ public class ParallelEsIndexer implements AutoCloseable {
 
     /**
      * Called by writer threads to enqueue a vertex for ES indexing.
-     * Drops the document if the queue is full (ES indexing should not block Cassandra writes).
+     * Blocks if the queue is full (backpressure — ensures zero doc drops).
      */
     public void enqueue(String vertexId, String propsJson, String typeName, String state) {
         if (propsJson == null || "{}".equals(propsJson)) return;
@@ -113,13 +113,12 @@ public class ParallelEsIndexer implements AutoCloseable {
             }
         }
 
-        boolean offered = queue.offer(new EsDoc(vertexId, propsJson, typeName, state));
-        if (!offered) {
-            // Queue full — drop rather than block the Cassandra write path
-            long dropped = totalErrors.incrementAndGet();
-            if (dropped <= 10 || dropped % 10000 == 0) {
-                LOG.warn("ES parallel indexer queue full, dropped doc for vertex {} (total dropped: {})", vertexId, dropped);
-            }
+        try {
+            queue.put(new EsDoc(vertexId, propsJson, typeName, state));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            totalErrors.incrementAndGet();
+            LOG.warn("Interrupted while enqueuing ES doc for vertex {}", vertexId);
         }
     }
 
