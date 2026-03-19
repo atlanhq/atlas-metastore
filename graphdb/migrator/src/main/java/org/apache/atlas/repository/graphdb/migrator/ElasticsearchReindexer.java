@@ -386,6 +386,21 @@ public class ElasticsearchReindexer implements AutoCloseable {
         return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
+    /**
+     * Delete the target ES index entirely.
+     * Called during --fresh mode to ensure a clean slate before reindexing.
+     * If the index doesn't exist, this is a no-op.
+     */
+    public void deleteIndex() {
+        String esIndex = config.getTargetEsIndex();
+        try {
+            esClient.performRequest(new Request("DELETE", "/" + esIndex));
+            LOG.info("Deleted ES index '{}'", esIndex);
+        } catch (IOException e) {
+            LOG.info("ES index '{}' did not exist or delete failed (non-fatal): {}", esIndex, e.getMessage());
+        }
+    }
+
     @Override
     public void close() {
         try {

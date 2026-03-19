@@ -80,6 +80,10 @@ public class MigratorConfig {
     private final IdStrategy idStrategy;
     private final boolean claimEnabled;
 
+    // Cassandra consistency levels
+    private final String sourceConsistencyLevel;
+    private final String targetConsistencyLevel;
+
     // Validation settings
     private final int     validationVertexSampleSize;
     private final int     validationEdgeSampleSize;
@@ -165,6 +169,10 @@ public class MigratorConfig {
         this.idStrategy = IdStrategy.from(get("migration.id.strategy", "legacy"));
         this.claimEnabled = getBoolean("migration.claim.enabled", false);
 
+        // Cassandra consistency levels
+        this.sourceConsistencyLevel = get("source.cassandra.consistency", "ONE");
+        this.targetConsistencyLevel = get("target.cassandra.consistency", "LOCAL_QUORUM");
+
         // Validation
         this.validationVertexSampleSize  = getInt("validation.vertex.sample.size", 1000);
         this.validationEdgeSampleSize    = getInt("validation.edge.sample.size", 500);
@@ -249,6 +257,9 @@ public class MigratorConfig {
 
     public IdStrategy getIdStrategy()      { return idStrategy; }
     public boolean isClaimEnabled()        { return claimEnabled; }
+
+    public String getSourceConsistencyLevel() { return sourceConsistencyLevel; }
+    public String getTargetConsistencyLevel() { return targetConsistencyLevel; }
 
     public int     getValidationVertexSampleSize()  { return validationVertexSampleSize; }
     public int     getValidationEdgeSampleSize()    { return validationEdgeSampleSize; }

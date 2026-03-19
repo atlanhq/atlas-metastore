@@ -65,6 +65,8 @@ spec:
       export ES_BULK_SIZE="{{ .Values.migration.esBulkSize | default 1000 }}"
       export MIGRATOR_JVM_HEAP="{{ .Values.migration.jvmHeap | default "4g" }}"
       export MIGRATOR_JVM_MIN_HEAP="{{ .Values.migration.jvmMinHeap | default "2g" }}"
+      export SOURCE_CONSISTENCY="{{ .Values.migration.sourceConsistency | default "ONE" }}"
+      export TARGET_CONSISTENCY="{{ .Values.migration.targetConsistency | default "LOCAL_QUORUM" }}"
 
       MIGRATOR_EXIT=0
       /opt/apache-atlas/bin/atlas_migrate.sh {{ .Values.migration.mode | default "" }} || MIGRATOR_EXIT=$?

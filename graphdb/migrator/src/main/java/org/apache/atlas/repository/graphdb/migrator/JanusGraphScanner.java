@@ -206,6 +206,13 @@ public class JanusGraphScanner implements AutoCloseable {
     }
 
     /**
+     * Returns the number of token ranges for the current scanner thread configuration.
+     */
+    public int getTokenRangeCount() {
+        return config.getScannerThreads();
+    }
+
+    /**
      * Scan all token ranges in parallel, decode vertices, and feed them to the consumer.
      *
      * @param consumer    receives each decoded vertex

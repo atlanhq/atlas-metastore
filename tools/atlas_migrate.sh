@@ -60,6 +60,10 @@ MAX_RETRIES="${MAX_RETRIES:-3}"
 ID_STRATEGY="${ID_STRATEGY:-legacy}"          # "legacy" (UUID), "hash-jg" (SHA-256 of JG ID), or "deterministic" (identity-based SHA-256)
 CLAIM_ENABLED="${CLAIM_ENABLED:-false}"       # LWT dedup claims during migration
 
+# Cassandra consistency levels
+SOURCE_CONSISTENCY="${SOURCE_CONSISTENCY:-ONE}"            # Read consistency (ONE = fast scans)
+TARGET_CONSISTENCY="${TARGET_CONSISTENCY:-LOCAL_QUORUM}"   # Write consistency (LOCAL_QUORUM = durable)
+
 # Skip flags
 SKIP_ES_REINDEX="${SKIP_ES_REINDEX:-false}"
 SKIP_CLASSIFICATIONS="${SKIP_CLASSIFICATIONS:-false}"
@@ -237,6 +241,10 @@ migration.resume=true
 # ID strategy / dedup
 migration.id.strategy=${ID_STRATEGY}
 migration.claim.enabled=${CLAIM_ENABLED}
+
+# Cassandra consistency levels
+source.cassandra.consistency=${SOURCE_CONSISTENCY}
+target.cassandra.consistency=${TARGET_CONSISTENCY}
 
 # Skip flags
 migration.skip.es.reindex=${SKIP_ES_REINDEX}

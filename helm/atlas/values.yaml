@@ -514,6 +514,8 @@ migration:
   esBulkSize: 1000
   jvmHeap: "4g"                     # -Xmx for migrator JVM
   jvmMinHeap: "2g"                  # -Xms for migrator JVM
+  sourceConsistency: "ONE"          # Cassandra read consistency (ONE = fast scans)
+  targetConsistency: "LOCAL_QUORUM" # Cassandra write consistency (LOCAL_QUORUM = durable)
   postCompletionSleepSeconds: 3600  # Pod stays Running for this long after migration for inspection
   resources:
     requests:

@@ -39,6 +39,9 @@ public class MigratorMain {
     private static final String PHASE_ES     = "es_reindex";
 
     public static void main(String[] args) throws Exception {
+        // Suppress verbose Cassandra driver CQL logging (query text, server-side warnings)
+        suppressDriverLogs();
+
         if (args.length < 1) {
             System.err.println("Usage: java -jar atlas-graphdb-migrator.jar <config-file>");
             System.err.println("       java -jar atlas-graphdb-migrator.jar <config-file> --validate-only");
@@ -74,18 +77,23 @@ public class MigratorMain {
         LOG.info("Auxiliary migration: configStore={}, tags={}, sameCluster={}",
                  config.isMigrateConfigStore(), config.isMigrateTags(), config.isSameCassandraCluster());
 
-        // Open Cassandra sessions (source gets long timeout for token-range scans)
+        // Open Cassandra sessions
+        // Source: long timeout for token-range scans, consistency ONE for fast reads
+        // Target: tuned for high-throughput writes, consistency LOCAL_QUORUM for durability
+        LOG.info("Source Cassandra consistency: {}, Target Cassandra consistency: {}",
+                 config.getSourceConsistencyLevel(), config.getTargetConsistencyLevel());
+
         CqlSession sourceSession = buildCqlSession(
             config.getSourceCassandraHostname(), config.getSourceCassandraPort(),
             config.getSourceCassandraDatacenter(), config.getSourceCassandraKeyspace(),
             config.getSourceCassandraUsername(), config.getSourceCassandraPassword(),
-            false, Duration.ofSeconds(120));
+            false, Duration.ofSeconds(120), config.getSourceConsistencyLevel());
 
         CqlSession targetSession = buildCqlSession(
             config.getTargetCassandraHostname(), config.getTargetCassandraPort(),
             config.getTargetCassandraDatacenter(), config.getTargetCassandraKeyspace(),
             config.getTargetCassandraUsername(), config.getTargetCassandraPassword(),
-            true);
+            true, null, config.getTargetConsistencyLevel());
 
         // Create target keyspace + tables first (must happen before stateStore.init()
         // since stateStore creates its table in the same keyspace)
@@ -96,8 +104,21 @@ public class MigratorMain {
         stateStore.init();
 
         if (fresh) {
+            LOG.info("=== FRESH MODE: Clearing ALL previous migration data ===");
+
+            // 1. Clear migration state (resume tracking)
             stateStore.clearState(PHASE_SCAN);
             stateStore.clearState(PHASE_ES);
+
+            // 2. Truncate all target Cassandra data tables
+            writer.truncateAll();
+
+            // 3. Delete target ES index so it's recreated fresh
+            ElasticsearchReindexer tempEs = new ElasticsearchReindexer(config, metrics, targetSession);
+            tempEs.deleteIndex();
+            tempEs.close();
+
+            LOG.info("=== FRESH MODE: All previous migration data cleared ===");
         }
 
         try {
@@ -150,6 +171,9 @@ public class MigratorMain {
                 stateStore,
                 PHASE_SCAN
             );
+
+            // Save expected token range count for validation cross-check
+            stateStore.saveMetadata("scan_total_ranges", String.valueOf(scanner.getTokenRangeCount()));
 
             LOG.info("All token ranges scanned. Waiting for writer threads to drain queue...");
             writer.signalScanComplete();
@@ -339,19 +363,9 @@ public class MigratorMain {
      *                       4 connections per local node, 1024 max concurrent requests per connection
      */
     private static CqlSession buildCqlSession(String hostname, int port, String datacenter,
-                                               String keyspace, String username, String password) {
-        return buildCqlSession(hostname, port, datacenter, keyspace, username, password, false, null);
-    }
-
-    private static CqlSession buildCqlSession(String hostname, int port, String datacenter,
                                                String keyspace, String username, String password,
-                                               boolean tuneForWrites) {
-        return buildCqlSession(hostname, port, datacenter, keyspace, username, password, tuneForWrites, null);
-    }
-
-    private static CqlSession buildCqlSession(String hostname, int port, String datacenter,
-                                               String keyspace, String username, String password,
-                                               boolean tuneForWrites, Duration requestTimeout) {
+                                               boolean tuneForWrites, Duration requestTimeout,
+                                               String consistencyLevel) {
         CqlSessionBuilder builder = CqlSession.builder()
             .addContactPoint(new InetSocketAddress(hostname, port))
             .withLocalDatacenter(datacenter);
@@ -360,31 +374,62 @@ public class MigratorMain {
             builder.withAuthCredentials(username, password);
         }
 
-        // Apply driver config if any tuning is needed
-        if (tuneForWrites || requestTimeout != null) {
-            var configBuilder = DriverConfigLoader.programmaticBuilder();
+        // Always create config builder to suppress driver warnings
+        var configBuilder = DriverConfigLoader.programmaticBuilder();
 
-            if (tuneForWrites) {
-                // 3 nodes × 4 connections × 1024 requests = 12,288 max concurrent requests
-                configBuilder
-                    .withInt(DefaultDriverOption.CONNECTION_POOL_LOCAL_SIZE, 4)
-                    .withInt(DefaultDriverOption.CONNECTION_POOL_REMOTE_SIZE, 2)
-                    .withInt(DefaultDriverOption.CONNECTION_MAX_REQUESTS, 1024);
-                LOG.info("Session tuned for writes: 4 connections/node, 1024 max requests/connection");
-            }
+        // Suppress server-side CQL warnings (unlogged batch size, etc.)
+        configBuilder.withString(DefaultDriverOption.REQUEST_LOG_WARNINGS, "false");
 
-            if (requestTimeout != null) {
-                configBuilder.withDuration(DefaultDriverOption.REQUEST_TIMEOUT, requestTimeout);
-                LOG.info("Session request timeout: {}s", requestTimeout.getSeconds());
-            } else if (tuneForWrites) {
-                configBuilder.withDuration(DefaultDriverOption.REQUEST_TIMEOUT, Duration.ofSeconds(30));
-            }
-
-            builder.withConfigLoader(configBuilder.build());
+        // Set consistency level
+        if (consistencyLevel != null && !consistencyLevel.isEmpty()) {
+            configBuilder.withString(DefaultDriverOption.REQUEST_CONSISTENCY, consistencyLevel);
+            LOG.info("Session consistency level: {}", consistencyLevel);
         }
+
+        if (tuneForWrites) {
+            // 3 nodes × 4 connections × 1024 requests = 12,288 max concurrent requests
+            configBuilder
+                .withInt(DefaultDriverOption.CONNECTION_POOL_LOCAL_SIZE, 4)
+                .withInt(DefaultDriverOption.CONNECTION_POOL_REMOTE_SIZE, 2)
+                .withInt(DefaultDriverOption.CONNECTION_MAX_REQUESTS, 1024);
+            LOG.info("Session tuned for writes: 4 connections/node, 1024 max requests/connection");
+        }
+
+        if (requestTimeout != null) {
+            configBuilder.withDuration(DefaultDriverOption.REQUEST_TIMEOUT, requestTimeout);
+            LOG.info("Session request timeout: {}s", requestTimeout.getSeconds());
+        } else if (tuneForWrites) {
+            configBuilder.withDuration(DefaultDriverOption.REQUEST_TIMEOUT, Duration.ofSeconds(30));
+        }
+
+        builder.withConfigLoader(configBuilder.build());
 
         CqlSession session = builder.build();
         LOG.info("Connected to Cassandra at {}:{} (datacenter: {})", hostname, port, datacenter);
         return session;
+    }
+
+    /**
+     * Suppress verbose Cassandra driver logging (CQL query text, server-side warnings).
+     * Must be called before any CqlSession is created.
+     */
+    private static void suppressDriverLogs() {
+        // Use reflection to set logback level, avoiding compile-time dependency on logback
+        try {
+            Class<?> levelClass = Class.forName("ch.qos.logback.classic.Level");
+            Object warnLevel = levelClass.getField("WARN").get(null);
+            Class<?> loggerClass = Class.forName("ch.qos.logback.classic.Logger");
+            java.lang.reflect.Method setLevel = loggerClass.getMethod("setLevel", levelClass);
+
+            for (String name : new String[]{"com.datastax.oss.driver", "com.datastax.oss.driver.internal"}) {
+                Object logger = LoggerFactory.getLogger(name);
+                if (loggerClass.isInstance(logger)) {
+                    setLevel.invoke(logger, warnLevel);
+                }
+            }
+            LOG.info("Cassandra driver log level set to WARN");
+        } catch (Exception e) {
+            LOG.debug("Could not set Cassandra driver log level (non-fatal): {}", e.getMessage());
+        }
     }
 }

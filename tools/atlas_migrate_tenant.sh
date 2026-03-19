@@ -71,7 +71,6 @@ ES_FIELD_LIMIT="10000"
 JVM_HEAP="4g"
 JVM_MIN_HEAP="2g"
 MIGRATION_MODE=""          # "", "--fresh", "--es-only", "--validate-only"
-USE_JOB="false"
 HELM_CHART=""
 SKIP_SWITCH="false"
 SWITCH_ONLY="false"
@@ -189,8 +188,7 @@ Options:
   --fresh                 Clear migration state, start from scratch
   --es-only               ES reindex only (skip Cassandra scan)
   --validate-only         Validation only (no migration)
-  --use-job               Use Helm Job instead of kubectl exec
-  --helm-chart <path>     Helm chart path for --use-job (default: ./helm/atlas)
+  --helm-chart <path>     Helm chart path (default: ./helm/atlas)
   --skip-switch           Run migration but don't switch backend
   --switch-only           Skip migration, only do backend switch + verify
   --skip-cleanup          Skip cleanup phase (first-time migration)
@@ -259,7 +257,6 @@ parse_args() {
             --fresh)          MIGRATION_MODE="--fresh"; shift ;;
             --es-only)        MIGRATION_MODE="--es-only"; shift ;;
             --validate-only)  MIGRATION_MODE="--validate-only"; shift ;;
-            --use-job)        USE_JOB="true"; shift ;;
             --helm-chart)     HELM_CHART="$2"; shift 2 ;;
             --skip-switch)    SKIP_SWITCH="true"; shift ;;
             --switch-only)    SWITCH_ONLY="true"; shift ;;
@@ -297,25 +294,6 @@ should_switch() {
 }
 
 # Build the env prefix for migration exec calls
-build_migrate_env() {
-    local env_args=(
-        "ID_STRATEGY=$ID_STRATEGY"
-        "CLAIM_ENABLED=$CLAIM_ENABLED"
-        "SCANNER_THREADS=$SCANNER_THREADS"
-        "WRITER_THREADS=$WRITER_THREADS"
-        "MIGRATOR_JVM_HEAP=$JVM_HEAP"
-        "MIGRATOR_JVM_MIN_HEAP=$JVM_MIN_HEAP"
-    )
-    if [ -n "$ES_BULK_SIZE" ]; then
-        env_args+=("ES_BULK_SIZE=$ES_BULK_SIZE")
-    fi
-    if [ -n "$ES_FIELD_LIMIT" ]; then
-        env_args+=("ES_FIELD_LIMIT=$ES_FIELD_LIMIT")
-    fi
-    env_args+=("MAX_RETRIES=$MAX_RETRIES")
-    echo "${env_args[@]}"
-}
-
 # ============================================================================
 # Log file setup (Fix 9: tee all output to persistent log file)
 # ============================================================================
@@ -404,6 +382,23 @@ phase_preflight() {
         warn "Cassandra pod $CASSANDRA_POD is not Running (status: $cass_status)"
     else
         ok "Cassandra pod $CASSANDRA_POD is Running"
+    fi
+
+    # 0.6b Connectivity probes (Cassandra + ES from inside the Atlas pod)
+    log "Testing Cassandra connectivity from Atlas pod..."
+    if kexec_quiet bash -c "nc -z -w3 localhost 9042" 2>/dev/null; then
+        ok "Cassandra port 9042 reachable from Atlas pod"
+    else
+        warn "Cannot reach Cassandra port 9042 from Atlas pod (nc test)"
+    fi
+
+    log "Testing Elasticsearch connectivity from Atlas pod..."
+    local es_probe_status
+    es_probe_status=$(kexec_quiet curl -s -o /dev/null -w "%{http_code}" "localhost:9200/" 2>/dev/null || echo "000")
+    if [ "$es_probe_status" = "200" ]; then
+        ok "Elasticsearch reachable from Atlas pod (HTTP 200)"
+    else
+        warn "Elasticsearch not reachable from Atlas pod (HTTP $es_probe_status)"
     fi
 
     # 0.7 Adaptive sizing probe
@@ -559,7 +554,6 @@ else:
     log "  ID Strategy:       $ID_STRATEGY"
     log "  Claim Enabled:     $CLAIM_ENABLED"
     log "  Migration Mode:    ${MIGRATION_MODE:-full}"
-    log "  Use Job:           $USE_JOB"
     log "  Helm Chart:        $HELM_CHART"
     log "  Skip Switch:       $SKIP_SWITCH"
     log "  Switch Only:       $SWITCH_ONLY"
@@ -755,37 +749,25 @@ phase_migration() {
         step "Phase 3: Migration"
     fi
 
-    if [ "$USE_JOB" = "true" ]; then
-        run_migration_job
-    else
-        run_migration_exec
-    fi
+    run_migration_pod
 }
 
-run_migration_exec() {
-    # Build env array
-    local env_args
-    env_args=(
-        "ID_STRATEGY=$ID_STRATEGY"
-        "CLAIM_ENABLED=$CLAIM_ENABLED"
-        "SCANNER_THREADS=$SCANNER_THREADS"
-        "WRITER_THREADS=$WRITER_THREADS"
-        "MIGRATOR_JVM_HEAP=$JVM_HEAP"
-        "MIGRATOR_JVM_MIN_HEAP=$JVM_MIN_HEAP"
-    )
-    if [ -n "$ES_BULK_SIZE" ]; then
-        env_args+=("ES_BULK_SIZE=$ES_BULK_SIZE")
+run_migration_pod() {
+    log "Triggering migration via dedicated pod..."
+
+    # Verify helm is available
+    if ! command -v helm >/dev/null 2>&1; then
+        record_phase "Phase 3: Migration" "FAIL (helm not found)"
+        die "helm CLI not found. Install helm to proceed." "$EXIT_MIGRATION"
     fi
 
-    # 3.1 Dry-run first (unless validate-only)
-    if [ "$MIGRATION_MODE" != "--validate-only" ]; then
-        log "Running dry-run to verify configuration..."
-        kexec env "${env_args[@]}" /opt/apache-atlas/bin/atlas_migrate.sh --dry-run
-        echo ""
-        ok "Dry-run complete"
+    # Verify chart path exists
+    if [ ! -d "$HELM_CHART" ]; then
+        record_phase "Phase 3: Migration" "FAIL (chart not found)"
+        die "Helm chart not found at '$HELM_CHART'. Use --helm-chart <path> to specify the chart directory." "$EXIT_MIGRATION"
     fi
 
-    # 3.2 Migration with retry
+    # Migration with retry loop
     local attempt=0
     local migration_passed="false"
 
@@ -796,17 +778,97 @@ run_migration_exec() {
         # First attempt uses MIGRATION_MODE, retries use "" for resume
         local mode_flag="$MIGRATION_MODE"
         if [ "$attempt" -gt 1 ]; then
-            mode_flag=""  # Resume from where it left off
+            mode_flag=""  # Resume: Java migrator picks up failed token ranges
         fi
 
-        local migrate_exit=0
-        kexec env "${env_args[@]}" /opt/apache-atlas/bin/atlas_migrate.sh ${mode_flag:-} || migrate_exit=$?
+        # Clean up any existing migration pod
+        local existing_pod
+        existing_pod=$(kubectl get pods -n "$NAMESPACE" -l app=atlas-migrator -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+        if [ -n "$existing_pod" ]; then
+            log "Deleting existing migration pod: $existing_pod"
+            kubectl delete pod "$existing_pod" -n "$NAMESPACE" --ignore-not-found
+            sleep 5
+        fi
 
-        if [ "$migrate_exit" -eq 0 ]; then
+        # Build helm set flags
+        local helm_sets=(
+            --set "migration.enabled=true"
+            --set "migration.idStrategy=${ID_STRATEGY}"
+            --set "migration.claimEnabled=${CLAIM_ENABLED}"
+            --set "migration.scannerThreads=${SCANNER_THREADS}"
+            --set "migration.writerThreads=${WRITER_THREADS}"
+            --set "migration.jvmHeap=${JVM_HEAP}"
+            --set "migration.jvmMinHeap=${JVM_MIN_HEAP}"
+        )
+        if [ -n "$mode_flag" ]; then
+            helm_sets+=(--set "migration.mode=${mode_flag}")
+        fi
+        if [ -n "$ES_BULK_SIZE" ]; then
+            helm_sets+=(--set "migration.esBulkSize=${ES_BULK_SIZE}")
+        fi
+
+        # Execute helm upgrade to create migration pod
+        log "Running helm upgrade to create migration pod..."
+        log "  Chart: $HELM_CHART"
+        log "  Mode: ${mode_flag:-resume}"
+        if ! helm upgrade atlas "$HELM_CHART" -n "$NAMESPACE" --reuse-values "${helm_sets[@]}"; then
+            warn "Helm upgrade failed on attempt $attempt"
+            if [ "$attempt" -lt "$MAX_RETRIES" ]; then
+                log "Retrying in 10s..."
+                sleep 10
+                continue
+            fi
+            record_phase "Phase 3: Migration" "FAIL (helm upgrade failed)"
+            die "helm upgrade failed after $MAX_RETRIES attempts" "$EXIT_MIGRATION"
+        fi
+        ok "Helm upgrade applied"
+
+        # Wait for migration pod to start
+        log "Waiting for migration pod to start..."
+        local job_pod=""
+        for i in $(seq 1 60); do
+            job_pod=$(kubectl get pods -n "$NAMESPACE" -l app=atlas-migrator --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+            if [ -n "$job_pod" ]; then
+                break
+            fi
+            local pending_pod
+            pending_pod=$(kubectl get pods -n "$NAMESPACE" -l app=atlas-migrator -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+            if [ -n "$pending_pod" ] && [ "$i" -le 5 ]; then
+                log "  Migration pod $pending_pod is starting..."
+            fi
+            sleep 5
+        done
+
+        if [ -z "$job_pod" ]; then
+            warn "Migration pod did not start within 5 minutes on attempt $attempt"
+            if [ "$attempt" -lt "$MAX_RETRIES" ]; then
+                log "Retrying in 10s..."
+                sleep 10
+                continue
+            fi
+            record_phase "Phase 3: Migration" "FAIL (pod timeout after $MAX_RETRIES attempts)"
+            die "Migration pod did not start after $MAX_RETRIES attempts" "$EXIT_MIGRATION"
+        fi
+
+        # Stream logs
+        log "Streaming logs from $job_pod..."
+        kubectl logs -f "$job_pod" -n "$NAMESPACE" || true
+
+        # Check pod status and exit code
+        local job_status
+        job_status=$(kubectl get pods "$job_pod" -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+        local exit_code
+        exit_code=$(kubectl get pods "$job_pod" -n "$NAMESPACE" -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}' 2>/dev/null || echo "")
+
+        if [ "$exit_code" = "0" ] || [ "$job_status" = "Succeeded" ]; then
             migration_passed="true"
             ok "Migration attempt $attempt: PASSED"
+        elif [ "$job_status" = "Running" ]; then
+            # Pod still running (in post-sleep phase)
+            migration_passed="true"
+            ok "Migration attempt $attempt: PASSED (pod in post-completion sleep)"
         else
-            warn "Migration attempt $attempt failed (exit code: $migrate_exit)"
+            warn "Migration attempt $attempt failed (pod status: $job_status, exit code: $exit_code)"
             if [ "$attempt" -lt "$MAX_RETRIES" ]; then
                 log "Retrying... (migration is resumable, will pick up from failed token ranges)"
                 sleep 10
@@ -819,115 +881,7 @@ run_migration_exec() {
         die "Migration failed after $MAX_RETRIES attempts" "$EXIT_MIGRATION"
     fi
 
-    echo ""
-    ok "Migration completed successfully (attempt $attempt/$MAX_RETRIES)"
-
-    # 3.3 Run validation if not already validate-only
-    if [ "$MIGRATION_MODE" != "--validate-only" ] && [ "$MIGRATION_MODE" != "--es-only" ]; then
-        log "Running post-migration validation..."
-        kexec env "${env_args[@]}" /opt/apache-atlas/bin/atlas_migrate.sh --validate-only || warn "Validation returned non-zero (check output above)"
-        ok "Validation complete"
-    fi
-
     record_phase "Phase 3: Migration" "PASS (attempt $attempt/$MAX_RETRIES)"
-}
-
-run_migration_job() {
-    log "Triggering migration via Helm Job..."
-
-    # Verify helm is available
-    if ! command -v helm >/dev/null 2>&1; then
-        record_phase "Phase 3: Migration" "FAIL (helm not found)"
-        die "helm CLI not found. Install helm or use kubectl exec mode (remove --use-job)." "$EXIT_MIGRATION"
-    fi
-
-    # Verify chart path exists
-    if [ ! -d "$HELM_CHART" ]; then
-        record_phase "Phase 3: Migration" "FAIL (chart not found)"
-        die "Helm chart not found at '$HELM_CHART'. Use --helm-chart <path> to specify the chart directory." "$EXIT_MIGRATION"
-    fi
-
-    # Check if job already exists
-    local existing_job
-    existing_job=$(kubectl get pods -n "$NAMESPACE" -l app=atlas-migrator -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-    if [ -n "$existing_job" ]; then
-        log "Deleting existing migration pod: $existing_job"
-        kubectl delete pod "$existing_job" -n "$NAMESPACE" --ignore-not-found
-        sleep 5
-    fi
-
-    # Build helm set flags
-    local helm_sets=(
-        --set "migration.enabled=true"
-        --set "migration.idStrategy=${ID_STRATEGY}"
-        --set "migration.claimEnabled=${CLAIM_ENABLED}"
-        --set "migration.scannerThreads=${SCANNER_THREADS}"
-        --set "migration.writerThreads=${WRITER_THREADS}"
-        --set "migration.jvmHeap=${JVM_HEAP}"
-        --set "migration.jvmMinHeap=${JVM_MIN_HEAP}"
-    )
-    if [ -n "$MIGRATION_MODE" ]; then
-        helm_sets+=(--set "migration.mode=${MIGRATION_MODE}")
-    fi
-    if [ -n "$ES_BULK_SIZE" ]; then
-        helm_sets+=(--set "migration.esBulkSize=${ES_BULK_SIZE}")
-    fi
-
-    # Execute helm upgrade
-    log "Running helm upgrade to create migration pod..."
-    log "  Chart: $HELM_CHART"
-    log "  Sets: ${helm_sets[*]}"
-    if ! helm upgrade atlas "$HELM_CHART" -n "$NAMESPACE" --reuse-values "${helm_sets[@]}"; then
-        record_phase "Phase 3: Migration" "FAIL (helm upgrade failed)"
-        die "helm upgrade failed" "$EXIT_MIGRATION"
-    fi
-    ok "Helm upgrade applied"
-
-    # Wait for job pod to start
-    log "Waiting for migration job pod..."
-    local job_pod=""
-    for i in $(seq 1 60); do
-        job_pod=$(kubectl get pods -n "$NAMESPACE" -l app=atlas-migrator --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-        if [ -n "$job_pod" ]; then
-            break
-        fi
-        # Also check for Pending pods (still starting)
-        local pending_pod
-        pending_pod=$(kubectl get pods -n "$NAMESPACE" -l app=atlas-migrator -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-        if [ -n "$pending_pod" ] && [ "$i" -le 5 ]; then
-            log "  Migration pod $pending_pod is starting..."
-        fi
-        sleep 5
-    done
-
-    if [ -z "$job_pod" ]; then
-        record_phase "Phase 3: Migration" "FAIL (job pod timeout)"
-        die "Migration job pod did not start within 5 minutes" "$EXIT_MIGRATION"
-    fi
-
-    log "Streaming logs from $job_pod..."
-    kubectl logs -f "$job_pod" -n "$NAMESPACE" || true
-
-    # Check job status
-    local job_status
-    job_status=$(kubectl get pods "$job_pod" -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
-
-    # Check container exit code for more accurate status
-    local exit_code
-    exit_code=$(kubectl get pods "$job_pod" -n "$NAMESPACE" -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}' 2>/dev/null || echo "")
-
-    if [ "$exit_code" = "0" ] || [ "$job_status" = "Succeeded" ]; then
-        ok "Migration Job completed successfully"
-        record_phase "Phase 3: Migration" "PASS (job)"
-    elif [ "$job_status" = "Running" ]; then
-        # Pod still running (in post-sleep phase), check log output for exit code
-        log "Migration pod still running (may be in post-completion sleep)"
-        ok "Migration Job likely completed (pod in sleep phase)"
-        record_phase "Phase 3: Migration" "PASS (job, post-sleep)"
-    else
-        record_phase "Phase 3: Migration" "FAIL (job status: $job_status, exit: $exit_code)"
-        die "Migration Job failed (pod status: $job_status, exit code: $exit_code)" "$EXIT_MIGRATION"
-    fi
 
     # Disable migration after completion
     log "Disabling migration pod in Helm..."

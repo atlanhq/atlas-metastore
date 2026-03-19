@@ -175,10 +175,14 @@ public class MigrationValidator {
             double ratio = (double) vertexCount / sourceBaseline.totalVertices;
             message += String.format(", source_baseline=%d, ratio=%.4f",
                                      sourceBaseline.totalVertices, ratio);
-            // Warn if target has significantly fewer vertices than source
-            if (ratio < 0.99) {
+            // Fail if target count is outside 5% tolerance of source
+            if (ratio < 0.95 || ratio > 1.05) {
                 passed = false;
-                message += " [FAIL: target has >1% fewer vertices than source]";
+                if (ratio < 0.95) {
+                    message += " [FAIL: target has >5% fewer vertices than source]";
+                } else {
+                    message += " [FAIL: target has >5% more vertices than source]";
+                }
             }
         }
 
@@ -1010,6 +1014,13 @@ public class MigrationValidator {
         long inProgress = statusCounts.getOrDefault("IN_PROGRESS", 0L);
         long total      = statusCounts.values().stream().mapToLong(Long::longValue).sum();
 
+        // Cross-check: compare tracked range count against the expected count
+        // saved during the scan phase. If scanner threads changed between runs,
+        // old completed ranges may be from a different token range partition.
+        String savedExpected = stateStore.loadMetadata("scan_total_ranges");
+        int expectedRanges = savedExpected != null ? Integer.parseInt(savedExpected.trim()) : -1;
+        boolean rangeMismatch = expectedRanges > 0 && total != expectedRanges;
+
         ValidationCheckResult.Severity severity;
         String message;
 
@@ -1025,9 +1036,17 @@ public class MigrationValidator {
             message = String.format("total=%d, COMPLETED=%d, FAILED=%d, IN_PROGRESS=%d " +
                 "[FAIL: %d ranges still in progress — migration did not finish cleanly]",
                 total, completed, failed, inProgress, inProgress);
+        } else if (completed == total && rangeMismatch) {
+            severity = ValidationCheckResult.Severity.WARN;
+            message = String.format("All %d tracked ranges COMPLETED, but expected %d based on scan config " +
+                "[WARN: ranges may be from a different scanner thread configuration — consider re-running with --fresh]",
+                total, expectedRanges);
         } else if (completed == total) {
             severity = ValidationCheckResult.Severity.PASS;
             message = String.format("All %d token ranges COMPLETED", total);
+            if (expectedRanges > 0) {
+                message += String.format(" (matches expected %d)", expectedRanges);
+            }
         } else {
             severity = ValidationCheckResult.Severity.WARN;
             message = String.format("total=%d, COMPLETED=%d — unexpected statuses: %s", total, completed, statusCounts);
@@ -1043,6 +1062,9 @@ public class MigrationValidator {
         result.addDetail("completed", completed);
         result.addDetail("failed", failed);
         result.addDetail("in_progress", inProgress);
+        if (expectedRanges > 0) {
+            result.addDetail("expected_ranges", expectedRanges);
+        }
         for (Map.Entry<String, Long> entry : statusCounts.entrySet()) {
             result.addDetail("status_" + entry.getKey().toLowerCase(), entry.getValue());
         }

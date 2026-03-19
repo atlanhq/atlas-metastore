@@ -633,6 +633,30 @@ public class CassandraTargetWriter implements AutoCloseable {
         return candidateVertexId;
     }
 
+    /**
+     * Truncate all data tables in the target keyspace.
+     * Called during --fresh mode to ensure a clean slate before migration.
+     * Does NOT drop the keyspace or schema — only removes data.
+     */
+    public void truncateAll() {
+        String[] tables = {
+            "vertices", "edges_out", "edges_in", "edges_by_id",
+            "vertex_index", "vertex_property_index", "edge_index",
+            "entity_claims", "type_definitions", "type_definitions_by_category",
+            "schema_registry"
+        };
+        for (String table : tables) {
+            try {
+                LOG.info("Truncating {}.{}", ks, table);
+                targetSession.execute("TRUNCATE " + ks + "." + table);
+            } catch (Exception e) {
+                // Table may not exist yet on first run — that's fine
+                LOG.debug("Could not truncate {}.{} (may not exist yet): {}", ks, table, e.getMessage());
+            }
+        }
+        LOG.info("All target tables truncated in keyspace '{}'", ks);
+    }
+
     @Override
     public void close() {
         if (!writerPool.isShutdown()) {
