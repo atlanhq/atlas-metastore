@@ -19,7 +19,6 @@ import org.janusgraph.graphdb.database.EdgeSerializer;
 import org.janusgraph.graphdb.database.StandardJanusGraph;
 import org.janusgraph.graphdb.idmanagement.IDManager;
 import org.janusgraph.graphdb.relations.RelationCache;
-import org.janusgraph.graphdb.transaction.StandardJanusGraphTx;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -57,7 +56,7 @@ public class JanusGraphScanner implements AutoCloseable {
     private final StandardJanusGraph   janusGraph;
     private final IDManager            idManager;
     private final EdgeSerializer       edgeSerializer;
-    private final ThreadLocal<StandardJanusGraphTx> threadLocalTx;
+    private final CachedTypeInspector  cachedTypeInspector;
 
     // Source baseline collector (captures stats during scan for Phase 3 comparison)
     private volatile SourceBaselineCollector baselineCollector;
@@ -84,14 +83,11 @@ public class JanusGraphScanner implements AutoCloseable {
         this.idManager      = janusGraph.getIDManager();
         this.edgeSerializer = janusGraph.getEdgeSerializer();
 
-        // Each scanner thread gets its own read-only tx for thread-safe type resolution.
-        // The tx caches type definitions after first lookup.
-        this.threadLocalTx = ThreadLocal.withInitial(() ->
-            (StandardJanusGraphTx) janusGraph.buildTransaction()
-                .readOnly()
-                .vertexCacheSize(200)
-                .start()
-        );
+        // Pre-load ALL type definitions into a shared HashMap.
+        // This eliminates per-thread StandardJanusGraphTx and removes all
+        // Cassandra lookups during type resolution — pure in-memory HashMap.
+        LOG.info("Pre-loading all type definitions into CachedTypeInspector...");
+        this.cachedTypeInspector = new CachedTypeInspector(janusGraph);
     }
 
     /**
@@ -439,7 +435,6 @@ public class JanusGraphScanner implements AutoCloseable {
         }
 
         DecodedVertex vertex = new DecodedVertex(vertexId);
-        StandardJanusGraphTx tx = threadLocalTx.get();
         int entryEdges = 0;
         int entryProps = 0;
         int entrySystem = 0;
@@ -448,7 +443,7 @@ public class JanusGraphScanner implements AutoCloseable {
 
         for (Entry entry : entries) {
             try {
-                RelationCache rel = edgeSerializer.parseRelation(entry, false, tx);
+                RelationCache rel = edgeSerializer.parseRelation(entry, false, cachedTypeInspector);
 
                 // Skip JanusGraph internal system relations (VertexExists, SchemaName, etc.)
                 if (isSystemRelation(rel.typeId)) {
@@ -456,7 +451,7 @@ public class JanusGraphScanner implements AutoCloseable {
                     continue;
                 }
 
-                RelationType type = tx.getExistingRelationType(rel.typeId);
+                RelationType type = cachedTypeInspector.getExistingRelationType(rel.typeId);
                 if (type == null) {
                     entryNullType++;
                     if (edgeSkippedNullType.incrementAndGet() <= EDGE_SAMPLE_LOG_LIMIT) {
@@ -503,7 +498,7 @@ public class JanusGraphScanner implements AutoCloseable {
                     // Extract edge properties via RelationCache iteration.
                     // RelationCache implements Iterable<LongObjectCursor<Object>>
                     // where key = property type ID, value = property value.
-                    extractEdgeProperties(edge, rel, tx);
+                    extractEdgeProperties(edge, rel);
 
                     vertex.addOutEdge(edge);
                     entryEdges++;
@@ -549,7 +544,7 @@ public class JanusGraphScanner implements AutoCloseable {
      * Extract edge properties from a RelationCache.
      * Uses iteration over the cache's internal property map.
      */
-    private void extractEdgeProperties(DecodedEdge edge, RelationCache rel, StandardJanusGraphTx tx) {
+    private void extractEdgeProperties(DecodedEdge edge, RelationCache rel) {
         if (!rel.hasProperties()) {
             return;
         }
@@ -568,7 +563,7 @@ public class JanusGraphScanner implements AutoCloseable {
                     long propTypeId = keyField.getLong(cursor);
                     Object propValue = valueField.get(cursor);
 
-                    RelationType propType = tx.getExistingRelationType(propTypeId);
+                    RelationType propType = cachedTypeInspector.getExistingRelationType(propTypeId);
                     if (propType != null && propValue != null) {
                         edge.addProperty(normalizePropertyName(propType.name()), propValue);
                     }
@@ -622,6 +617,11 @@ public class JanusGraphScanner implements AutoCloseable {
 
     @Override
     public void close() {
+        try {
+            cachedTypeInspector.close();
+        } catch (Exception e) {
+            LOG.debug("Error closing CachedTypeInspector", e);
+        }
         try {
             janusGraph.close();
         } catch (Exception e) {

@@ -274,13 +274,14 @@ public class ElasticsearchReindexer implements AutoCloseable {
                 if (settings != null) {
                     Map<String, Object> indexSettings = (Map<String, Object>) settings.get("index");
                     if (indexSettings != null) {
-                        // Remove read-only / auto-generated settings that can't be set on creation
-                        indexSettings.remove("creation_date");
-                        indexSettings.remove("provided_name");
-                        indexSettings.remove("uuid");
-                        indexSettings.remove("version");
-                        indexSettings.remove("routing");
-                        indexSettings.remove("history");
+                        // Allowlist: only keep settings that are safe and meaningful for index creation.
+                        // ES returns many read-only / auto-generated settings (creation_date, uuid, version,
+                        // resize, routing, blocks, etc.) that cause 400 errors if included in PUT /{index}.
+                        java.util.Set<String> ALLOWED_SETTINGS = java.util.Set.of(
+                            "analysis", "number_of_shards", "number_of_replicas", "refresh_interval",
+                            "max_result_window", "mapping", "similarity"
+                        );
+                        indexSettings.keySet().retainAll(ALLOWED_SETTINGS);
                         settingsJson = MAPPER.writeValueAsString(Map.of("index", indexSettings));
                     }
                 }
