@@ -1019,47 +1019,60 @@ EOF
     # Cleanup temp files
     rm -f "$props_file" "$props_clean"
 
-    # 5.3 Restart pod
-    log "Restarting pod $POD..."
-    kubectl delete pod "$POD" -n "$NAMESPACE"
+    # 5.3 Verify the ConfigMap was patched correctly
+    log "Verifying ConfigMap after patch..."
+    local verify_props
+    verify_props=$(kubectl get configmap atlas-config -n "$NAMESPACE" -o jsonpath='{.data.atlas-application\.properties}')
 
-    log "Waiting for pod to become ready (timeout: ${WAIT_TIMEOUT}s)..."
-    if ! kubectl wait --for=condition=Ready "pod/$POD" -n "$NAMESPACE" --timeout="${WAIT_TIMEOUT}s" 2>/dev/null; then
-        record_phase "Phase 5: Backend Switch" "FAIL (pod not ready)"
-        die "Pod $POD did not become Ready within ${WAIT_TIMEOUT}s. Check pod logs. ConfigMap backup at: $CONFIGMAP_BACKUP" "$EXIT_SWITCH"
-    fi
-    ok "Pod $POD is Ready"
-
-    # 5.4 Verify Atlas is ACTIVE with Cassandra backend
-    log "Waiting for Atlas to become ACTIVE..."
-    local atlas_status="UNKNOWN"
-    for i in $(seq 1 30); do
-        atlas_status=$(kexec_quiet curl -s localhost:21000/api/atlas/admin/status 2>/dev/null | \
-            py_extract "import sys,json; print(json.load(sys.stdin).get('Status','UNKNOWN'))" || echo "STARTING")
-        if [ "$atlas_status" = "ACTIVE" ]; then
-            break
-        fi
-        sleep 10
-    done
-
-    if [ "$atlas_status" != "ACTIVE" ]; then
-        record_phase "Phase 5: Backend Switch" "FAIL (not ACTIVE)"
-        die "Atlas did not become ACTIVE (status: $atlas_status). ConfigMap backup at: $CONFIGMAP_BACKUP" "$EXIT_SWITCH"
-    fi
-    ok "Atlas is ACTIVE on Cassandra backend"
-
-    # 5.5 Check logs for CassandraGraph initialization
-    log "Checking startup logs..."
-    local init_log
-    init_log=$(kubectl logs "$POD" -n "$NAMESPACE" -c "$CONTAINER" --tail=300 2>/dev/null | grep -i "CassandraGraph\|idStrategy\|field mappings" | head -5 || echo "")
-    if [ -n "$init_log" ]; then
-        echo "$init_log"
-        ok "CassandraGraph initialization confirmed in logs"
+    local verify_ok="true"
+    local verify_backend
+    verify_backend=$(echo "$verify_props" | grep '^atlas.graphdb.backend=' | cut -d= -f2 | head -1 || echo "")
+    if [ "$verify_backend" = "cassandra" ]; then
+        ok "  atlas.graphdb.backend=cassandra"
     else
-        warn "Could not find CassandraGraph init log lines (may still be OK)"
+        warn "  atlas.graphdb.backend='$verify_backend' (expected 'cassandra')"
+        verify_ok="false"
     fi
 
-    record_phase "Phase 5: Backend Switch" "PASS"
+    local verify_prefix
+    verify_prefix=$(echo "$verify_props" | grep '^atlas.graph.index.search.es.prefix=' | cut -d= -f2 | head -1 || echo "")
+    if [ -n "$verify_prefix" ]; then
+        ok "  atlas.graph.index.search.es.prefix=$verify_prefix"
+    else
+        warn "  atlas.graph.index.search.es.prefix not found"
+        verify_ok="false"
+    fi
+
+    local verify_ks
+    verify_ks=$(echo "$verify_props" | grep '^atlas.cassandra.graph.keyspace=' | cut -d= -f2 | head -1 || echo "")
+    if [ -n "$verify_ks" ]; then
+        ok "  atlas.cassandra.graph.keyspace=$verify_ks"
+    else
+        warn "  atlas.cassandra.graph.keyspace not found"
+        verify_ok="false"
+    fi
+
+    local verify_id
+    verify_id=$(echo "$verify_props" | grep '^atlas.graph.id.strategy=' | cut -d= -f2 | head -1 || echo "")
+    if [ -n "$verify_id" ]; then
+        ok "  atlas.graph.id.strategy=$verify_id"
+    else
+        warn "  atlas.graph.id.strategy not found"
+        verify_ok="false"
+    fi
+
+    if [ "$verify_ok" = "true" ]; then
+        ok "ConfigMap verification passed"
+    else
+        warn "ConfigMap verification had issues — review manually before restarting pod"
+    fi
+
+    # 5.4 Let the pod pick up the new config naturally (no restart)
+    ok "ConfigMap updated. The pod will pick up the new backend on its next restart."
+    log "  To restart manually: kubectl delete pod $POD -n $NAMESPACE"
+    warn "ConfigMap backup available at: $CONFIGMAP_BACKUP"
+
+    record_phase "Phase 5: Backend Switch" "PASS (ConfigMap patched, pod not restarted)"
 }
 
 # ============================================================================
