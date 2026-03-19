@@ -33,7 +33,7 @@ on:
       - ms-664-fix-audit-search
       - hotfix-reindex-refresh
       - nb-switchable-graph-provider
-      - zg_dual_deploy
+      - zg-dual-deploy
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
