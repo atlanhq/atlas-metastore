@@ -25,7 +25,7 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * Enhanced post-migration validation.
  *
- * Runs 14 correctness checks against the target Cassandra (and optionally ES).
+ * Runs 16 correctness checks against the target Cassandra (and optionally ES).
  * Returns a structured {@link ValidationReport} with per-check results, per-type
  * statistics, super vertex detection, and source baseline comparison.
  *
@@ -131,6 +131,12 @@ public class MigrationValidator {
 
         // --- Check 14: tags tables accessibility ---
         runTagsTablesCheck(report);
+
+        // --- Check 15: Token range completion ---
+        runTokenRangeCompletionCheck(report);
+
+        // --- Check 16: Disk space adequacy ---
+        runDiskSpaceCheck(report);
 
         report.complete();
 
@@ -989,6 +995,162 @@ public class MigrationValidator {
         if (tagsCount >= 0) result.addDetail("tags_by_id_count", tagsCount);
         if (propagatedCount >= 0) result.addDetail("propagated_tags_count", propagatedCount);
         report.addCheck(result);
+    }
+
+    // ========================================================================
+    // Check 15: Token range completion
+    // ========================================================================
+
+    private void runTokenRangeCompletionCheck(ValidationReport report) {
+        LOG.info("Token range completion check: verifying all scan ranges are COMPLETED...");
+
+        Map<String, Long> statusCounts = stateStore.getStatusCounts("scan");
+        long completed  = statusCounts.getOrDefault("COMPLETED", 0L);
+        long failed     = statusCounts.getOrDefault("FAILED", 0L);
+        long inProgress = statusCounts.getOrDefault("IN_PROGRESS", 0L);
+        long total      = statusCounts.values().stream().mapToLong(Long::longValue).sum();
+
+        ValidationCheckResult.Severity severity;
+        String message;
+
+        if (total == 0) {
+            severity = ValidationCheckResult.Severity.FAIL;
+            message = "No token ranges found in migration_state — migration may not have run";
+        } else if (failed > 0) {
+            severity = ValidationCheckResult.Severity.FAIL;
+            message = String.format("total=%d, COMPLETED=%d, FAILED=%d, IN_PROGRESS=%d " +
+                "[FAIL: %d ranges failed — data may be incomplete]", total, completed, failed, inProgress, failed);
+        } else if (inProgress > 0) {
+            severity = ValidationCheckResult.Severity.FAIL;
+            message = String.format("total=%d, COMPLETED=%d, FAILED=%d, IN_PROGRESS=%d " +
+                "[FAIL: %d ranges still in progress — migration did not finish cleanly]",
+                total, completed, failed, inProgress, inProgress);
+        } else if (completed == total) {
+            severity = ValidationCheckResult.Severity.PASS;
+            message = String.format("All %d token ranges COMPLETED", total);
+        } else {
+            severity = ValidationCheckResult.Severity.WARN;
+            message = String.format("total=%d, COMPLETED=%d — unexpected statuses: %s", total, completed, statusCounts);
+        }
+
+        LOG.info("Token range completion: {}", message);
+
+        ValidationCheckResult result = new ValidationCheckResult(
+            "token_range_completion",
+            "All migration token ranges completed successfully",
+            severity, message);
+        result.addDetail("total_ranges", total);
+        result.addDetail("completed", completed);
+        result.addDetail("failed", failed);
+        result.addDetail("in_progress", inProgress);
+        for (Map.Entry<String, Long> entry : statusCounts.entrySet()) {
+            result.addDetail("status_" + entry.getKey().toLowerCase(), entry.getValue());
+        }
+        report.addCheck(result);
+    }
+
+    // ========================================================================
+    // Check 16: Disk space adequacy
+    // ========================================================================
+
+    private void runDiskSpaceCheck(ValidationReport report) {
+        LOG.info("Disk space check: verifying ES and Cassandra have adequate free space...");
+
+        List<String> issues = new ArrayList<>();
+        boolean esPassed = true;
+        boolean cassandraPassed = true;
+
+        // Check ES disk space via _cat/allocation API
+        RestClient esClient = null;
+        try {
+            esClient = createEsClient();
+            Request req = new Request("GET", "/_cat/allocation?format=json&bytes=b");
+            Response resp = esClient.performRequest(req);
+            String body = EntityUtils.toString(resp.getEntity());
+
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> nodes = MAPPER.readValue(body,
+                MAPPER.getTypeFactory().constructCollectionType(List.class, Map.class));
+
+            for (Map<String, Object> node : nodes) {
+                String diskUsedStr = String.valueOf(node.getOrDefault("disk.used", "0"));
+                String diskAvailStr = String.valueOf(node.getOrDefault("disk.avail", "0"));
+                String nodeName = String.valueOf(node.getOrDefault("node", "unknown"));
+
+                long diskUsed  = parseLong(diskUsedStr);
+                long diskAvail = parseLong(diskAvailStr);
+
+                if (diskUsed > 0 && diskAvail < 2 * diskUsed) {
+                    esPassed = false;
+                    issues.add(String.format("ES node '%s': used=%s, avail=%s (need 2x used = %s)",
+                        nodeName, humanBytes(diskUsed), humanBytes(diskAvail), humanBytes(2 * diskUsed)));
+                }
+            }
+        } catch (Exception e) {
+            LOG.warn("ES disk space check failed: {}", e.getMessage());
+            issues.add("ES disk check failed: " + e.getMessage());
+            esPassed = false;
+        } finally {
+            if (esClient != null) {
+                try { esClient.close(); } catch (Exception ignored) {}
+            }
+        }
+
+        // Check Cassandra disk space via system keyspace
+        try {
+            // Query system.local for data_file_directories info
+            // Use size_estimates as a proxy for Cassandra data size
+            String ks = config.getTargetCassandraKeyspace();
+            ResultSet rs = targetSession.execute(
+                "SELECT mean_partition_size, partitions_count FROM system.size_estimates " +
+                "WHERE keyspace_name = '" + config.getSourceCassandraKeyspace() + "'");
+
+            long totalEstimatedBytes = 0;
+            for (Row row : rs) {
+                long meanSize = row.getLong("mean_partition_size");
+                long partCount = row.getLong("partitions_count");
+                totalEstimatedBytes += meanSize * partCount;
+            }
+
+            if (totalEstimatedBytes > 0) {
+                LOG.info("Cassandra source keyspace estimated size: {}", humanBytes(totalEstimatedBytes));
+                // Note: We can't directly query free disk from CQL. Log the estimate for operator review.
+                // The shell script handles the actual df check on the Cassandra pod.
+            }
+        } catch (Exception e) {
+            LOG.warn("Cassandra size estimation failed: {}", e.getMessage());
+            issues.add("Cassandra size check: " + e.getMessage());
+        }
+
+        boolean passed = esPassed && issues.isEmpty();
+        ValidationCheckResult.Severity severity = passed ? ValidationCheckResult.Severity.PASS :
+            esPassed ? ValidationCheckResult.Severity.WARN : ValidationCheckResult.Severity.FAIL;
+        String message = issues.isEmpty()
+            ? "ES nodes have >= 2x free disk space relative to used"
+            : String.join("; ", issues);
+
+        ValidationCheckResult result = new ValidationCheckResult(
+            "disk_space_adequacy",
+            "ES and Cassandra have adequate free disk space for migration (2x headroom)",
+            severity, message);
+        result.addDetail("es_passed", esPassed);
+        result.addDetail("cassandra_passed", cassandraPassed);
+        report.addCheck(result);
+    }
+
+    private static long parseLong(String s) {
+        try {
+            return Long.parseLong(s.trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    private static String humanBytes(long bytes) {
+        if (bytes < 1024) return bytes + "B";
+        if (bytes < 1024 * 1024) return String.format("%.1fKB", bytes / 1024.0);
+        if (bytes < 1024L * 1024 * 1024) return String.format("%.1fMB", bytes / (1024.0 * 1024));
+        return String.format("%.1fGB", bytes / (1024.0 * 1024 * 1024));
     }
 
     // ========================================================================

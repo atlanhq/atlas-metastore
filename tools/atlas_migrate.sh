@@ -53,6 +53,8 @@ TARGET_ES_INDEX="${TARGET_ES_INDEX:-atlas_graph_vertex_index}"
 SCANNER_THREADS="${SCANNER_THREADS:-16}"
 WRITER_THREADS="${WRITER_THREADS:-8}"
 ES_BULK_SIZE="${ES_BULK_SIZE:-1000}"
+ES_FIELD_LIMIT="${ES_FIELD_LIMIT:-10000}"
+MAX_RETRIES="${MAX_RETRIES:-3}"
 
 # ID strategy and dedup claims
 ID_STRATEGY="${ID_STRATEGY:-legacy}"          # "legacy" (UUID), "hash-jg" (SHA-256 of JG ID), or "deterministic" (identity-based SHA-256)
@@ -221,11 +223,13 @@ target.elasticsearch.protocol=${ES_PROTOCOL}
 target.elasticsearch.index=${TARGET_ES_INDEX}
 target.elasticsearch.username=
 target.elasticsearch.password=
+target.elasticsearch.field.limit=${ES_FIELD_LIMIT}
 
 # Tuning
 migration.scanner.threads=${SCANNER_THREADS}
 migration.writer.threads=${WRITER_THREADS}
 migration.es.bulk.size=${ES_BULK_SIZE}
+migration.max.retries=${MAX_RETRIES}
 migration.scan.fetch.size=5000
 migration.queue.capacity=10000
 migration.resume=true

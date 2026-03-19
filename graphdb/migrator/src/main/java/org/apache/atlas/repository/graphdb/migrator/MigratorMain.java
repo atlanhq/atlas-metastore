@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.time.Duration;
+import java.util.Map;
 import java.util.concurrent.*;
 
 /**
@@ -69,6 +70,7 @@ public class MigratorMain {
         LOG.info("ID strategy: {}, claim enabled: {}", config.getIdStrategy(), config.isClaimEnabled());
         LOG.info("Skip flags: esReindex={}, classifications={}, tasks={}",
                  config.isSkipEsReindex(), config.isSkipClassifications(), config.isSkipTasks());
+        LOG.info("ES field limit: {}, Max retries: {}", config.getEsFieldLimit(), config.getMaxRetries());
         LOG.info("Auxiliary migration: configStore={}, tags={}, sameCluster={}",
                  config.isMigrateConfigStore(), config.isMigrateTags(), config.isSameCassandraCluster());
 
@@ -152,6 +154,10 @@ public class MigratorMain {
             LOG.info("All token ranges scanned. Waiting for writer threads to drain queue...");
             writer.signalScanComplete();
             writer.awaitCompletion();
+
+            // ========== Phase 1.1: Retry failed token ranges ==========
+            retryFailedRanges(config, metrics, sourceSession, stateStore, writer, scanner, PHASE_SCAN);
+
             scanner.close();
             writer.close();
 
@@ -273,6 +279,56 @@ public class MigratorMain {
         LOG.info("  VALIDATION PASSED");
         LOG.info("  All {} checks passed. Migration is safe for cutover.", report.getChecks().size());
         LOG.info("========================================");
+    }
+
+    /**
+     * Retry failed token ranges up to maxRetries times.
+     * After each retry round, re-checks for remaining FAILED ranges.
+     */
+    private static void retryFailedRanges(MigratorConfig config, MigrationMetrics metrics,
+                                            CqlSession sourceSession, MigrationStateStore stateStore,
+                                            CassandraTargetWriter writer, JanusGraphScanner scanner,
+                                            String phase) {
+        int maxRetries = config.getMaxRetries();
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            Map<String, Long> statusCounts = stateStore.getStatusCounts(phase);
+            long failed = statusCounts.getOrDefault("FAILED", 0L);
+
+            if (failed == 0) {
+                LOG.info("No failed token ranges — retry not needed");
+                return;
+            }
+
+            LOG.info("========================================");
+            LOG.info("=== Retry attempt {}/{}: {} failed token ranges ===", attempt, maxRetries, failed);
+            LOG.info("========================================");
+
+            // Clear FAILED status so they will be re-scanned (resume mode skips COMPLETED only)
+            // The scanner.scanAll with resume=true will pick up non-COMPLETED ranges
+            try {
+                writer.startWriters();
+                scanner.scanAll(
+                    vertex -> writer.enqueue(vertex),
+                    stateStore,
+                    phase
+                );
+                writer.signalScanComplete();
+                writer.awaitCompletion();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                LOG.error("Retry interrupted at attempt {}", attempt);
+                return;
+            }
+        }
+
+        // Final check
+        Map<String, Long> finalCounts = stateStore.getStatusCounts(phase);
+        long remainingFailed = finalCounts.getOrDefault("FAILED", 0L);
+        if (remainingFailed > 0) {
+            LOG.error("After {} retries, {} token ranges still FAILED", maxRetries, remainingFailed);
+        } else {
+            LOG.info("All token ranges completed after retries");
+        }
     }
 
     /**

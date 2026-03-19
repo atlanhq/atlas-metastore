@@ -9,6 +9,8 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -117,6 +119,20 @@ public class MigrationStateStore {
             }
         }
         return new long[]{completedRanges, totalVertices, totalEdges};
+    }
+
+    /**
+     * Returns a map of status → count for all token ranges in a given phase.
+     * Used by validation to check that all ranges are COMPLETED.
+     */
+    public Map<String, Long> getStatusCounts(String phase) {
+        Map<String, Long> counts = new LinkedHashMap<>();
+        ResultSet rs = session.execute(selectPhaseStmt.bind(phase));
+        for (Row row : rs) {
+            String status = row.getString("status");
+            counts.merge(status, 1L, Long::sum);
+        }
+        return counts;
     }
 
     /** Save a JSON blob by key */

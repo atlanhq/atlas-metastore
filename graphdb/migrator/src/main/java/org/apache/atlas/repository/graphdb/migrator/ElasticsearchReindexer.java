@@ -183,6 +183,9 @@ public class ElasticsearchReindexer implements AutoCloseable {
         String sourceIndex = config.getSourceEsIndex();
         String createBody = getCreateBodyFromSourceIndex(sourceIndex);
 
+        // Ensure field limit is set in the create body
+        createBody = ensureFieldLimit(createBody, config.getEsFieldLimit());
+
         try {
             Request createReq = new Request("PUT", "/" + esIndex);
             createReq.setJsonEntity(createBody);
@@ -301,6 +304,50 @@ public class ElasticsearchReindexer implements AutoCloseable {
             LOG.warn("Failed to read mappings/settings from source index '{}', falling back to default Atlas mappings: {}",
                      sourceIndex, e.getMessage());
             return "{\"mappings\":" + DEFAULT_MAPPINGS_JSON + "}";
+        }
+    }
+
+    /**
+     * Ensures the index creation body includes index.mapping.total_fields.limit.
+     * Injects the setting into the "settings" block if not already present.
+     */
+    @SuppressWarnings("unchecked")
+    private String ensureFieldLimit(String createBody, int fieldLimit) {
+        if (fieldLimit <= 0) return createBody;
+
+        try {
+            Map<String, Object> body = MAPPER.readValue(createBody, Map.class);
+
+            Map<String, Object> settings = (Map<String, Object>) body.get("settings");
+            if (settings == null) {
+                settings = new java.util.LinkedHashMap<>();
+                body.put("settings", settings);
+            }
+
+            Map<String, Object> indexSettings = (Map<String, Object>) settings.get("index");
+            if (indexSettings == null) {
+                indexSettings = new java.util.LinkedHashMap<>();
+                settings.put("index", indexSettings);
+            }
+
+            // Set mapping.total_fields.limit
+            Map<String, Object> mapping = (Map<String, Object>) indexSettings.get("mapping");
+            if (mapping == null) {
+                mapping = new java.util.LinkedHashMap<>();
+                indexSettings.put("mapping", mapping);
+            }
+            Map<String, Object> totalFields = (Map<String, Object>) mapping.get("total_fields");
+            if (totalFields == null) {
+                totalFields = new java.util.LinkedHashMap<>();
+                mapping.put("total_fields", totalFields);
+            }
+            totalFields.put("limit", fieldLimit);
+
+            LOG.info("ES index field limit set to: {}", fieldLimit);
+            return MAPPER.writeValueAsString(body);
+        } catch (Exception e) {
+            LOG.warn("Failed to inject field limit into index settings: {}", e.getMessage());
+            return createBody;
         }
     }
 

@@ -1,0 +1,123 @@
+{{- if .Values.migration.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: atlas-migrator-{{ .Release.Revision }}
+  namespace: {{ .Values.Namespace }}
+  labels:
+    app: atlas-migrator
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+  annotations:
+    helm.sh/hook-weight: "0"
+spec:
+  restartPolicy: Never
+  {{- if .Values.atlas.imagePullSecrets }}
+  imagePullSecrets:
+  {{- toYaml .Values.atlas.imagePullSecrets | nindent 4 }}
+  {{- end }}
+  {{- with .Values.atlas.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        preference:
+          matchExpressions:
+          - key: eks.amazonaws.com/capacityType
+            operator: In
+            values:
+            - ON_DEMAND
+      - weight: 100
+        preference:
+          matchExpressions:
+          - key: lifecycle
+            operator: In
+            values:
+            - ondemand
+      - weight: 100
+        preference:
+          matchExpressions:
+          - key: cloud.google.com/gke-provisioning
+            operator: In
+            values:
+            - standard
+  containers:
+  - name: atlas-migrator
+    image: "{{ .Values.atlas.image.repository }}:{{ .Values.atlas.image.tag }}"
+    imagePullPolicy: {{ .Values.atlas.image.pullPolicy }}
+    command:
+    - /bin/bash
+    - -c
+    - |
+      echo "=== Atlas Migrator Pod ==="
+      echo "Mode: {{ .Values.migration.mode | default "full" }}"
+      echo "ID Strategy: {{ .Values.migration.idStrategy | default "legacy" }}"
+      echo "Claim Enabled: {{ .Values.migration.claimEnabled | default false }}"
+      echo ""
+
+      export ID_STRATEGY="{{ .Values.migration.idStrategy | default "legacy" }}"
+      export CLAIM_ENABLED="{{ .Values.migration.claimEnabled | default false }}"
+      export SCANNER_THREADS="{{ .Values.migration.scannerThreads | default 16 }}"
+      export WRITER_THREADS="{{ .Values.migration.writerThreads | default 8 }}"
+      export ES_BULK_SIZE="{{ .Values.migration.esBulkSize | default 1000 }}"
+      export MIGRATOR_JVM_HEAP="{{ .Values.migration.jvmHeap | default "4g" }}"
+      export MIGRATOR_JVM_MIN_HEAP="{{ .Values.migration.jvmMinHeap | default "2g" }}"
+
+      MIGRATOR_EXIT=0
+      /opt/apache-atlas/bin/atlas_migrate.sh {{ .Values.migration.mode | default "" }} || MIGRATOR_EXIT=$?
+
+      POST_SLEEP={{ .Values.migration.postCompletionSleepSeconds | default 3600 }}
+      echo ""
+      echo "=== Migration finished with exit code: $MIGRATOR_EXIT ==="
+      echo "Pod will remain Running for ${POST_SLEEP}s for inspection."
+      echo "To exec:    kubectl exec -it $K8S_POD_NAME -n $Namespace -- bash"
+      echo "To view logs: kubectl logs $K8S_POD_NAME -n $Namespace"
+      echo "To kill early: kubectl delete pod $K8S_POD_NAME -n $Namespace"
+      echo ""
+
+      sleep $POST_SLEEP
+      exit $MIGRATOR_EXIT
+    env:
+    - name: ATLAS_SERVER_OPTS
+      value: '-XX:MaxRAMPercentage=80.0 -XX:InitialRAMPercentage=50.0'
+    - name: K8S_POD_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.name
+    - name: Namespace
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.namespace
+    envFrom:
+    - secretRef:
+        name: atlas-keycloak-config
+    {{- if .Values.multitenant }}
+    - secretRef:
+        name: atlas-secret-manager
+    - secretRef:
+        name: atlas-secret-parameter-store
+    {{- end }}
+    resources:
+      {{- toYaml .Values.migration.resources | nindent 6 }}
+    volumeMounts:
+    - name: atlas-config
+      mountPath: /opt/apache-atlas/conf/atlas-application.properties
+      subPath: atlas-application.properties
+    - name: atlas-logback-config
+      mountPath: /opt/apache-atlas/conf/atlas-logback.xml
+      subPath: atlas-logback.xml
+    - name: atlas-logs
+      mountPath: /opt/apache-atlas/logs
+  volumes:
+  - name: atlas-config
+    configMap:
+      name: atlas-config
+  - name: atlas-logback-config
+    configMap:
+      name: atlas-logback-config
+  - name: atlas-logs
+    emptyDir: {}
+{{- end }}

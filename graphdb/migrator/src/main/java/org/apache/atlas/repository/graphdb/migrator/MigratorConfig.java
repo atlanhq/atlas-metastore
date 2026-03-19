@@ -61,6 +61,9 @@ public class MigratorConfig {
     private final boolean edgesOutOnly;
     private final int maxEdgesPerBatch;
 
+    // ES index settings
+    private final int esFieldLimit;
+
     // Skip flags
     private final boolean skipEsReindex;
     private final boolean skipClassifications;
@@ -69,6 +72,9 @@ public class MigratorConfig {
     // Auxiliary keyspace migration flags
     private final boolean migrateConfigStore;
     private final boolean migrateTags;
+
+    // Retry
+    private final int maxRetries;
 
     // ID strategy / claim
     private final IdStrategy idStrategy;
@@ -140,6 +146,9 @@ public class MigratorConfig {
         this.edgesOutOnly         = getBoolean("migration.edges.out.only", true);
         this.maxEdgesPerBatch     = getInt("migration.writer.max.edges.per.batch", 15);
 
+        // ES index settings
+        this.esFieldLimit = getInt("target.elasticsearch.field.limit", 10000);
+
         // Skip flags
         this.skipEsReindex      = getBoolean("migration.skip.es.reindex", false);
         this.skipClassifications = getBoolean("migration.skip.classifications", false);
@@ -148,6 +157,9 @@ public class MigratorConfig {
         // Auxiliary keyspace migration flags
         this.migrateConfigStore = getBoolean("migration.migrate.config.store", false);
         this.migrateTags        = getBoolean("migration.migrate.tags", false);
+
+        // Retry
+        this.maxRetries = getInt("migration.max.retries", 3);
 
         // ID strategy / claim
         this.idStrategy = IdStrategy.from(get("migration.id.strategy", "legacy"));
@@ -219,6 +231,8 @@ public class MigratorConfig {
     public boolean isEdgesOutOnly()          { return edgesOutOnly; }
     public int     getMaxEdgesPerBatch()     { return maxEdgesPerBatch; }
 
+    public int     getEsFieldLimit()      { return esFieldLimit; }
+
     public boolean isSkipEsReindex()      { return skipEsReindex; }
     public boolean isSkipClassifications() { return skipClassifications; }
     public boolean isSkipTasks()           { return skipTasks; }
@@ -230,6 +244,8 @@ public class MigratorConfig {
         return sourceCassandraHostname.equals(targetCassandraHostname)
             && sourceCassandraPort == targetCassandraPort;
     }
+
+    public int     getMaxRetries()        { return maxRetries; }
 
     public IdStrategy getIdStrategy()      { return idStrategy; }
     public boolean isClaimEnabled()        { return claimEnabled; }
