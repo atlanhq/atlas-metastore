@@ -1067,12 +1067,57 @@ EOF
         warn "ConfigMap verification had issues — review manually before restarting pod"
     fi
 
-    # 5.4 Let the pod pick up the new config naturally (no restart)
-    ok "ConfigMap updated. The pod will pick up the new backend on its next restart."
-    log "  To restart manually: kubectl delete pod $POD -n $NAMESPACE"
+    # 5.4 Trigger rolling restart of Atlas StatefulSet
+    log "Triggering rolling restart of Atlas StatefulSet..."
+    if ! kubectl rollout restart statefulset/atlas -n "$NAMESPACE"; then
+        warn "kubectl rollout restart failed — falling back to manual pod delete"
+        kubectl delete pod "$POD" -n "$NAMESPACE" || true
+    fi
+
+    # 5.5 Wait for rollout to complete
+    log "Waiting for all pods to pick up new config (timeout: 600s)..."
+    if ! kubectl rollout status statefulset/atlas -n "$NAMESPACE" --timeout=600s; then
+        record_phase "Phase 5: Backend Switch" "FAIL (rollout timeout)"
+        warn "ConfigMap backup available at: $CONFIGMAP_BACKUP"
+        die "StatefulSet rollout did not complete within 600s. ConfigMap backup: $CONFIGMAP_BACKUP" "$EXIT_SWITCH"
+    fi
+    ok "All pods updated"
+
+    # 5.6 Verify Atlas is ACTIVE on each pod
+    log "Verifying Atlas is ACTIVE on all pods..."
+    local replicas
+    replicas=$(kubectl get statefulset atlas -n "$NAMESPACE" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+    local all_active="true"
+    for i in $(seq 0 $((replicas - 1))); do
+        local pod_name="atlas-${i}"
+        log "  Checking $pod_name..."
+        local atlas_status="UNKNOWN"
+        for attempt in $(seq 1 30); do
+            atlas_status=$(kubectl exec "$pod_name" -n "$NAMESPACE" -c "$CONTAINER" -- \
+                curl -s localhost:21000/api/atlas/admin/status 2>/dev/null | \
+                py_extract "import sys,json; print(json.load(sys.stdin).get('Status','UNKNOWN'))" || echo "STARTING")
+            if [ "$atlas_status" = "ACTIVE" ]; then
+                break
+            fi
+            sleep 10
+        done
+        if [ "$atlas_status" = "ACTIVE" ]; then
+            ok "  $pod_name: ACTIVE"
+        else
+            warn "  $pod_name: $atlas_status (not ACTIVE after 5 min)"
+            all_active="false"
+        fi
+    done
+
     warn "ConfigMap backup available at: $CONFIGMAP_BACKUP"
 
-    record_phase "Phase 5: Backend Switch" "PASS (ConfigMap patched, pod not restarted)"
+    if [ "$all_active" = "true" ]; then
+        ok "All pods are ACTIVE on Cassandra backend"
+        record_phase "Phase 5: Backend Switch" "PASS"
+    else
+        warn "Some pods did not reach ACTIVE state — check manually"
+        record_phase "Phase 5: Backend Switch" "WARN (not all pods ACTIVE)"
+    fi
 }
 
 # ============================================================================

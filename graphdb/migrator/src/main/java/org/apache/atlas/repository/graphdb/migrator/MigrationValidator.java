@@ -19,6 +19,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.FileWriter;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -88,9 +89,11 @@ public class MigrationValidator {
         // --- Source-side counts (direct query, independent of baseline) ---
         runSourceCounts(report);
 
-        // --- Check 1: Vertex count + groupBy type ---
-        runVertexCountCheck(ks, report);
+        // --- GroupBy type_name scan (runs first to get exact vertex count) ---
         runVertexCountByType(ks, report);
+
+        // --- Check 1: Vertex count (uses exact count from GroupBy scan above) ---
+        runVertexCountCheck(ks, report);
 
         // --- Check 2 & 3: Edge consistency ---
         runEdgeConsistencyChecks(ks, report);
@@ -161,8 +164,8 @@ public class MigrationValidator {
     // ========================================================================
 
     private void runVertexCountCheck(String ks, ValidationReport report) {
-        long vertexCount = countTable(ks + ".vertices");
-        report.setVertexCount(vertexCount);
+        // Use exact count already set by runVertexCountByType() (full table scan)
+        long vertexCount = report.getVertexCount();
 
         long[] phaseSummary = stateStore.getPhaseSummary("scan");
 
@@ -225,6 +228,7 @@ public class MigrationValidator {
         }
 
         report.setVertexCountByType(countByType);
+        report.setVertexCount(totalScanned);
 
         // Log top types
         LOG.info("Vertex count by type ({} distinct types, {} total vertices):", countByType.size(), totalScanned);
@@ -371,13 +375,13 @@ public class MigrationValidator {
     // ========================================================================
 
     private void runTypeDefConsistencyCheck(String ks, ValidationReport report) {
-        long typeDefCount      = countTable(ks + ".type_definitions");
-        long typeDefByCatCount = countTable(ks + ".type_definitions_by_category");
+        long typeDefCount      = countTableExact(ks + ".type_definitions");
+        long typeDefByCatCount = countTableExact(ks + ".type_definitions_by_category");
 
         report.setTypeDefCount(typeDefCount);
         report.setTypeDefByCategoryCount(typeDefByCatCount);
 
-        boolean countMatch = isWithinTolerance(typeDefCount, typeDefByCatCount, 0.05);
+        boolean countMatch = typeDefCount == typeDefByCatCount;
         boolean nonEmpty   = typeDefCount > 0;
 
         ValidationCheckResult.Severity severity;
@@ -387,7 +391,7 @@ public class MigrationValidator {
 
         ValidationCheckResult result = new ValidationCheckResult(
             "typedef_consistency",
-            "type_definitions and type_definitions_by_category are consistent and non-empty (estimated, 5% tolerance)",
+            "type_definitions and type_definitions_by_category are consistent and non-empty (exact count)",
             severity,
             String.format("type_definitions=%d, type_definitions_by_category=%d", typeDefCount, typeDefByCatCount));
         result.addDetail("type_definitions_count", typeDefCount);
@@ -885,14 +889,14 @@ public class MigrationValidator {
         long edgeOutCount = report.getEdgeOutCount();
         boolean passed = edgeIndexCount > 0 || edgeOutCount == 0;
 
-        String message = String.format("edge_index=%d, edges_out=%d", edgeIndexCount, edgeOutCount);
+        String message = String.format("edge_index=%d (estimated), edges_out=%d (estimated)", edgeIndexCount, edgeOutCount);
         if (edgeOutCount > 0 && edgeIndexCount == 0) {
             message += " [FAIL: edge_index is empty but edges exist — relationship GUID lookups will fail]";
         }
 
         ValidationCheckResult result = new ValidationCheckResult(
             "edge_index_count",
-            "Edge index table populated for relationship GUID lookups",
+            "Edge index table populated for relationship GUID lookups (estimated via size_estimates)",
             passed ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.FAIL,
             message);
         result.addDetail("edge_index_count", edgeIndexCount);
@@ -1269,6 +1273,26 @@ public class MigrationValidator {
             return totalPartitions;
         } catch (Exception e) {
             LOG.warn("Failed to estimate count for {} via size_estimates: {}", fullyQualifiedTable, e.getMessage());
+            return -1;
+        }
+    }
+
+    /**
+     * Exact table row count using SELECT count(*).
+     * Only suitable for small tables (hundreds of rows) like type_definitions.
+     * For large tables, use {@link #countTable(String)} which uses size_estimates.
+     */
+    private long countTableExact(String fullyQualifiedTable) {
+        try {
+            ResultSet rs = targetSession.execute(
+                SimpleStatement.builder("SELECT count(*) FROM " + fullyQualifiedTable)
+                    .setTimeout(Duration.ofSeconds(60)).build());
+            Row row = rs.one();
+            long count = row != null ? row.getLong(0) : -1;
+            LOG.info("Exact row count for {}: {}", fullyQualifiedTable, String.format("%,d", count));
+            return count;
+        } catch (Exception e) {
+            LOG.warn("Failed to count {} via SELECT count(*): {}", fullyQualifiedTable, e.getMessage());
             return -1;
         }
     }
