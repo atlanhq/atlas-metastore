@@ -1456,7 +1456,7 @@ public class EntityGraphRetriever {
                return null;
            }
 
-           // Phase 1: Fetch result vertex properties (always fresh, no cross-request cache)
+           // Phase 1: Fetch result vertex properties
            AtlasPerfMetrics.MetricRecorder phase1Metric = RequestContext.get().startMetricRecord("enrichVertexProperties.phase1.vertexFetch");
            Pair<Map<String, Map<String, List<?>>>, Map<String, AtlasVertex>> vertexCache = getVertexPropertiesValueMap(vertexIds, 100);
 
@@ -1552,7 +1552,7 @@ public class EntityGraphRetriever {
                }
            }
 
-           // Phase 3: Fetch referenced vertex properties (uses cross-request cache)
+           // Phase 3: Fetch referenced vertex properties
            vertexIdsToProcess.removeAll(vertexIds); // Don't re-fetch vertices we already have from Phase 1
            AtlasPerfMetrics.MetricRecorder phase3Metric = RequestContext.get().startMetricRecord("enrichVertexProperties.phase3.referenceFetch");
            Pair<Map<String, Map<String, List<?>>>, Map<String, AtlasVertex>> referenceVertices =
