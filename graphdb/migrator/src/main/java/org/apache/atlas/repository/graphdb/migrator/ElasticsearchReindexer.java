@@ -328,9 +328,9 @@ public class ElasticsearchReindexer implements AutoCloseable {
             }
         }
 
-        LOG.info("ES bulk indexed {} docs in {}ms (total: {}, rate: {}/s)",
-                 docCount, bulkMs, String.format("%,d", totalSoFar),
-                 bulkMs > 0 ? (docCount * 1000L / bulkMs) : "N/A");
+        LOG.debug("ES bulk indexed {} docs in {}ms (total: {}, rate: {}/s)",
+                  docCount, bulkMs, String.format("%,d", totalSoFar),
+                  bulkMs > 0 ? (docCount * 1000L / bulkMs) : "N/A");
     }
 
     /** Escape special JSON characters in a string value */

@@ -61,6 +61,8 @@ public class CassandraTargetWriter implements AutoCloseable {
     private final AtomicLong writeAttempts = new AtomicLong(0);
     private final AtomicLong writeErrors   = new AtomicLong(0);
     private static final int WRITE_SAMPLE_LOG_LIMIT = 10;
+    private final AtomicLong claimRedirectCount = new AtomicLong(0);
+    private final AtomicLong edgeFallbackCount  = new AtomicLong(0);
     private final ConcurrentMap<Long, String> vertexIdOverrides = new ConcurrentHashMap<>();
 
     public CassandraTargetWriter(MigratorConfig config, MigrationMetrics metrics, CqlSession targetSession) {
@@ -573,8 +575,14 @@ public class CassandraTargetWriter implements AutoCloseable {
         String claimedVertexId = claimVertexId(identityKey, computed);
         if (!claimedVertexId.equals(computed)) {
             vertexIdOverrides.put(vertex.getJgVertexId(), claimedVertexId);
-            LOG.info("Vertex claim redirect: jgVertexId={} computedId={} claimedId={} identityKey={}",
-                    vertex.getJgVertexId(), computed, claimedVertexId, identityKey);
+            long count = claimRedirectCount.incrementAndGet();
+            if (count <= 10 || count % 1000 == 0) {
+                LOG.info("Vertex claim redirect #{}: jgVertexId={} computedId={} claimedId={} identityKey={}",
+                        count, vertex.getJgVertexId(), computed, claimedVertexId, identityKey);
+            } else {
+                LOG.debug("Vertex claim redirect #{}: jgVertexId={} computedId={} claimedId={} identityKey={}",
+                        count, vertex.getJgVertexId(), computed, claimedVertexId, identityKey);
+            }
         }
 
         return claimedVertexId;
@@ -589,7 +597,12 @@ public class CassandraTargetWriter implements AutoCloseable {
         // Use HASH_JG as a stable fallback — the edge will still land on a deterministic ID,
         // just not the identity-based one. Log a warning so we can track how often this happens.
         if (config.getIdStrategy() == IdStrategy.HASH_IDENTITY) {
-            LOG.warn("Edge endpoint jgVertexId={} not in override map; falling back to HASH_JG", jgVertexId);
+            long count = edgeFallbackCount.incrementAndGet();
+            if (count <= 10 || count % 1000 == 0) {
+                LOG.warn("Edge endpoint jgVertexId={} not in override map (#{}); falling back to HASH_JG", jgVertexId, count);
+            } else {
+                LOG.debug("Edge endpoint jgVertexId={} not in override map (#{}); falling back to HASH_JG", jgVertexId, count);
+            }
         }
         return DeterministicIdUtil.vertexIdFromJg(jgVertexId,
                 config.getIdStrategy() == IdStrategy.HASH_IDENTITY ? IdStrategy.HASH_JG : config.getIdStrategy());

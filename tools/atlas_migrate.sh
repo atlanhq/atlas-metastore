@@ -300,7 +300,7 @@ run() {
     # Use pipefail + PIPESTATUS to capture the JAR's exit code through tee
     set +e
     java \
-        -Xmx4g -Xms2g \
+        -Xmx${MIGRATOR_JVM_HEAP:-4g} -Xms${MIGRATOR_JVM_MIN_HEAP:-2g} \
         --add-opens java.base/java.lang=ALL-UNNAMED \
         -jar "$MIGRATOR_JAR" \
         "$PROPERTIES_FILE" \
@@ -346,6 +346,8 @@ show_help() {
     echo "  SKIP_CLASSIFICATIONS     Skip classification vertices: true/false (default: false)"
     echo "  SKIP_TASKS               Skip task vertices: true/false (default: false)"
     echo "  VALIDATION_TENANT_ID     Tenant ID for validation report (default: auto-derived from hostname)"
+    echo "  MIGRATOR_JVM_HEAP        JVM max heap (default: 4g)"
+    echo "  MIGRATOR_JVM_MIN_HEAP    JVM initial heap (default: 2g)"
     echo ""
     echo "Quick start (from kubectl):"
     echo "  kubectl exec -it atlas-0 -n atlas -c atlas-main -- /opt/apache-atlas/bin/atlas_migrate.sh --dry-run"
@@ -366,7 +368,7 @@ case "${1:-}" in
         preflight
         log ""
         log "Dry run complete. Properties at $PROPERTIES_FILE"
-        log "To run: java -Xmx4g -jar $MIGRATOR_JAR $PROPERTIES_FILE"
+        log "To run: java -Xmx${MIGRATOR_JVM_HEAP:-4g} -jar $MIGRATOR_JAR $PROPERTIES_FILE"
         ;;
     --es-only|--validate-only|--fresh|"")
         find_migrator_jar

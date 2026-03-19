@@ -66,9 +66,21 @@ Use AskUserQuestion:
 - Header: "Pod strategy"
 - Options:
   - "Atlas pod (Recommended)" — run directly on atlas-0 (simple, good for small/medium tenants)
-  - "Dedicated pod" — create a separate pod with 4 CPU / 8Gi memory + PodDisruptionBudget (large tenants)
+  - "Dedicated Helm Pod" — create a migration Pod via `helm upgrade --set migration.enabled=true` (higher resources, stays Running for 1hr after completion for inspection)
+  - "Dedicated manual pod" — create a separate pod with custom CPU/memory + PodDisruptionBudget (very large tenants)
 
 Store the choice for later phases.
+
+### 0.4b Ask user: maintenance mode
+
+Use AskUserQuestion:
+- Question: "Should we enable maintenance mode during migration? This blocks POST/PUT/DELETE requests to prevent data drift while copying."
+- Header: "Maintenance"
+- Options:
+  - "Yes, enable maintenance mode (Recommended)" — prevents writes during migration, ensures consistency
+  - "No, keep tenant writable" — migration runs while tenant is live (small risk of data drift)
+
+Store the choice as `MAINTENANCE_MODE` (`true` or `false`).
 
 ### 0.5 Verify kubectl access and atlas pod health
 
@@ -105,6 +117,25 @@ If neither the script nor JAR is found, STOP:
 
 ## Phase 1: Set Up Migration Environment
 
+### 1.0 Enable Maintenance Mode (if requested)
+
+If `MAINTENANCE_MODE` is `true`:
+
+```bash
+# Enable maintenance mode — blocks POST/PUT/DELETE requests
+kubectl exec -n $NS $POD -c $CONTAINER -- curl -s -X PUT \
+  -H "Content-Type: application/json" \
+  -d 'true' \
+  "localhost:21000/api/atlas/v2/configs/MAINTENANCE_MODE"
+
+# Verify it's enabled
+kubectl exec -n $NS $POD -c $CONTAINER -- curl -s \
+  "localhost:21000/api/atlas/v2/configs/MAINTENANCE_MODE"
+# Expected: true
+```
+
+**Report to user**: Maintenance mode is enabled. All write requests will be blocked until we disable it after migration.
+
 ### If user chose "Atlas pod" — skip to Phase 2
 
 No setup needed. Migration runs directly on atlas-0.
@@ -115,7 +146,56 @@ MIGRATE_POD="$POD"
 MIGRATE_CONTAINER="$CONTAINER"
 ```
 
-### If user chose "Dedicated pod" — create migration pod + PDB
+### If user chose "Dedicated Helm Pod"
+
+Use the Helm chart to create a migration Pod with dedicated resources. The Pod stays Running for 1 hour after migration completes for log inspection, then auto-exits.
+
+```bash
+# Enable migration Pod via Helm
+helm upgrade atlas ./helm/atlas -n $NS --reuse-values \
+  --set migration.enabled=true \
+  --set migration.mode="--fresh" \
+  --set migration.idStrategy=deterministic \
+  --set migration.claimEnabled=true \
+  --set migration.scannerThreads=16 \
+  --set migration.writerThreads=8 \
+  --set migration.jvmHeap=4g \
+  --set migration.jvmMinHeap=2g \
+  --set migration.postCompletionSleepSeconds=3600 \
+  --set migration.resources.requests.cpu=4 \
+  --set migration.resources.requests.memory=8Gi \
+  --set migration.resources.limits.cpu=4 \
+  --set migration.resources.limits.memory=8Gi
+
+# For large tenants (>10M vertices), increase resources:
+# --set migration.jvmHeap=48g --set migration.jvmMinHeap=16g
+# --set migration.scannerThreads=32 --set migration.writerThreads=16
+# --set migration.resources.requests.cpu=32 --set migration.resources.requests.memory=64Gi
+```
+
+Monitor the Pod:
+```bash
+# Wait for pod to start
+kubectl get pods -n $NS -l app=atlas-migrator -w
+
+# Stream logs
+kubectl logs -f -l app=atlas-migrator -n $NS
+
+# After migration, the pod stays Running for 1hr — exec into it for inspection:
+kubectl exec -it <migrator-pod> -n $NS -- bash
+kubectl exec -it <migrator-pod> -n $NS -- tail -100 /opt/apache-atlas/logs/migrator-*.log
+```
+
+After the migration completes and you're done inspecting:
+```bash
+# Disable migration Pod
+helm upgrade atlas ./helm/atlas -n $NS --reuse-values --set migration.enabled=false
+kubectl delete pod -l app=atlas-migrator -n $NS
+```
+
+**Skip to Phase 2 verification steps** (the Helm Pod runs the migration automatically).
+
+### If user chose "Dedicated manual pod" — create migration pod + PDB
 
 #### 1.1 Identify the node zone for pod affinity (so it lands near Cassandra)
 
@@ -341,7 +421,13 @@ kubectl exec -n $NS $POD -c $CONTAINER -- curl -s \
 ```bash
 kubectl exec -n $NS $MIGRATE_POD -c $MIGRATE_CONTAINER -- \
   env ID_STRATEGY=deterministic CLAIM_ENABLED=true \
+  MIGRATOR_JVM_HEAP=4g MIGRATOR_JVM_MIN_HEAP=2g \
   /opt/apache-atlas/bin/atlas_migrate.sh --dry-run
+```
+
+**For large tenants (>10M vertices)**, increase JVM heap:
+```bash
+# MIGRATOR_JVM_HEAP=48g MIGRATOR_JVM_MIN_HEAP=16g SCANNER_THREADS=32 WRITER_THREADS=16
 ```
 
 **Report to user:**
@@ -359,6 +445,7 @@ If connectivity fails, STOP and report the issue.
 ```bash
 kubectl exec -n $NS $MIGRATE_POD -c $MIGRATE_CONTAINER -- \
   env ID_STRATEGY=deterministic CLAIM_ENABLED=true \
+  MIGRATOR_JVM_HEAP=4g MIGRATOR_JVM_MIN_HEAP=2g \
   /opt/apache-atlas/bin/atlas_migrate.sh 2>&1
 ```
 
@@ -366,6 +453,7 @@ kubectl exec -n $NS $MIGRATE_POD -c $MIGRATE_CONTAINER -- \
 ```bash
 kubectl exec -n $NS $MIGRATE_POD -c $MIGRATE_CONTAINER -- \
   env ID_STRATEGY=deterministic CLAIM_ENABLED=true \
+  MIGRATOR_JVM_HEAP=4g MIGRATOR_JVM_MIN_HEAP=2g \
   /opt/apache-atlas/bin/atlas_migrate.sh --fresh 2>&1
 ```
 
@@ -404,10 +492,13 @@ If there are FAILED or PENDING token ranges, rerun the migration. It is **resuma
 ```bash
 kubectl exec -n $NS $MIGRATE_POD -c $MIGRATE_CONTAINER -- \
   env ID_STRATEGY=deterministic CLAIM_ENABLED=true \
+  MIGRATOR_JVM_HEAP=4g MIGRATOR_JVM_MIN_HEAP=2g \
   /opt/apache-atlas/bin/atlas_migrate.sh 2>&1
 ```
 
 Keep rerunning until ALL token ranges are COMPLETED. Report each rerun attempt to the user.
+
+**Note:** The `atlas_migrate_tenant.sh` orchestrator has built-in retry with `--max-retries <n>` (default 3). If using the orchestrator, retries happen automatically.
 
 If the same ranges keep failing after 3 retries, use AskUserQuestion to ask:
 - "Migration has failed token ranges after 3 retries. How should we proceed?"
@@ -659,6 +750,30 @@ Expected:
 - Log lines showing `CassandraGraphDatabase` initialized
 - `id.strategy=DETERMINISTIC`, `claim.enabled=true` in logs
 - No JanusGraph/TinkerPop/RepairIndex initialization
+
+---
+
+## Phase 3B: Disable Maintenance Mode
+
+**Skip this if maintenance mode was not enabled in Phase 1.**
+
+```bash
+# Wait 30s cooldown before disabling
+sleep 30
+
+# Disable maintenance mode
+kubectl exec -n $NS $POD -c $CONTAINER -- curl -s -X PUT \
+  -H "Content-Type: application/json" \
+  -d 'false' \
+  "localhost:21000/api/atlas/v2/configs/MAINTENANCE_MODE"
+
+# Verify
+kubectl exec -n $NS $POD -c $CONTAINER -- curl -s \
+  "localhost:21000/api/atlas/v2/configs/MAINTENANCE_MODE"
+# Expected: false
+```
+
+**Report to user**: Maintenance mode disabled. Writes are now allowed again.
 
 ---
 
@@ -976,12 +1091,14 @@ Pod strategy:    <atlas pod / dedicated pod>
 |------------------------------|---------|-------------------------------------|
 | Prerequisites                | OK/FAIL | Build verified, migrator found      |
 | ArgoCD disabled              | OK      | Confirmed by user                   |
+| Maintenance mode ON          | OK/SKIP | Writes blocked during migration     |
 | Cleanup (remigration only)   | OK/SKIP | Keyspace dropped, ES index deleted  |
 | Migration (Scan+Write)       | OK/FAIL | X vertices, Y edges, Z token ranges |
 | ES Reindex                   | OK/FAIL | N docs indexed                      |
 | Validation                   | OK/FAIL | All checks PASS/FAIL                |
 | Deterministic IDs verified   | OK/SKIP | 32-char hex IDs, N claims           |
 | Backend switch (ConfigMap)   | OK/FAIL | ConfigMap updated, pod restarted    |
+| Maintenance mode OFF         | OK/SKIP | Writes re-enabled                   |
 | Atlas health                 | OK/FAIL | {"Status":"ACTIVE"}                 |
 | Search works                 | OK/FAIL | N entities returned, no lock icons  |
 | AuthPolicy in ES             | OK/FAIL | N policies found                    |
@@ -1018,8 +1135,13 @@ Throughout execution, if any phase fails:
 - **Never modify JanusGraph data** — migration is copy-not-move
 - **ES index prefix MUST match backend** — `atlas_graph_` for cassandra, `janusgraph_` for janus
 - **Keycloak client secret may change** on pod restart — always read from env/config, don't hardcode
-- **Large tenants (50M+ assets)** may need 4-8 hours for migration — use dedicated pod
+- **Large tenants (50M+ assets)** may need 4-8 hours for migration — use dedicated Helm Pod with increased resources (`--set migration.jvmHeap=48g`)
+- **Maintenance mode** is recommended for production migrations to prevent data drift. Use `--maintenance-mode` flag with the orchestrator or Phase 1.0 in the skill
+- **JVM heap** is now configurable via `MIGRATOR_JVM_HEAP` env var (default: 4g). Large tenants need 24-48g
+- **Helm migration Pod** stays Running for 1 hour after completion (configurable via `postCompletionSleepSeconds`) — use for log inspection and cqlsh access
+- **Retry**: The orchestrator (`atlas_migrate_tenant.sh`) retries failed migrations up to `--max-retries` times (default: 3). Manual retries are always safe — migration is resumable
 - **ArgoCD**: If ArgoCD is re-enabled after migration, ensure the Helm values / source-of-truth config includes the new Cassandra properties, otherwise the next sync will revert to JanusGraph
 - **ConfigMap edits may trigger implicit pod restart** — the skill handles this by checking pod status after the edit
 - **The `deploy-jars.sh` script should NOT be used** — jars are already in the pod from the deployed build
-- Reference docs: `docs/tenant-migration-runbook.md`, `graphdb/migrator/MIGRATION-STATUS.md`
+- **Orchestrator**: For fully automated migration, use `tools/atlas_migrate_tenant.sh` — handles all 9 phases including maintenance mode, retry, adaptive sizing, and summary
+- Reference docs: `docs/tenant-migration-runbook.md`, `docs/tenant-migration-operations.md`
