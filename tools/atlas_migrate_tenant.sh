@@ -71,7 +71,8 @@ ES_FIELD_LIMIT="10000"
 JVM_HEAP="4g"
 JVM_MIN_HEAP="2g"
 MIGRATION_MODE=""          # "", "--fresh", "--es-only", "--validate-only"
-HELM_CHART=""
+MIGRATOR_CPU="4"
+MIGRATOR_MEMORY="8Gi"
 SKIP_SWITCH="false"
 SWITCH_ONLY="false"
 SKIP_CLEANUP="false"
@@ -188,7 +189,8 @@ Options:
   --fresh                 Clear migration state, start from scratch
   --es-only               ES reindex only (skip Cassandra scan)
   --validate-only         Validation only (no migration)
-  --helm-chart <path>     Helm chart path (default: ./helm/atlas)
+  --migrator-cpu <n>      CPU request/limit for migrator pod (default: 4)
+  --migrator-memory <sz>  Memory request/limit for migrator pod (default: 8Gi)
   --skip-switch           Run migration but don't switch backend
   --switch-only           Skip migration, only do backend switch + verify
   --skip-cleanup          Skip cleanup phase (first-time migration)
@@ -257,7 +259,8 @@ parse_args() {
             --fresh)          MIGRATION_MODE="--fresh"; shift ;;
             --es-only)        MIGRATION_MODE="--es-only"; shift ;;
             --validate-only)  MIGRATION_MODE="--validate-only"; shift ;;
-            --helm-chart)     HELM_CHART="$2"; shift 2 ;;
+            --migrator-cpu)   MIGRATOR_CPU="$2"; shift 2 ;;
+            --migrator-memory) MIGRATOR_MEMORY="$2"; shift 2 ;;
             --skip-switch)    SKIP_SWITCH="true"; shift ;;
             --switch-only)    SWITCH_ONLY="true"; shift ;;
             --skip-cleanup)   SKIP_CLEANUP="true"; shift ;;
@@ -276,11 +279,6 @@ parse_args() {
 
     if [ -z "$VCLUSTER" ]; then
         die "Missing required argument: --vcluster <name>" "$EXIT_PREFLIGHT"
-    fi
-
-    # Default helm chart path
-    if [ -z "$HELM_CHART" ]; then
-        HELM_CHART="./helm/atlas"
     fi
 }
 
@@ -554,7 +552,8 @@ else:
     log "  ID Strategy:       $ID_STRATEGY"
     log "  Claim Enabled:     $CLAIM_ENABLED"
     log "  Migration Mode:    ${MIGRATION_MODE:-full}"
-    log "  Helm Chart:        $HELM_CHART"
+    log "  Migrator CPU:      $MIGRATOR_CPU"
+    log "  Migrator Memory:   $MIGRATOR_MEMORY"
     log "  Skip Switch:       $SKIP_SWITCH"
     log "  Switch Only:       $SWITCH_ONLY"
     log "  Skip Cleanup:      $SKIP_CLEANUP"
@@ -753,23 +752,75 @@ phase_migration() {
 }
 
 run_migration_pod() {
-    log "Triggering migration via dedicated pod..."
+    log "Triggering migration via dedicated pod (kubectl apply)..."
 
-    # Verify helm is available
-    if ! command -v helm >/dev/null 2>&1; then
-        record_phase "Phase 3: Migration" "FAIL (helm not found)"
-        die "helm CLI not found. Install helm to proceed." "$EXIT_MIGRATION"
+    # ---- Read runtime info from the running atlas-0 pod ----
+    log "Reading runtime info from $POD..."
+    local atlas_image
+    atlas_image=$(kubectl get pod "$POD" -n "$NAMESPACE" -o jsonpath="{.spec.containers[?(@.name=='${CONTAINER}')].image}" 2>/dev/null || echo "")
+    if [ -z "$atlas_image" ]; then
+        record_phase "Phase 3: Migration" "FAIL (cannot read image from $POD)"
+        die "Could not determine container image from pod $POD" "$EXIT_MIGRATION"
+    fi
+    log "  Image: $atlas_image"
+
+    # imagePullSecrets (may be empty)
+    local image_pull_secrets_yaml=""
+    local pull_secret_names
+    pull_secret_names=$(kubectl get pod "$POD" -n "$NAMESPACE" -o jsonpath='{.spec.imagePullSecrets[*].name}' 2>/dev/null || echo "")
+    if [ -n "$pull_secret_names" ]; then
+        image_pull_secrets_yaml="  imagePullSecrets:"
+        for secret_name in $pull_secret_names; do
+            image_pull_secrets_yaml="${image_pull_secrets_yaml}
+  - name: ${secret_name}"
+        done
     fi
 
-    # Verify chart path exists
-    if [ ! -d "$HELM_CHART" ]; then
-        record_phase "Phase 3: Migration" "FAIL (chart not found)"
-        die "Helm chart not found at '$HELM_CHART'. Use --helm-chart <path> to specify the chart directory." "$EXIT_MIGRATION"
+    # Tolerations (may be empty)
+    local tolerations_yaml=""
+    local tolerations_json
+    tolerations_json=$(kubectl get pod "$POD" -n "$NAMESPACE" -o jsonpath='{.spec.tolerations}' 2>/dev/null || echo "")
+    if [ -n "$tolerations_json" ] && [ "$tolerations_json" != "[]" ] && [ "$tolerations_json" != "null" ]; then
+        # Convert JSON array to YAML via python
+        tolerations_yaml=$(py_extract "
+import sys, json, io
+tolerations = json.loads('${tolerations_json}')
+lines = ['  tolerations:']
+for t in tolerations:
+    first = True
+    for k in ('key', 'operator', 'value', 'effect', 'tolerationSeconds'):
+        if k in t and t[k] is not None:
+            prefix = '  - ' if first else '    '
+            lines.append(f'{prefix}{k}: \"{t[k]}\"' if isinstance(t[k], str) else f'{prefix}{k}: {t[k]}')
+            first = False
+    if first:
+        lines.append('  - operator: \"Exists\"')
+print('\n'.join(lines))
+")
     fi
 
-    # Migration with retry loop
+    # Multitenant detection: check if atlas-secret-manager secret exists
+    local is_multitenant="false"
+    if kubectl get secret atlas-secret-manager -n "$NAMESPACE" >/dev/null 2>&1; then
+        is_multitenant="true"
+        log "  Multitenant: yes (atlas-secret-manager found)"
+    else
+        log "  Multitenant: no"
+    fi
+
+    # Build multitenant envFrom block
+    local multitenant_env_yaml=""
+    if [ "$is_multitenant" = "true" ]; then
+        multitenant_env_yaml="    - secretRef:
+        name: atlas-secret-manager
+    - secretRef:
+        name: atlas-secret-parameter-store"
+    fi
+
+    # ---- Migration with retry loop ----
     local attempt=0
     local migration_passed="false"
+    local pod_manifest="/tmp/migrator-pod-${VCLUSTER}-${TIMESTAMP}.yaml"
 
     while [ "$attempt" -lt "$MAX_RETRIES" ] && [ "$migration_passed" = "false" ]; do
         attempt=$((attempt + 1))
@@ -782,46 +833,150 @@ run_migration_pod() {
         fi
 
         # Clean up any existing migration pod
-        local existing_pod
-        existing_pod=$(kubectl get pods -n "$NAMESPACE" -l app=atlas-migrator -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-        if [ -n "$existing_pod" ]; then
-            log "Deleting existing migration pod: $existing_pod"
-            kubectl delete pod "$existing_pod" -n "$NAMESPACE" --ignore-not-found
-            sleep 5
-        fi
+        log "Cleaning up any existing migration pods..."
+        kubectl delete pods -n "$NAMESPACE" -l app=atlas-migrator --ignore-not-found 2>/dev/null || true
+        sleep 3
 
-        # Build helm set flags
-        local helm_sets=(
-            --set "migration.enabled=true"
-            --set "migration.idStrategy=${ID_STRATEGY}"
-            --set "migration.claimEnabled=${CLAIM_ENABLED}"
-            --set "migration.scannerThreads=${SCANNER_THREADS}"
-            --set "migration.writerThreads=${WRITER_THREADS}"
-            --set "migration.jvmHeap=${JVM_HEAP}"
-            --set "migration.jvmMinHeap=${JVM_MIN_HEAP}"
-        )
-        if [ -n "$mode_flag" ]; then
-            helm_sets+=(--set "migration.mode=${mode_flag}")
-        fi
+        # ES_BULK_SIZE env entry (conditional)
+        local es_bulk_env=""
         if [ -n "$ES_BULK_SIZE" ]; then
-            helm_sets+=(--set "migration.esBulkSize=${ES_BULK_SIZE}")
+            es_bulk_env="      - name: ES_BULK_SIZE
+        value: \"${ES_BULK_SIZE}\""
         fi
 
-        # Execute helm upgrade to create migration pod
-        log "Running helm upgrade to create migration pod..."
-        log "  Chart: $HELM_CHART"
+        # Generate Pod YAML manifest
+        cat > "$pod_manifest" <<EOYAML
+apiVersion: v1
+kind: Pod
+metadata:
+  name: atlas-migrator-${attempt}
+  namespace: ${NAMESPACE}
+  labels:
+    app: atlas-migrator
+spec:
+  restartPolicy: Never
+${image_pull_secrets_yaml}
+${tolerations_yaml}
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        preference:
+          matchExpressions:
+          - key: eks.amazonaws.com/capacityType
+            operator: In
+            values:
+            - ON_DEMAND
+      - weight: 100
+        preference:
+          matchExpressions:
+          - key: lifecycle
+            operator: In
+            values:
+            - ondemand
+      - weight: 100
+        preference:
+          matchExpressions:
+          - key: cloud.google.com/gke-provisioning
+            operator: In
+            values:
+            - standard
+  containers:
+  - name: atlas-migrator
+    image: "${atlas_image}"
+    imagePullPolicy: IfNotPresent
+    command:
+    - /bin/bash
+    - -c
+    - |
+      echo "=== Atlas Migrator Pod ==="
+      echo "Mode: ${mode_flag:-full}"
+      echo "ID Strategy: ${ID_STRATEGY}"
+      echo "Claim Enabled: ${CLAIM_ENABLED}"
+      echo ""
+
+      export ID_STRATEGY="${ID_STRATEGY}"
+      export CLAIM_ENABLED="${CLAIM_ENABLED}"
+      export SCANNER_THREADS="${SCANNER_THREADS}"
+      export WRITER_THREADS="${WRITER_THREADS}"
+      export ES_BULK_SIZE="${ES_BULK_SIZE:-1000}"
+      export MIGRATOR_JVM_HEAP="${JVM_HEAP}"
+      export MIGRATOR_JVM_MIN_HEAP="${JVM_MIN_HEAP}"
+      export SOURCE_CONSISTENCY="ONE"
+      export TARGET_CONSISTENCY="LOCAL_QUORUM"
+
+      MIGRATOR_EXIT=0
+      /opt/apache-atlas/bin/atlas_migrate.sh ${mode_flag} || MIGRATOR_EXIT=\$?
+
+      POST_SLEEP=3600
+      echo ""
+      echo "=== Migration finished with exit code: \$MIGRATOR_EXIT ==="
+      echo "Pod will remain Running for \${POST_SLEEP}s for inspection."
+      echo "To exec:    kubectl exec -it \$K8S_POD_NAME -n \$Namespace -- bash"
+      echo "To view logs: kubectl logs \$K8S_POD_NAME -n \$Namespace"
+      echo "To kill early: kubectl delete pod \$K8S_POD_NAME -n \$Namespace"
+      echo ""
+
+      sleep \$POST_SLEEP
+      exit \$MIGRATOR_EXIT
+    env:
+    - name: ATLAS_SERVER_OPTS
+      value: '-XX:MaxRAMPercentage=80.0 -XX:InitialRAMPercentage=50.0'
+    - name: K8S_POD_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.name
+    - name: Namespace
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.namespace
+${es_bulk_env}
+    envFrom:
+    - secretRef:
+        name: atlas-keycloak-config
+${multitenant_env_yaml}
+    resources:
+      requests:
+        cpu: "${MIGRATOR_CPU}"
+        memory: "${MIGRATOR_MEMORY}"
+      limits:
+        cpu: "${MIGRATOR_CPU}"
+        memory: "${MIGRATOR_MEMORY}"
+    volumeMounts:
+    - name: atlas-config
+      mountPath: /opt/apache-atlas/conf/atlas-application.properties
+      subPath: atlas-application.properties
+    - name: atlas-logback-config
+      mountPath: /opt/apache-atlas/conf/atlas-logback.xml
+      subPath: atlas-logback.xml
+    - name: atlas-logs
+      mountPath: /opt/apache-atlas/logs
+  volumes:
+  - name: atlas-config
+    configMap:
+      name: atlas-config
+  - name: atlas-logback-config
+    configMap:
+      name: atlas-logback-config
+  - name: atlas-logs
+    emptyDir: {}
+EOYAML
+
+        # Deploy via kubectl apply
+        log "Applying migrator pod manifest..."
         log "  Mode: ${mode_flag:-resume}"
-        if ! helm upgrade atlas "$HELM_CHART" -n "$NAMESPACE" --reuse-values "${helm_sets[@]}"; then
-            warn "Helm upgrade failed on attempt $attempt"
+        log "  Resources: cpu=${MIGRATOR_CPU}, memory=${MIGRATOR_MEMORY}"
+        if ! kubectl apply -f "$pod_manifest"; then
+            warn "kubectl apply failed on attempt $attempt"
             if [ "$attempt" -lt "$MAX_RETRIES" ]; then
                 log "Retrying in 10s..."
                 sleep 10
                 continue
             fi
-            record_phase "Phase 3: Migration" "FAIL (helm upgrade failed)"
-            die "helm upgrade failed after $MAX_RETRIES attempts" "$EXIT_MIGRATION"
+            record_phase "Phase 3: Migration" "FAIL (kubectl apply failed)"
+            die "kubectl apply failed after $MAX_RETRIES attempts" "$EXIT_MIGRATION"
         fi
-        ok "Helm upgrade applied"
+        ok "Pod manifest applied"
 
         # Wait for migration pod to start
         log "Waiting for migration pod to start..."
@@ -876,17 +1031,15 @@ run_migration_pod() {
         fi
     done
 
+    # Clean up manifest file
+    rm -f "$pod_manifest"
+
     if [ "$migration_passed" = "false" ]; then
         record_phase "Phase 3: Migration" "FAIL (after $MAX_RETRIES attempts)"
         die "Migration failed after $MAX_RETRIES attempts" "$EXIT_MIGRATION"
     fi
 
     record_phase "Phase 3: Migration" "PASS (attempt $attempt/$MAX_RETRIES)"
-
-    # Disable migration after completion
-    log "Disabling migration pod in Helm..."
-    helm upgrade atlas "$HELM_CHART" -n "$NAMESPACE" --reuse-values --set migration.enabled=false || \
-        warn "Could not disable migration.enabled via helm (non-fatal)"
 }
 
 # ============================================================================

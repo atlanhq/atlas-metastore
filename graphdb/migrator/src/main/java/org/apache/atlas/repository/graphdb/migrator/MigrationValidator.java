@@ -19,7 +19,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.FileWriter;
 import java.io.IOException;
-import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -375,8 +374,8 @@ public class MigrationValidator {
     // ========================================================================
 
     private void runTypeDefConsistencyCheck(String ks, ValidationReport report) {
-        long typeDefCount      = countTableExact(ks + ".type_definitions");
-        long typeDefByCatCount = countTableExact(ks + ".type_definitions_by_category");
+        long typeDefCount      = scanTableCount(ks + ".type_definitions");
+        long typeDefByCatCount = scanTableCount(ks + ".type_definitions_by_category");
 
         report.setTypeDefCount(typeDefCount);
         report.setTypeDefByCategoryCount(typeDefByCatCount);
@@ -1278,21 +1277,25 @@ public class MigrationValidator {
     }
 
     /**
-     * Exact table row count using SELECT count(*).
-     * Only suitable for small tables (hundreds of rows) like type_definitions.
-     * For large tables, use {@link #countTable(String)} which uses size_estimates.
+     * Exact table row count via paginated scan.
+     * Iterates all rows counting client-side — avoids coordinator-level count(*)
+     * which can timeout on some Cassandra configurations.
+     * Fast for small tables (type_definitions ~hundreds of rows).
      */
-    private long countTableExact(String fullyQualifiedTable) {
+    private long scanTableCount(String fullyQualifiedTable) {
         try {
+            long count = 0;
             ResultSet rs = targetSession.execute(
-                SimpleStatement.builder("SELECT count(*) FROM " + fullyQualifiedTable)
-                    .setTimeout(Duration.ofSeconds(60)).build());
-            Row row = rs.one();
-            long count = row != null ? row.getLong(0) : -1;
-            LOG.info("Exact row count for {}: {}", fullyQualifiedTable, String.format("%,d", count));
+                SimpleStatement.builder("SELECT * FROM " + fullyQualifiedTable)
+                    .setPageSize(5000)
+                    .build());
+            for (Row row : rs) {
+                count++;
+            }
+            LOG.info("Scanned row count for {}: {}", fullyQualifiedTable, String.format("%,d", count));
             return count;
         } catch (Exception e) {
-            LOG.warn("Failed to count {} via SELECT count(*): {}", fullyQualifiedTable, e.getMessage());
+            LOG.warn("Failed to scan-count {}: {}", fullyQualifiedTable, e.getMessage());
             return -1;
         }
     }
