@@ -64,6 +64,9 @@ public class MigratorConfig {
     // ES index settings
     private final int esFieldLimit;
 
+    // Parallel ES indexing during Phase 1
+    private final boolean esParallel;
+
     // Skip flags
     private final boolean skipEsReindex;
     private final boolean skipClassifications;
@@ -153,6 +156,9 @@ public class MigratorConfig {
         // ES index settings
         this.esFieldLimit = getInt("target.elasticsearch.field.limit", 10000);
 
+        // Parallel ES indexing during Phase 1 (eliminates Phase 2)
+        this.esParallel = getBoolean("migration.es.parallel", false);
+
         // Skip flags
         this.skipEsReindex      = getBoolean("migration.skip.es.reindex", false);
         this.skipClassifications = getBoolean("migration.skip.classifications", false);
@@ -240,6 +246,7 @@ public class MigratorConfig {
     public int     getMaxEdgesPerBatch()     { return maxEdgesPerBatch; }
 
     public int     getEsFieldLimit()      { return esFieldLimit; }
+    public boolean isEsParallel()         { return esParallel; }
 
     public boolean isSkipEsReindex()      { return skipEsReindex; }
     public boolean isSkipClassifications() { return skipClassifications; }
