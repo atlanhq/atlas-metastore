@@ -82,7 +82,9 @@ REPORT_FILE=""
 WAIT_TIMEOUT=300
 MAINTENANCE_MODE="false"
 MAINTENANCE_COOLDOWN=30
-ALIAS_SCRIPT=""  # Deprecated — alias step is now a no-op
+OLD_ES_INDEX="janusgraph_vertex_index"
+NEW_ES_INDEX="atlas_graph_vertex_index"
+VERTEX_ALIAS="atlas_vertex_index"
 MAX_RETRIES=3
 
 # Runtime state
@@ -267,7 +269,7 @@ parse_args() {
             --skip-alias)     SKIP_ALIAS="true"; shift ;;
             --maintenance-mode) MAINTENANCE_MODE="true"; shift ;;
             --maintenance-cooldown) MAINTENANCE_COOLDOWN="$2"; shift 2 ;;
-            --alias-script)   ALIAS_SCRIPT="$2"; shift 2 ;;
+            --alias-script)   warn "--alias-script is deprecated (alias logic is now inline); ignoring"; shift 2 ;;
             --max-retries)    MAX_RETRIES="$2"; shift 2 ;;
             --dry-run)        DRY_RUN="true"; shift ;;
             --report-file)    REPORT_FILE="$2"; shift 2 ;;
@@ -692,9 +694,9 @@ EOF
     # Check if atlas_graph keyspace exists
     log "Checking for existing atlas_graph keyspace..."
     local ks_exists
-    ks_exists=$(cexec cqlsh -e "DESCRIBE KEYSPACES;" 2>/dev/null | grep -c "atlas_graph" || echo 0)
+    ks_exists=$(cexec cqlsh -e "DESCRIBE KEYSPACES;" 2>/dev/null | grep -c "atlas_graph" | tr -d '[:space:]' || echo 0)
 
-    if [ "$ks_exists" -eq 0 ]; then
+    if [ "${ks_exists:-0}" -eq 0 ] 2>/dev/null; then
         log "No existing atlas_graph keyspace found — skip cleanup"
         record_phase "Phase 2: Cleanup" "SKIPPED (no keyspace)"
         return 0
@@ -709,8 +711,8 @@ EOF
     ok "Keyspace dropped"
 
     # Verify keyspace gone
-    ks_exists=$(cexec cqlsh -e "DESCRIBE KEYSPACES;" 2>/dev/null | grep -c "atlas_graph" || echo 0)
-    if [ "$ks_exists" -ne 0 ]; then
+    ks_exists=$(cexec cqlsh -e "DESCRIBE KEYSPACES;" 2>/dev/null | grep -c "atlas_graph" | tr -d '[:space:]' || echo 0)
+    if [ "${ks_exists:-0}" -ne 0 ] 2>/dev/null; then
         record_phase "Phase 2: Cleanup" "FAIL"
         die "atlas_graph keyspace still exists after DROP" "$EXIT_CLEANUP"
     fi
@@ -1047,11 +1049,209 @@ EOYAML
 # ============================================================================
 
 phase_alias() {
-    # ES alias creation is not needed for Cassandra-backed graph.
-    # The new graph layer uses atlas_graph_vertex_index directly.
-    # This phase is retained as a no-op placeholder for future use.
-    log "Phase 4: ES Alias — not required for Cassandra migration, skipping"
-    record_phase "Phase 4: ES Alias" "SKIPPED (not required)"
+    if [ "$SKIP_ALIAS" = "true" ]; then
+        log "Skipping alias phase (--skip-alias)"
+        record_phase "Phase 4: ES Alias" "SKIPPED"
+        return 0
+    fi
+
+    step "Phase 4: ES Alias Management"
+
+    # ---- Step 4.1: Verify target index exists ----
+    log "Checking target index ${NEW_ES_INDEX} exists..."
+    local index_status
+    index_status=$(kexec_quiet curl -s -o /dev/null -w "%{http_code}" "localhost:9200/${NEW_ES_INDEX}" 2>/dev/null || echo "000")
+
+    if [ "$index_status" != "200" ]; then
+        warn "Target index ${NEW_ES_INDEX} does not exist (HTTP ${index_status}). Migration may not have completed."
+        record_phase "Phase 4: ES Alias" "SKIPPED (index not found)"
+        return 0
+    fi
+    ok "Target index ${NEW_ES_INDEX} exists"
+
+    # ---- Step 4.2: Create vertex index alias ----
+    log "Creating vertex index alias (${VERTEX_ALIAS} → ${NEW_ES_INDEX})..."
+    local alias_resp
+    alias_resp=$(kexec_quiet curl -s -X POST "localhost:9200/_aliases" \
+        -H 'Content-Type: application/json' \
+        -d "{
+            \"actions\": [
+                {\"remove\": {\"index\": \"*\", \"alias\": \"${VERTEX_ALIAS}\"}},
+                {\"add\": {\"index\": \"${NEW_ES_INDEX}\", \"alias\": \"${VERTEX_ALIAS}\"}}
+            ]
+        }" 2>/dev/null || echo '{"acknowledged":false}')
+
+    local alias_ack
+    alias_ack=$(echo "$alias_resp" | py_extract "import sys,json; print(json.load(sys.stdin).get('acknowledged', False))")
+
+    if [ "$alias_ack" = "True" ] || [ "$alias_ack" = "true" ]; then
+        ok "Alias ${VERTEX_ALIAS} → ${NEW_ES_INDEX} created"
+    else
+        warn "Vertex alias creation response: ${alias_resp}"
+    fi
+
+    # Verify vertex alias
+    local verify_resp
+    verify_resp=$(kexec_quiet curl -s "localhost:9200/_alias/${VERTEX_ALIAS}" 2>/dev/null || echo "{}")
+    local points_to
+    points_to=$(echo "$verify_resp" | py_extract "import sys,json; d=json.load(sys.stdin); print(','.join(d.keys()))")
+
+    if echo "$points_to" | grep -q "${NEW_ES_INDEX}"; then
+        ok "Verified: ${VERTEX_ALIAS} points to ${NEW_ES_INDEX}"
+    else
+        warn "Alias verification inconclusive (points to: ${points_to})"
+    fi
+
+    # ---- Step 4.3: Migrate persona aliases from old index to new index ----
+    log "Migrating persona aliases from ${OLD_ES_INDEX} to ${NEW_ES_INDEX}..."
+
+    # Check old index exists
+    local old_index_status
+    old_index_status=$(kexec_quiet curl -s -o /dev/null -w "%{http_code}" "localhost:9200/${OLD_ES_INDEX}" 2>/dev/null || echo "000")
+
+    if [ "$old_index_status" != "200" ]; then
+        log "Old index ${OLD_ES_INDEX} does not exist — skipping persona alias migration"
+        record_phase "Phase 4: ES Alias" "PASS (vertex alias only)"
+        return 0
+    fi
+
+    # Get all aliases from old index
+    local old_aliases_json
+    old_aliases_json=$(kexec_quiet curl -s "localhost:9200/${OLD_ES_INDEX}/_alias/*" 2>/dev/null || echo "{}")
+
+    # Parse persona aliases (exclude system aliases)
+    local alias_data
+    alias_data=$(echo "$old_aliases_json" | py_extract "
+import sys, json
+
+data = json.load(sys.stdin)
+aliases = data.get('${OLD_ES_INDEX}', {}).get('aliases', {})
+
+# System aliases to skip
+skip = {'${VERTEX_ALIAS}', '${OLD_ES_INDEX}', '${NEW_ES_INDEX}'}
+
+persona_aliases = {}
+for name, config in aliases.items():
+    if name in skip:
+        continue
+    persona_aliases[name] = config
+
+print(json.dumps(persona_aliases))
+")
+
+    if [ -z "$alias_data" ] || [ "$alias_data" = "{}" ] || [ "$alias_data" = "null" ]; then
+        log "No persona aliases found on ${OLD_ES_INDEX}"
+        record_phase "Phase 4: ES Alias" "PASS (vertex alias only, no persona aliases)"
+        return 0
+    fi
+
+    local persona_count
+    persona_count=$(echo "$alias_data" | py_extract "import sys,json; print(len(json.load(sys.stdin)))")
+    log "Found ${persona_count} persona aliases to migrate"
+
+    # Build batch actions: for each alias, remove from old + add to new with same filter
+    local actions_json
+    actions_json=$(echo "$alias_data" | py_extract "
+import sys, json
+
+aliases = json.load(sys.stdin)
+all_actions = []
+
+for name, config in aliases.items():
+    # Remove from old index
+    all_actions.append({'remove': {'index': '${OLD_ES_INDEX}', 'alias': name}})
+    # Add to new index preserving filter
+    add_action = {'index': '${NEW_ES_INDEX}', 'alias': name}
+    if 'filter' in config:
+        add_action['filter'] = config['filter']
+    all_actions.append({'add': add_action})
+
+# Split into batches of 50 aliases (100 actions)
+batch_size = 100
+batches = []
+for i in range(0, len(all_actions), batch_size):
+    batch = all_actions[i:i + batch_size]
+    batches.append(json.dumps({'actions': batch}))
+
+for b in batches:
+    print(b)
+")
+
+    local migrated=0
+    local failed=0
+
+    while IFS= read -r batch; do
+        [ -z "$batch" ] && continue
+
+        local batch_resp
+        batch_resp=$(kexec_quiet curl -s -X POST "localhost:9200/_aliases" \
+            -H 'Content-Type: application/json' \
+            -d "$batch" 2>/dev/null || echo '{"acknowledged":false}')
+
+        local batch_ack
+        batch_ack=$(echo "$batch_resp" | py_extract "import sys,json; print(json.load(sys.stdin).get('acknowledged', False))")
+
+        if [ "$batch_ack" = "True" ] || [ "$batch_ack" = "true" ]; then
+            local batch_count
+            batch_count=$(echo "$batch" | py_extract "import sys,json; print(len(json.load(sys.stdin).get('actions',[])) // 2)")
+            migrated=$((migrated + batch_count))
+        else
+            # Fall back to individual alias migration
+            warn "Batch migration failed, trying individually..."
+            local individual_lines
+            individual_lines=$(echo "$batch" | py_extract "
+import sys, json
+data = json.load(sys.stdin)
+actions = data.get('actions', [])
+for i in range(0, len(actions), 2):
+    pair = actions[i:i+2]
+    if len(pair) == 2:
+        alias_name = pair[1].get('add', {}).get('alias', 'unknown')
+        print(alias_name + '|' + json.dumps({'actions': pair}))
+")
+            while IFS= read -r line; do
+                [ -z "$line" ] && continue
+                local a_name a_payload
+                a_name=$(echo "$line" | cut -d'|' -f1)
+                a_payload=$(echo "$line" | cut -d'|' -f2-)
+
+                local a_resp
+                a_resp=$(kexec_quiet curl -s -X POST "localhost:9200/_aliases" \
+                    -H 'Content-Type: application/json' \
+                    -d "$a_payload" 2>/dev/null || echo '{"acknowledged":false}')
+
+                local a_ack
+                a_ack=$(echo "$a_resp" | py_extract "import sys,json; print(json.load(sys.stdin).get('acknowledged', False))")
+
+                if [ "$a_ack" = "True" ] || [ "$a_ack" = "true" ]; then
+                    migrated=$((migrated + 1))
+                else
+                    err "  Failed to migrate alias: ${a_name}"
+                    failed=$((failed + 1))
+                fi
+            done <<< "$individual_lines"
+        fi
+    done <<< "$actions_json"
+
+    # Verify alias count on new index
+    local new_alias_count
+    new_alias_count=$(kexec_quiet curl -s "localhost:9200/${NEW_ES_INDEX}/_alias/*" 2>/dev/null | py_extract "
+import sys, json
+data = json.load(sys.stdin)
+aliases = data.get('${NEW_ES_INDEX}', {}).get('aliases', {})
+skip = {'${VERTEX_ALIAS}'}
+print(sum(1 for name in aliases if name not in skip))
+" || echo "0")
+
+    log "Persona alias migration: migrated=${migrated}, failed=${failed}, on new index=${new_alias_count}"
+
+    if [ "$failed" -gt 0 ]; then
+        warn "${failed} persona aliases failed to migrate"
+        record_phase "Phase 4: ES Alias" "WARN (${migrated} migrated, ${failed} failed)"
+    else
+        ok "All ${migrated} persona aliases migrated successfully"
+        record_phase "Phase 4: ES Alias" "PASS (vertex alias + ${migrated} persona aliases)"
+    fi
 }
 
 # ============================================================================

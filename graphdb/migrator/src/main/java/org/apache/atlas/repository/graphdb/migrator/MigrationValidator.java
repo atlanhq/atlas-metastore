@@ -94,6 +94,13 @@ public class MigrationValidator {
         // --- Check 1: Vertex count (uses exact count from GroupBy scan above) ---
         runVertexCountCheck(ks, report);
 
+        // --- Check 11 (run early): Super vertex detection ---
+        // Runs before edge consistency checks so actual row counts from full scan
+        // can be used instead of unreliable system.size_estimates.
+        if (!config.isSkipSuperVertexDetection()) {
+            runSuperVertexDetection(ks, report);
+        }
+
         // --- Check 2 & 3: Edge consistency ---
         runEdgeConsistencyChecks(ks, report);
 
@@ -119,11 +126,6 @@ public class MigrationValidator {
 
         // --- Check 10: Orphan edge detection ---
         runOrphanEdgeCheck(ks, report);
-
-        // --- Check 11: Super vertex detection ---
-        if (!config.isSkipSuperVertexDetection()) {
-            runSuperVertexDetection(ks, report);
-        }
 
         // --- Check 12: Edge index table count ---
         runEdgeIndexCheck(ks, report);
@@ -267,27 +269,50 @@ public class MigrationValidator {
     // ========================================================================
 
     private void runEdgeConsistencyChecks(String ks, ValidationReport report) {
-        long edgeOutCount  = countTable(ks + ".edges_out");
-        long edgeInCount   = countTable(ks + ".edges_in");
-        long edgeByIdCount = countTable(ks + ".edges_by_id");
+        // Use actual row counts from super vertex detection full scan when available.
+        // Falls back to system.size_estimates which are unreliable after bulk writes.
+        SuperVertexReport svReport = report.getSuperVertexReport();
+        boolean usingActualCounts = svReport != null;
+
+        long edgeOutCount, edgeInCount;
+        if (usingActualCounts) {
+            edgeOutCount = svReport.getEdgesOutRowCount();
+            edgeInCount  = svReport.getEdgesInRowCount();
+            LOG.info("Edge consistency: using actual counts from super vertex full scan " +
+                     "(edges_out={}, edges_in={})", String.format("%,d", edgeOutCount),
+                     String.format("%,d", edgeInCount));
+        } else {
+            edgeOutCount = countTable(ks + ".edges_out");
+            edgeInCount  = countTable(ks + ".edges_in");
+            LOG.info("Edge consistency: using estimated counts from size_estimates " +
+                     "(edges_out={}, edges_in={})", String.format("%,d", edgeOutCount),
+                     String.format("%,d", edgeInCount));
+        }
+        long edgeByIdCount = countTable(ks + ".edges_by_id"); // always estimated (not scanned by SuperVertexDetector)
 
         report.setEdgeOutCount(edgeOutCount);
         report.setEdgeInCount(edgeInCount);
         report.setEdgeByIdCount(edgeByIdCount);
 
-        // Check 2: edges_out ~= edges_in (5% tolerance — counts are estimates from size_estimates)
-        boolean outInMatch = isWithinTolerance(edgeOutCount, edgeInCount, 0.05);
+        // Check 2: edges_out vs edges_in
+        // With actual counts (full scan): exact match required, FAIL on mismatch (real data issue)
+        // With estimates (size_estimates): 5% tolerance, WARN on mismatch (unreliable after bulk writes)
+        double outInTolerance = usingActualCounts ? 0.0 : 0.05;
+        boolean outInMatch = isWithinTolerance(edgeOutCount, edgeInCount, outInTolerance);
+        String countSource = usingActualCounts ? "actual full scan" : "estimated, 5% tolerance";
         ValidationCheckResult outInCheck = new ValidationCheckResult(
             "edge_out_in_consistency",
-            "edges_out count matches edges_in count (estimated, 5% tolerance)",
-            outInMatch ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.FAIL,
-            String.format("edges_out=%d, edges_in=%d, diff=%d",
-                          edgeOutCount, edgeInCount, Math.abs(edgeOutCount - edgeInCount)));
+            "edges_out count matches edges_in count (" + countSource + ")",
+            outInMatch ? ValidationCheckResult.Severity.PASS :
+                (usingActualCounts ? ValidationCheckResult.Severity.FAIL : ValidationCheckResult.Severity.WARN),
+            String.format("edges_out=%d, edges_in=%d, diff=%d (source: %s)",
+                          edgeOutCount, edgeInCount, Math.abs(edgeOutCount - edgeInCount), countSource));
         outInCheck.addDetail("edges_out_count", edgeOutCount);
         outInCheck.addDetail("edges_in_count", edgeInCount);
+        outInCheck.addDetail("count_source", usingActualCounts ? "full_scan" : "size_estimates");
         report.addCheck(outInCheck);
 
-        // Check 3: edges_by_id ~= edges_out (5% tolerance)
+        // Check 3: edges_by_id ~= edges_out (5% tolerance, always estimated)
         boolean byIdMatch = isWithinTolerance(edgeByIdCount, edgeOutCount, 0.05);
         ValidationCheckResult byIdCheck = new ValidationCheckResult(
             "edge_by_id_consistency",
@@ -1240,7 +1265,11 @@ public class MigrationValidator {
     /**
      * Estimate table row count using system.size_estimates.
      * This is instant even for tables with millions of rows, unlike SELECT count(*).
-     * Accuracy is ~95% — sufficient for migration validation.
+     * <p>
+     * WARNING: Accuracy is only ~95% in steady state — immediately after bulk writes
+     * (e.g. migration), estimates can be wildly inaccurate (8-30% of actual) because
+     * data in memtables or un-compacted SSTables is underrepresented.
+     * Prefer actual counts from SuperVertexDetector full scans when available.
      */
     private long countTable(String fullyQualifiedTable) {
         // Parse "keyspace.table" format
