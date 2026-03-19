@@ -128,8 +128,6 @@ public class ConnectionPreProcessor implements PreProcessor {
             }
             connection.setAttribute(ATTR_ADMIN_USERS, adminUsers);
 
-            RoleRepresentation role = keycloakStore.createRoleForConnection(roleName, true, adminUsers, adminGroups, adminRoles);
-
             //create connection bootstrap policies
             AtlasEntitiesWithExtInfo policies = transformer.transform(connection);
 
@@ -193,11 +191,6 @@ public class ConnectionPreProcessor implements PreProcessor {
                 throw new AtlasBaseException(AtlasErrorCode.ADMIN_LIST_SHOULD_NOT_BE_EMPTY, existingConnEntity.getTypeName());
             }
 
-            keycloakStore.updateRoleUsers(roleName, currentAdminUsers, finalStateUsers, representation);
-            keycloakStore.updateRoleGroups(roleName, currentAdminGroups, finalStateGroups, representation);
-            keycloakStore.updateRoleRoles(roleName, currentAdminRoles, finalStateRoles, representation);
-
-
             RequestContext.get().endMetricRecord(metricRecorder);
         }
     }
@@ -254,8 +247,6 @@ public class ConnectionPreProcessor implements PreProcessor {
             } else {
                 LOG.warn("No Connection policy found for connection {}", connection.getGuid());
             }
-
-            keycloakStore.removeRoleByName(roleName);
         }
     }
 

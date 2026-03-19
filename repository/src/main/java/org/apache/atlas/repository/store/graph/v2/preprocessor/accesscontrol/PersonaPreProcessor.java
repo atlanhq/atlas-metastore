@@ -64,7 +64,6 @@ import static org.apache.atlas.repository.util.AccessControlUtils.getESAliasInde
 import static org.apache.atlas.repository.util.AccessControlUtils.getEntityName;
 import static org.apache.atlas.repository.util.AccessControlUtils.getIsAccessControlEnabled;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPersonaGroups;
-import static org.apache.atlas.repository.util.AccessControlUtils.getPersonaRoleId;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPersonaRoleName;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPersonaUsers;
 import static org.apache.atlas.repository.util.AccessControlUtils.getTenantId;
@@ -133,9 +132,6 @@ public class PersonaPreProcessor extends AccessControlPreProcessor {
             }
         }
 
-        //remove role
-        keycloakStore.removeRole(getPersonaRoleId(persona));
-
         //delete ES alias
         aliasStore.deleteAlias(getESAliasIndexName(persona));
     }
@@ -149,11 +145,6 @@ public class PersonaPreProcessor extends AccessControlPreProcessor {
 
         entity.setAttribute(QUALIFIED_NAME, String.format("%s/%s", tenantId, getUUID()));
         entity.setAttribute(ATTR_ACCESS_CONTROL_ENABLED, entity.getAttributes().getOrDefault(ATTR_ACCESS_CONTROL_ENABLED, true));
-
-        //create keycloak role
-        String roleId = createKeycloakRole((AtlasEntity) entity);
-
-        entity.setAttribute(ATTR_PERSONA_ROLE_ID, roleId);
 
         //create ES alias
         aliasStore.createAlias((AtlasEntity) entity);
@@ -176,14 +167,11 @@ public class PersonaPreProcessor extends AccessControlPreProcessor {
 
         String vertexQName = vertex.getProperty(QUALIFIED_NAME, String.class);
         entity.setAttribute(QUALIFIED_NAME, vertexQName);
-        entity.setAttribute(ATTR_PERSONA_ROLE_ID, getPersonaRoleId(existingPersonaEntity));
 
         boolean isEnabled = getIsAccessControlEnabled(persona);
         if (getIsAccessControlEnabled(existingPersonaEntity) != isEnabled) {
             updatePoliciesIsEnabledAttr(context, existingPersonaEntity, isEnabled);
         }
-
-        updateKeycloakRole(persona, existingPersonaEntity);
 
         RequestContext.get().endMetricRecord(metricRecorder);
     }
@@ -209,61 +197,6 @@ public class PersonaPreProcessor extends AccessControlPreProcessor {
                     }
                 }
             }
-        }
-    }
-
-    protected String createKeycloakRole(AtlasEntity entity) throws AtlasBaseException {
-        String roleName = getPersonaRoleName(entity);
-        List<String> users = getPersonaUsers(entity);
-        List<String> groups = getPersonaGroups(entity);
-
-        Map<String, List<String>> attributes = new HashMap<>();
-        attributes.put("name", Collections.singletonList(roleName));
-        attributes.put("type", Collections.singletonList("persona"));
-        attributes.put("level", Collections.singletonList("workspace"));
-        attributes.put("createdAt", Collections.singletonList(String.valueOf(System.currentTimeMillis())));
-        attributes.put("createdBy", Collections.singletonList(RequestContext.get().getUser()));
-        attributes.put("enabled", Collections.singletonList(String.valueOf(true)));
-        attributes.put("displayName", Collections.singletonList(getEntityName(entity)));
-
-        RoleRepresentation role = keycloakStore.createRole(roleName, users, groups, null);
-
-        return role.getId();
-    }
-
-    protected void updateKeycloakRole(AtlasEntity newPersona, AtlasEntity existingPersona) throws AtlasBaseException {
-        String roleId = getPersonaRoleId(existingPersona);
-        String roleName = getPersonaRoleName(existingPersona);
-
-        RoleRepresentation roleRepresentation = AtlasKeycloakClient.getKeycloakClient().getRoleById(roleId);
-
-        boolean isUpdated = false;
-        if (newPersona.hasAttribute(ATTR_PERSONA_USERS)) {
-            List<String> newUsers       = getPersonaUsers(newPersona);
-            List<String> existingUsers  = getPersonaUsers(existingPersona);
-
-            keycloakStore.updateRoleUsers(roleName, existingUsers, newUsers, roleRepresentation);
-            isUpdated = true;
-        }
-
-        if (newPersona.hasAttribute(ATTR_PERSONA_GROUPS)) {
-            List<String> newGroups = getPersonaGroups(newPersona);
-            List<String> existingGroups = getPersonaGroups(existingPersona);
-
-            keycloakStore.updateRoleGroups(roleName, existingGroups, newGroups, roleRepresentation);
-            isUpdated = true;
-        }
-
-        if (isUpdated) {
-            Map<String, List<String>> attributes = new HashMap<>();
-            attributes.put("updatedAt", Collections.singletonList(String.valueOf(System.currentTimeMillis())));
-            attributes.put("updatedBy", Collections.singletonList(RequestContext.get().getUser()));
-            attributes.put("enabled", Collections.singletonList(String.valueOf(true)));
-            attributes.put("displayName", Collections.singletonList(getEntityName(newPersona)));
-
-            roleRepresentation.setAttributes(attributes);
-            AtlasKeycloakClient.getKeycloakClient().updateRole(roleId, roleRepresentation);
-            LOG.info("Updated keycloak role with name {}", roleName);
         }
     }
 }

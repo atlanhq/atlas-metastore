@@ -63,7 +63,6 @@ import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_ACCESS_CO
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_PERSONA_ROLE_ID;
 import static org.apache.atlas.repository.util.AccessControlUtils.REL_ATTR_POLICIES;
 import static org.apache.atlas.repository.util.AccessControlUtils.getESAliasIndexName;
-import static org.apache.atlas.repository.util.AccessControlUtils.getPersonaRoleId;
 import static org.apache.atlas.repository.util.AccessControlUtils.getUUID;
 import static org.apache.atlas.repository.util.AccessControlUtils.validateNoPoliciesAttached;
 import static org.apache.atlas.repository.util.AtlasEntityUtils.mapOf;
@@ -129,9 +128,6 @@ public class StakeholderPreProcessor extends PersonaPreProcessor {
             }
         }
 
-        //remove role
-        keycloakStore.removeRole(getPersonaRoleId(stakeholder));
-
         //delete ES alias
         aliasStore.deleteAlias(getESAliasIndexName(stakeholder));
     }
@@ -173,11 +169,6 @@ public class StakeholderPreProcessor extends PersonaPreProcessor {
 
         entity.setAttribute(ATTR_ACCESS_CONTROL_ENABLED, entity.getAttributes().getOrDefault(ATTR_ACCESS_CONTROL_ENABLED, true));
 
-        //create keycloak role
-        String roleId = createKeycloakRole(entity);
-
-        entity.setAttribute(ATTR_PERSONA_ROLE_ID, roleId);
-
         //create ES alias
         aliasStore.createAlias(entity);
 
@@ -218,8 +209,6 @@ public class StakeholderPreProcessor extends PersonaPreProcessor {
 
         AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(typeRegistry, AtlasPrivilege.ENTITY_UPDATE, new AtlasEntityHeader(stakeholder)),
                 "update Stakeholder: ", stakeholder.getAttribute(NAME));
-
-        updateKeycloakRole(stakeholder, existingStakeholderEntity);
 
         RequestContext.get().endMetricRecord(metricRecorder);
     }
