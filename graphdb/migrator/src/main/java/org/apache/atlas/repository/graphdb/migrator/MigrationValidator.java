@@ -1144,16 +1144,16 @@ public class MigrationValidator {
             issues.add("Cassandra size check: " + e.getMessage());
         }
 
-        boolean passed = esPassed && issues.isEmpty();
-        ValidationCheckResult.Severity severity = passed ? ValidationCheckResult.Severity.PASS :
-            esPassed ? ValidationCheckResult.Severity.WARN : ValidationCheckResult.Severity.FAIL;
+        // Disk checks are advisory only — never block migration
+        ValidationCheckResult.Severity severity = issues.isEmpty()
+            ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.WARN;
         String message = issues.isEmpty()
             ? "ES nodes have >= 2x free disk space relative to used"
-            : String.join("; ", issues);
+            : "[WARNING] " + String.join("; ", issues);
 
         ValidationCheckResult result = new ValidationCheckResult(
             "disk_space_adequacy",
-            "ES and Cassandra have adequate free disk space for migration (2x headroom)",
+            "ES and Cassandra disk space advisory (warning only, does not block migration)",
             severity, message);
         result.addDetail("es_passed", esPassed);
         result.addDetail("cassandra_passed", cassandraPassed);

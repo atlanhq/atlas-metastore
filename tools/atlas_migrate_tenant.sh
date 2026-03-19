@@ -429,8 +429,8 @@ phase_preflight() {
         log "  Sizing recommendation: 4C/8Gi, scanner=8, writer=4, JVM heap=4g (default)"
     fi
 
-    # 0.8 Disk space check — migration copies data, so we need 2x free space
-    log "Checking disk space (migration requires ~2x current usage)..."
+    # 0.8 Disk space check — advisory only, does not block migration
+    log "Checking disk space (advisory — migration roughly doubles storage usage)..."
 
     # Elasticsearch disk usage
     local es_disk_info
