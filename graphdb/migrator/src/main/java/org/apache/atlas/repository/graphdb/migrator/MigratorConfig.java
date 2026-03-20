@@ -61,6 +61,12 @@ public class MigratorConfig {
     private final boolean edgesOutOnly;
     private final int maxEdgesPerBatch;
 
+    // ES index settings
+    private final int esFieldLimit;
+
+    // Parallel ES indexing during Phase 1
+    private final boolean esParallel;
+
     // Skip flags
     private final boolean skipEsReindex;
     private final boolean skipClassifications;
@@ -70,9 +76,16 @@ public class MigratorConfig {
     private final boolean migrateConfigStore;
     private final boolean migrateTags;
 
+    // Retry
+    private final int maxRetries;
+
     // ID strategy / claim
     private final IdStrategy idStrategy;
     private final boolean claimEnabled;
+
+    // Cassandra consistency levels
+    private final String sourceConsistencyLevel;
+    private final String targetConsistencyLevel;
 
     // Validation settings
     private final int     validationVertexSampleSize;
@@ -140,6 +153,12 @@ public class MigratorConfig {
         this.edgesOutOnly         = getBoolean("migration.edges.out.only", true);
         this.maxEdgesPerBatch     = getInt("migration.writer.max.edges.per.batch", 15);
 
+        // ES index settings
+        this.esFieldLimit = getInt("target.elasticsearch.field.limit", 10000);
+
+        // Parallel ES indexing during Phase 1 (eliminates Phase 2)
+        this.esParallel = getBoolean("migration.es.parallel", false);
+
         // Skip flags
         this.skipEsReindex      = getBoolean("migration.skip.es.reindex", false);
         this.skipClassifications = getBoolean("migration.skip.classifications", false);
@@ -149,9 +168,16 @@ public class MigratorConfig {
         this.migrateConfigStore = getBoolean("migration.migrate.config.store", false);
         this.migrateTags        = getBoolean("migration.migrate.tags", false);
 
+        // Retry
+        this.maxRetries = getInt("migration.max.retries", 3);
+
         // ID strategy / claim
         this.idStrategy = IdStrategy.from(get("migration.id.strategy", "legacy"));
         this.claimEnabled = getBoolean("migration.claim.enabled", false);
+
+        // Cassandra consistency levels
+        this.sourceConsistencyLevel = get("source.cassandra.consistency", "ONE");
+        this.targetConsistencyLevel = get("target.cassandra.consistency", "LOCAL_QUORUM");
 
         // Validation
         this.validationVertexSampleSize  = getInt("validation.vertex.sample.size", 1000);
@@ -219,6 +245,9 @@ public class MigratorConfig {
     public boolean isEdgesOutOnly()          { return edgesOutOnly; }
     public int     getMaxEdgesPerBatch()     { return maxEdgesPerBatch; }
 
+    public int     getEsFieldLimit()      { return esFieldLimit; }
+    public boolean isEsParallel()         { return esParallel; }
+
     public boolean isSkipEsReindex()      { return skipEsReindex; }
     public boolean isSkipClassifications() { return skipClassifications; }
     public boolean isSkipTasks()           { return skipTasks; }
@@ -231,8 +260,13 @@ public class MigratorConfig {
             && sourceCassandraPort == targetCassandraPort;
     }
 
+    public int     getMaxRetries()        { return maxRetries; }
+
     public IdStrategy getIdStrategy()      { return idStrategy; }
     public boolean isClaimEnabled()        { return claimEnabled; }
+
+    public String getSourceConsistencyLevel() { return sourceConsistencyLevel; }
+    public String getTargetConsistencyLevel() { return targetConsistencyLevel; }
 
     public int     getValidationVertexSampleSize()  { return validationVertexSampleSize; }
     public int     getValidationEdgeSampleSize()    { return validationEdgeSampleSize; }
