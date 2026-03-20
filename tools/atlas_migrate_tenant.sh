@@ -839,11 +839,16 @@ print('\n'.join(lines))
         kubectl delete pods -n "$NAMESPACE" -l app=atlas-migrator --ignore-not-found 2>/dev/null || true
         sleep 3
 
-        # ES_BULK_SIZE env entry (conditional)
-        local es_bulk_env=""
+        # ES_BULK_SIZE and QUEUE_CAPACITY env entries (conditional)
+        local extra_env=""
         if [ -n "$ES_BULK_SIZE" ]; then
-            es_bulk_env="      - name: ES_BULK_SIZE
-        value: \"${ES_BULK_SIZE}\""
+            extra_env="    - name: ES_BULK_SIZE
+      value: \"${ES_BULK_SIZE}\""
+        fi
+        if [ "${QUEUE_CAPACITY:-10000}" != "10000" ]; then
+            extra_env="${extra_env}
+    - name: QUEUE_CAPACITY
+      value: \"${QUEUE_CAPACITY}\""
         fi
 
         # Generate Pod YAML manifest
@@ -933,7 +938,7 @@ ${tolerations_yaml}
       valueFrom:
         fieldRef:
           fieldPath: metadata.namespace
-${es_bulk_env}
+${extra_env}
     envFrom:
     - secretRef:
         name: atlas-keycloak-config
