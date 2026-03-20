@@ -37,6 +37,7 @@ on:
       - ms-664-fix-audit-search
       - hotfix-reindex-refresh
       - migrator-validations-customization
+      - migration_edge_chunking
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
