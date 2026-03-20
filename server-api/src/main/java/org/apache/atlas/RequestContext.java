@@ -687,6 +687,12 @@ public class RequestContext {
         return entityCache.get(guid);
     }
 
+    public void removeFromEntityCache(String guid) {
+        if (guid != null) {
+            entityCache.remove(guid);
+        }
+    }
+
     public long getRequestTime() {
         return requestTime;
     }
