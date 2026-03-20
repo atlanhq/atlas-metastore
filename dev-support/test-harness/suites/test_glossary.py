@@ -146,6 +146,20 @@ class GlossarySuite:
 
     @test("list_glossaries_find_created", tags=["glossary", "validation"], order=3, depends_on=["create_glossary"])
     def test_list_glossaries_find_created(self, client, ctx):
+        import time
+
+        # First verify glossary is readable by GUID
+        guid = ctx.get_entity_guid("glossary")
+        assert guid, "glossary GUID not in context"
+        resp_get = client.get(f"/glossary/{guid}")
+        print(f"  [glossary] GET /glossary/{guid} → {resp_get.status_code}")
+        if resp_get.status_code == 200:
+            print(f"  [glossary] Name: {resp_get.json().get('name')}")
+
+        # Wait for glossary to appear in list endpoint
+        print(f"  [glossary] Sleeping for 30 seconds...")
+        time.sleep(30)
+
         # GET-all -> find our glossary by name -> GET by that GUID -> verify details
         resp = client.get("/glossary", params={"limit": 100, "offset": 0, "sort": "ASC"})
         assert_status(resp, 200)

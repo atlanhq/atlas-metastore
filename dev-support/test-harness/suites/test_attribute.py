@@ -34,6 +34,8 @@ class AttributeSuite:
     @test("update_attribute_read_after_write", tags=["attribute"], order=3)
     def test_update_attribute_read_after_write(self, client, ctx):
         """Update description via /attribute/update, GET entity and verify."""
+        import time
+        time.sleep(5)
         guid = ctx.get_entity_guid("ds1")
         assert guid, "ds1 GUID not found"
         new_desc = "Updated via attribute API - test harness"
@@ -69,6 +71,8 @@ class AttributeSuite:
     @test("clear_attribute_value", tags=["attribute"], order=5)
     def test_clear_attribute_value(self, client, ctx):
         """Set description to empty string, verify cleared."""
+        import time
+        time.sleep(5)
         guid = ctx.get_entity_guid("ds1")
         assert guid, "ds1 GUID not found"
         resp = client.post("/attribute/update", json_data={
