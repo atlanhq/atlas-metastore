@@ -62,7 +62,7 @@ import static org.apache.atlas.repository.store.graph.v2.preprocessor.datamesh.S
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_ACCESS_CONTROL_ENABLED;
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_PERSONA_ROLE_ID;
 import static org.apache.atlas.repository.util.AccessControlUtils.REL_ATTR_POLICIES;
-import static org.apache.atlas.repository.util.AccessControlUtils.getESAliasName;
+import static org.apache.atlas.repository.util.AccessControlUtils.getESAliasIndexName;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPersonaRoleId;
 import static org.apache.atlas.repository.util.AccessControlUtils.getUUID;
 import static org.apache.atlas.repository.util.AccessControlUtils.validateNoPoliciesAttached;
@@ -133,7 +133,7 @@ public class StakeholderPreProcessor extends PersonaPreProcessor {
         keycloakStore.removeRole(getPersonaRoleId(stakeholder));
 
         //delete ES alias
-        aliasStore.deleteAlias(getESAliasName(stakeholder));
+        aliasStore.deleteAlias(getESAliasIndexName(stakeholder));
     }
 
     private void processCreateStakeholder(AtlasEntity entity) throws AtlasBaseException {

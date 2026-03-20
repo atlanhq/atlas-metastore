@@ -60,7 +60,7 @@ import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_PERSONA_R
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_PERSONA_USERS;
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_IS_ENABLED;
 import static org.apache.atlas.repository.util.AccessControlUtils.REL_ATTR_POLICIES;
-import static org.apache.atlas.repository.util.AccessControlUtils.getESAliasName;
+import static org.apache.atlas.repository.util.AccessControlUtils.getESAliasIndexName;
 import static org.apache.atlas.repository.util.AccessControlUtils.getEntityName;
 import static org.apache.atlas.repository.util.AccessControlUtils.getIsAccessControlEnabled;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPersonaGroups;
@@ -137,7 +137,7 @@ public class PersonaPreProcessor extends AccessControlPreProcessor {
         keycloakStore.removeRole(getPersonaRoleId(persona));
 
         //delete ES alias
-        aliasStore.deleteAlias(getESAliasName(persona));
+        aliasStore.deleteAlias(getESAliasIndexName(persona));
     }
 
     private void processCreatePersona(AtlasStruct entity) throws AtlasBaseException {
