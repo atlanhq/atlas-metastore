@@ -163,7 +163,7 @@ public class MigratorConfig {
         this.esFieldLimit = getInt("target.elasticsearch.field.limit", 10000);
 
         // Parallel ES indexing during Phase 1 (eliminates Phase 2)
-        this.esParallel = getBoolean("migration.es.parallel", false);
+        this.esParallel = getBoolean("migration.es.parallel", true);
 
         // ES edge index
         this.targetEsEdgeIndex = get("target.elasticsearch.edge.index", "atlas_graph_edge_index");
