@@ -14,8 +14,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -36,11 +39,20 @@ public class ParallelEsIndexer implements AutoCloseable {
     private static final Logger LOG = LoggerFactory.getLogger(ParallelEsIndexer.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    /**
+     * Minimum positive normal float required by ES rank_feature fields.
+     * Values <= 0 cause indexing failures; we clamp them to this floor.
+     */
+    static final float RANK_FEATURE_MIN = Float.MIN_NORMAL; // 1.17549435E-38
+
     private final MigratorConfig config;
     private final MigrationMetrics metrics;
     private final RestClient esClient;
     private final String esIndex;
     private final int bulkSize;
+
+    /** Field names that have a rank_feature sub-field in the ES mapping. Discovered once at startup. */
+    private Set<String> rankFeatureFields = Collections.emptySet();
 
     private final BlockingQueue<EsDoc> queue;
     private final Thread indexerThread;
@@ -49,6 +61,7 @@ public class ParallelEsIndexer implements AutoCloseable {
     private final AtomicLong totalIndexed = new AtomicLong(0);
     private final AtomicLong totalSkipped = new AtomicLong(0);
     private final AtomicLong totalErrors  = new AtomicLong(0);
+    private final AtomicLong totalRankFeatureNormalized = new AtomicLong(0);
 
     /** Lightweight holder for an ES document to be indexed. */
     static class EsDoc {
@@ -78,18 +91,24 @@ public class ParallelEsIndexer implements AutoCloseable {
     }
 
     /**
-     * Ensure the target ES index exists (create with source mappings if needed).
+     * Ensure the target ES index exists (create with source mappings if needed),
+     * then discover rank_feature fields from the mapping.
      * Must be called before {@link #start()}.
-     * Delegates to ElasticsearchReindexer's static-friendly logic.
      */
     public void ensureIndex(ElasticsearchReindexer reindexer) {
-        // Reuse the existing ensureIndexExists logic from ElasticsearchReindexer
         reindexer.ensureIndexExists(esIndex);
+        this.rankFeatureFields = discoverRankFeatureFields(esIndex);
     }
 
     public void start() {
-        LOG.info("Starting parallel ES indexer (queue capacity: {}, bulk size: {})", config.getQueueCapacity(), bulkSize);
+        LOG.info("Starting parallel ES indexer (queue capacity: {}, bulk size: {}, rank_feature fields: {})",
+                 config.getQueueCapacity(), bulkSize, rankFeatureFields);
         indexerThread.start();
+    }
+
+    /** Expose discovered rank_feature fields (for ElasticsearchReindexer Phase 2 path). */
+    Set<String> getRankFeatureFields() {
+        return rankFeatureFields;
     }
 
     /**
@@ -130,10 +149,11 @@ public class ParallelEsIndexer implements AutoCloseable {
     /** Wait for the indexer thread to drain the queue and finish. */
     public void awaitCompletion() throws InterruptedException {
         indexerThread.join(TimeUnit.HOURS.toMillis(24));
-        LOG.info("Parallel ES indexer complete: indexed={}, skipped={}, dropped/errors={}",
+        LOG.info("Parallel ES indexer complete: indexed={}, skipped={}, dropped/errors={}, rank_feature_normalized={}",
                  String.format("%,d", totalIndexed.get()),
                  String.format("%,d", totalSkipped.get()),
-                 String.format("%,d", totalErrors.get()));
+                 String.format("%,d", totalErrors.get()),
+                 String.format("%,d", totalRankFeatureNormalized.get()));
     }
 
     private void indexerLoop() {
@@ -192,8 +212,9 @@ public class ParallelEsIndexer implements AutoCloseable {
 
     /**
      * Build the ES document JSON from a decoded vertex's properties.
-     * Applies the same sanitization as ElasticsearchReindexer:
+     * Applies sanitization:
      * - Replaces dots in field names with underscores (ES 7.x nested path conflict)
+     * - Clamps rank_feature fields with value <= 0 to Float.MIN_NORMAL
      * - Ensures __typeName and __state are present at top level
      */
     @SuppressWarnings("unchecked")
@@ -204,10 +225,19 @@ public class ParallelEsIndexer implements AutoCloseable {
             Map<String, Object> sanitized = new LinkedHashMap<>(rawDoc.size());
             for (Map.Entry<String, Object> entry : rawDoc.entrySet()) {
                 String key = entry.getKey();
+                Object value = entry.getValue();
                 if (key.contains(".")) {
                     key = key.replace('.', '_');
                 }
-                sanitized.put(key, entry.getValue());
+                // Clamp rank_feature fields: ES rejects values <= 0
+                if (value instanceof Number && rankFeatureFields.contains(key)) {
+                    float fv = ((Number) value).floatValue();
+                    if (fv < RANK_FEATURE_MIN) {
+                        value = RANK_FEATURE_MIN;
+                        totalRankFeatureNormalized.incrementAndGet();
+                    }
+                }
+                sanitized.put(key, value);
             }
 
             if (doc.typeName != null) sanitized.putIfAbsent("__typeName", doc.typeName);
@@ -262,6 +292,61 @@ public class ParallelEsIndexer implements AutoCloseable {
             .setSocketTimeout(120_000));
 
         return builder.build();
+    }
+
+    /**
+     * Query the ES index mapping and discover fields that have a rank_feature sub-field.
+     * These are multi-field mappings like:
+     * <pre>
+     *   "viewScore": { "type": "float", "fields": { "rank_feature": { "type": "rank_feature" } } }
+     * </pre>
+     * Returns field names (e.g. "viewScore") whose rank_feature sub-field rejects values <= 0.
+     */
+    @SuppressWarnings("unchecked")
+    private Set<String> discoverRankFeatureFields(String index) {
+        Set<String> fields = new HashSet<>();
+        try {
+            Response resp = esClient.performRequest(new Request("GET", "/" + index + "/_mapping"));
+            if (resp.getStatusLine().getStatusCode() != 200) return fields;
+
+            String body = EntityUtils.toString(resp.getEntity());
+            Map<String, Object> parsed = MAPPER.readValue(body, Map.class);
+            // { "indexName": { "mappings": { "properties": { ... } } } }
+            Map<String, Object> indexData = (Map<String, Object>) parsed.values().iterator().next();
+            Map<String, Object> mappings  = (Map<String, Object>) indexData.get("mappings");
+            if (mappings == null) return fields;
+            Map<String, Object> properties = (Map<String, Object>) mappings.get("properties");
+            if (properties == null) return fields;
+
+            for (Map.Entry<String, Object> entry : properties.entrySet()) {
+                if (!(entry.getValue() instanceof Map)) continue;
+                Map<String, Object> fieldDef = (Map<String, Object>) entry.getValue();
+
+                // Check top-level type
+                if ("rank_feature".equals(fieldDef.get("type"))) {
+                    fields.add(entry.getKey());
+                    continue;
+                }
+                // Check sub-fields (multi-field mapping)
+                Map<String, Object> subFields = (Map<String, Object>) fieldDef.get("fields");
+                if (subFields != null) {
+                    for (Object subFieldDef : subFields.values()) {
+                        if (subFieldDef instanceof Map &&
+                            "rank_feature".equals(((Map<String, Object>) subFieldDef).get("type"))) {
+                            fields.add(entry.getKey());
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (!fields.isEmpty()) {
+                LOG.info("Discovered {} rank_feature fields from ES mapping: {}", fields.size(), fields);
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to discover rank_feature fields from ES mapping (non-fatal): {}", e.getMessage());
+        }
+        return Collections.unmodifiableSet(fields);
     }
 
     private static String escapeJson(String value) {
