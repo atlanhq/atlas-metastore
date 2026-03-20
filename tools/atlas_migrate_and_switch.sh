@@ -71,6 +71,8 @@ OLD_ES_INDEX="janusgraph_vertex_index"
 NEW_ES_INDEX="atlas_graph_vertex_index"
 VERTEX_ALIAS="atlas_vertex_index"
 DRY_RUN="false"
+SKIP_MAINTENANCE="false"
+SKIP_ALIASES="false"
 
 # Derived at runtime
 TENANT_FQDN=""
@@ -143,6 +145,8 @@ Options:
   --migrator-memory <sz>    Memory for migrator pod (default: 8Gi)
   --max-retries <n>         Max retries (default: 3)
   --wait-timeout <secs>     Pod readiness timeout (default: 300)
+  --skip-maintenance        Skip maintenance mode enable/disable entirely
+  --skip-aliases            Skip ES alias switching (Step 5)
   --dry-run                 Show config, don't execute
   --help                    Show this help
 
@@ -196,6 +200,8 @@ parse_args() {
             --migrator-memory) MIGRATOR_MEMORY="$2"; shift 2 ;;
             --max-retries)     MAX_RETRIES="$2"; shift 2 ;;
             --wait-timeout)    WAIT_TIMEOUT="$2"; shift 2 ;;
+            --skip-maintenance) SKIP_MAINTENANCE="true"; shift ;;
+            --skip-aliases)    SKIP_ALIASES="true"; shift ;;
             --dry-run)         DRY_RUN="true"; shift ;;
             --help|-h)         show_help; exit 0 ;;
             *)                 die "Unknown option: $1 (use --help)" ;;
@@ -453,6 +459,8 @@ phase_connectivity() {
     log "  Scanner Threads:   $SCANNER_THREADS"
     log "  Writer Threads:    $WRITER_THREADS"
     log "  JVM Heap:          $JVM_HEAP (min: $JVM_MIN_HEAP)"
+    log "  Skip Maintenance:  $SKIP_MAINTENANCE"
+    log "  Skip Aliases:      $SKIP_ALIASES"
     log "  Max Retries:       $MAX_RETRIES"
     echo ""
 
@@ -631,7 +639,9 @@ ${tolerations_yaml}
               --data-urlencode 'client_id=atlan-argo' \
               --data-urlencode "client_secret=\${CLIENT_SECRET}" \
               --data-urlencode 'grant_type=client_credentials' 2>/dev/null || echo "")
-          token=\$(echo "\$resp" | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || echo "")
+          token=\$(echo "\$resp" | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null \
+                  || echo "\$resp" | python -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null \
+                  || echo "")
           echo "\$token"
       }
 
@@ -701,38 +711,42 @@ ${tolerations_yaml}
       # STEP 3: Enable Maintenance Mode
       # ============================================================
       echo ""
-      echo "=== Step 3: Enabling Maintenance Mode ==="
-
-      # Generate fresh token (15-min TTL — preflight may have consumed time)
-      echo "Generating fresh token for maintenance mode..."
-      TOKEN=\$(generate_token)
-      if [ -z "\$TOKEN" ]; then
-          echo "FATAL: Could not generate token for maintenance mode"
-          exit 1
-      fi
-
-      MAINT_HTTP=\$(curl -s -o /dev/null -w "%{http_code}" \
-          -X PUT "https://\${TENANT_FQDN}/api/meta/configs/MAINTENANCE_MODE" \
-          -H "Accept: application/json" \
-          -H "Content-Type: application/json" \
-          -H "Authorization: Bearer \${TOKEN}" \
-          -d '{"value": "true"}' 2>/dev/null || echo "000")
-
-      if [ "\$MAINT_HTTP" -ge 200 ] && [ "\$MAINT_HTTP" -lt 300 ] 2>/dev/null; then
-          echo "[PASS] Maintenance mode enabled (HTTP \$MAINT_HTTP)"
+      if [ "${SKIP_MAINTENANCE}" = "true" ]; then
+          echo "=== Step 3: Skipping Maintenance Mode (--skip-maintenance) ==="
       else
-          echo "[WARN] Maintenance mode API returned HTTP \$MAINT_HTTP — proceeding anyway"
+          echo "=== Step 3: Enabling Maintenance Mode ==="
+
+          # Generate fresh token (15-min TTL — preflight may have consumed time)
+          echo "Generating fresh token for maintenance mode..."
+          TOKEN=\$(generate_token)
+          if [ -z "\$TOKEN" ]; then
+              echo "FATAL: Could not generate token for maintenance mode"
+              exit 1
+          fi
+
+          MAINT_HTTP=\$(curl -s -o /dev/null -w "%{http_code}" \
+              -X PUT "https://\${TENANT_FQDN}/api/meta/configs/MAINTENANCE_MODE" \
+              -H "Accept: application/json" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer \${TOKEN}" \
+              -d '{"value": "true"}' 2>/dev/null || echo "000")
+
+          if [ "\$MAINT_HTTP" -ge 200 ] && [ "\$MAINT_HTTP" -lt 300 ] 2>/dev/null; then
+              echo "[PASS] Maintenance mode enabled (HTTP \$MAINT_HTTP)"
+          else
+              echo "[WARN] Maintenance mode API returned HTTP \$MAINT_HTTP — proceeding anyway"
+          fi
+
+          # Verify
+          MAINT_VERIFY=\$(curl -s \
+              "https://\${TENANT_FQDN}/api/meta/admin/config/MAINTENANCE_MODE" \
+              -H "Accept: application/json" \
+              -H "Authorization: Bearer \${TOKEN}" 2>/dev/null || echo "")
+          echo "Maintenance mode verification: \$MAINT_VERIFY"
+
+          # Write a marker file so the outer script knows maintenance was enabled
+          echo "true" > /tmp/maintenance_enabled
       fi
-
-      # Verify
-      MAINT_VERIFY=\$(curl -s \
-          "https://\${TENANT_FQDN}/api/meta/admin/config/MAINTENANCE_MODE" \
-          -H "Accept: application/json" \
-          -H "Authorization: Bearer \${TOKEN}" 2>/dev/null || echo "")
-      echo "Maintenance mode verification: \$MAINT_VERIFY"
-
-      # Write a marker file so the outer script knows maintenance was enabled
-      echo "true" > /tmp/maintenance_enabled
 
       # ============================================================
       # STEP 4: Run Migration
@@ -763,38 +777,42 @@ ${tolerations_yaml}
       # STEP 5: ES Alias Switching
       # ============================================================
       echo ""
-      echo "=== Step 5: ES Alias Switching ==="
-
-      # Check target index exists
-      INDEX_STATUS=\$(curl -s -o /dev/null -w "%{http_code}" "\${ES_BASE}/${NEW_ES_INDEX}" 2>/dev/null || echo "000")
-      if [ "\$INDEX_STATUS" != "200" ]; then
-          echo "[WARN] Target index ${NEW_ES_INDEX} not found (HTTP \$INDEX_STATUS) — skipping alias switching"
+      if [ "${SKIP_ALIASES}" = "true" ]; then
+          echo "=== Step 5: Skipping ES Alias Switching (--skip-aliases) ==="
       else
-          # Switch vertex alias
-          echo "Switching vertex alias (${VERTEX_ALIAS} -> ${NEW_ES_INDEX})..."
-          ALIAS_RESP=\$(curl -s -X POST "\${ES_BASE}/_aliases" \
-              -H 'Content-Type: application/json' \
-              -d '{
-                  "actions": [
-                      {"remove": {"index": "*", "alias": "${VERTEX_ALIAS}"}},
-                      {"add": {"index": "${NEW_ES_INDEX}", "alias": "${VERTEX_ALIAS}"}}
-                  ]
-              }' 2>/dev/null || echo '{}')
-          echo "Vertex alias response: \$ALIAS_RESP"
+          echo "=== Step 5: ES Alias Switching ==="
 
-          # Verify
-          VERIFY=\$(curl -s "\${ES_BASE}/_alias/${VERTEX_ALIAS}" 2>/dev/null || echo "{}")
-          echo "Vertex alias now points to: \$(echo "\$VERIFY" | python3 -c "import sys,json; print(','.join(json.load(sys.stdin).keys()))" 2>/dev/null || echo "unknown")"
-
-          # Migrate persona aliases from old index to new index
-          echo ""
-          echo "Migrating persona aliases from ${OLD_ES_INDEX} to ${NEW_ES_INDEX}..."
-
-          OLD_STATUS=\$(curl -s -o /dev/null -w "%{http_code}" "\${ES_BASE}/${OLD_ES_INDEX}" 2>/dev/null || echo "000")
-          if [ "\$OLD_STATUS" != "200" ]; then
-              echo "Old index ${OLD_ES_INDEX} not found — skipping persona alias migration"
+          # Check target index exists
+          INDEX_STATUS=\$(curl -s -o /dev/null -w "%{http_code}" "\${ES_BASE}/${NEW_ES_INDEX}" 2>/dev/null || echo "000")
+          if [ "\$INDEX_STATUS" != "200" ]; then
+              echo "[WARN] Target index ${NEW_ES_INDEX} not found (HTTP \$INDEX_STATUS) — skipping alias switching"
           else
-              cat > /tmp/migrate_aliases.py << 'PYEOF'
+              # Switch vertex alias
+              echo "Switching vertex alias (${VERTEX_ALIAS} -> ${NEW_ES_INDEX})..."
+              ALIAS_RESP=\$(curl -s -X POST "\${ES_BASE}/_aliases" \
+                  -H 'Content-Type: application/json' \
+                  -d '{
+                      "actions": [
+                          {"remove": {"index": "*", "alias": "${VERTEX_ALIAS}"}},
+                          {"add": {"index": "${NEW_ES_INDEX}", "alias": "${VERTEX_ALIAS}"}}
+                      ]
+                  }' 2>/dev/null || echo '{}')
+              echo "Vertex alias response: \$ALIAS_RESP"
+
+              # Verify
+              VERIFY=\$(curl -s "\${ES_BASE}/_alias/${VERTEX_ALIAS}" 2>/dev/null || echo "{}")
+              echo "Vertex alias now points to: \$(echo "\$VERIFY" | python3 -c "import sys,json; print(','.join(json.load(sys.stdin).keys()))" 2>/dev/null \
+                  || echo "\$VERIFY" | python -c "import sys,json; print(','.join(json.load(sys.stdin).keys()))" 2>/dev/null || echo "unknown")"
+
+              # Migrate persona aliases from old index to new index
+              echo ""
+              echo "Migrating persona aliases from ${OLD_ES_INDEX} to ${NEW_ES_INDEX}..."
+
+              OLD_STATUS=\$(curl -s -o /dev/null -w "%{http_code}" "\${ES_BASE}/${OLD_ES_INDEX}" 2>/dev/null || echo "000")
+              if [ "\$OLD_STATUS" != "200" ]; then
+                  echo "Old index ${OLD_ES_INDEX} not found — skipping persona alias migration"
+              else
+                  cat > /tmp/migrate_aliases.py << 'PYEOF'
       import json, sys, urllib.request
       es_base = sys.argv[1]
       old_index = sys.argv[2]
@@ -851,14 +869,19 @@ ${tolerations_yaml}
               print(f'Batch failed: {e}')
       print(f'Persona aliases: migrated={migrated}, failed={failed}')
       PYEOF
-              python3 /tmp/migrate_aliases.py "\${ES_BASE}" "${OLD_ES_INDEX}" "${NEW_ES_INDEX}" "${VERTEX_ALIAS},${OLD_ES_INDEX},${NEW_ES_INDEX}" 2>/dev/null || echo "Persona alias script error (non-fatal)"
-          fi
+                  python3 /tmp/migrate_aliases.py "\${ES_BASE}" "${OLD_ES_INDEX}" "${NEW_ES_INDEX}" "${VERTEX_ALIAS},${OLD_ES_INDEX},${NEW_ES_INDEX}" 2>/dev/null \
+                      || python /tmp/migrate_aliases.py "\${ES_BASE}" "${OLD_ES_INDEX}" "${NEW_ES_INDEX}" "${VERTEX_ALIAS},${OLD_ES_INDEX},${NEW_ES_INDEX}" 2>/dev/null \
+                      || echo "Persona alias script error (non-fatal)"
+              fi
 
-          # Final count
-          echo ""
-          ALIAS_COUNT=\$(curl -s "\${ES_BASE}/${NEW_ES_INDEX}/_alias/*" 2>/dev/null | \
-              python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('${NEW_ES_INDEX}',{}).get('aliases',{})))" 2>/dev/null || echo "?")
-          echo "Total aliases on ${NEW_ES_INDEX}: \$ALIAS_COUNT"
+              # Final count
+              echo ""
+              ALIAS_COUNT=\$(curl -s "\${ES_BASE}/${NEW_ES_INDEX}/_alias/*" 2>/dev/null | \
+                  (python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('${NEW_ES_INDEX}',{}).get('aliases',{})))" 2>/dev/null \
+                  || python -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('${NEW_ES_INDEX}',{}).get('aliases',{})))" 2>/dev/null \
+                  || echo "?"))
+              echo "Total aliases on ${NEW_ES_INDEX}: \$ALIAS_COUNT"
+          fi
       fi
 
       echo ""
@@ -902,6 +925,23 @@ ${multitenant_env_yaml}
       subPath: atlas-logback.xml
     - name: atlas-logs
       mountPath: /opt/apache-atlas/logs
+  - name: debug-sidecar
+    image: "${atlas_image}"
+    imagePullPolicy: IfNotPresent
+    command: ["/bin/bash", "-c", "echo 'Debug sidecar: sleeping 24h for kubectl exec access'; sleep 86400"]
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "64Mi"
+      limits:
+        cpu: "100m"
+        memory: "64Mi"
+    volumeMounts:
+    - name: atlas-config
+      mountPath: /opt/apache-atlas/conf/atlas-application.properties
+      subPath: atlas-application.properties
+    - name: atlas-logs
+      mountPath: /opt/apache-atlas/logs
   volumes:
   - name: atlas-config
     configMap:
@@ -926,7 +966,9 @@ EOYAML
 
         # Mark that maintenance mode will be enabled by the pod
         # (so EXIT trap knows to disable it)
-        MAINTENANCE_ENABLED="true"
+        if [ "$SKIP_MAINTENANCE" != "true" ]; then
+            MAINTENANCE_ENABLED="true"
+        fi
 
         # ---- Wait for pod to start ----
         log "Waiting for migrator pod to start..."
@@ -952,18 +994,18 @@ EOYAML
 
         # ---- Stream logs and wait for completion ----
         log "Streaming logs from $job_pod..."
-        kubectl logs -f "$job_pod" -n "$NAMESPACE" 2>/dev/null || true
+        kubectl logs -f "$job_pod" -c atlas-migrator -n "$NAMESPACE" 2>/dev/null || true
 
         # ---- Check outcome ----
-        # Wait briefly for pod status to settle
+        # Wait briefly for container status to settle (pod stays Running due to debug sidecar)
         sleep 5
         local job_status exit_code
         job_status=$(kubectl get pod "$job_pod" -n "$NAMESPACE" \
             -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
         exit_code=$(kubectl get pod "$job_pod" -n "$NAMESPACE" \
-            -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}' 2>/dev/null || echo "")
+            -o jsonpath='{.status.containerStatuses[?(@.name=="atlas-migrator")].state.terminated.exitCode}' 2>/dev/null || echo "")
 
-        if [ "$exit_code" = "0" ] || [ "$job_status" = "Succeeded" ]; then
+        if [ "$exit_code" = "0" ]; then
             migration_passed="true"
             ok "Migration pod completed successfully (attempt $attempt)"
         else
