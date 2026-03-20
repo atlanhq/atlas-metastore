@@ -22,6 +22,8 @@ public class MigrationMetrics {
     private final AtomicLong esDocsIndexed    = new AtomicLong(0);
     private final AtomicLong decodeErrors     = new AtomicLong(0);
     private final AtomicLong writeErrors      = new AtomicLong(0);
+    private final AtomicLong superVertexChunksEmitted = new AtomicLong(0);
+    private final AtomicLong esEdgeDocsIndexed = new AtomicLong(0);
     private final AtomicLong tokenRangesTotal = new AtomicLong(0);
     private final AtomicLong tokenRangesDone  = new AtomicLong(0);
     private final AtomicLong cqlRowsRead      = new AtomicLong(0);
@@ -52,6 +54,8 @@ public class MigrationMetrics {
     public void incrEsDocsIndexed(long count)    { esDocsIndexed.addAndGet(count); }
     public void incrDecodeErrors()               { decodeErrors.incrementAndGet(); }
     public void incrWriteErrors()                { writeErrors.incrementAndGet(); }
+    public void incrSuperVertexChunksEmitted(long count) { superVertexChunksEmitted.addAndGet(count); }
+    public void incrEsEdgeDocsIndexed(long count) { esEdgeDocsIndexed.addAndGet(count); }
     public void incrCqlRowsRead(long count)      { cqlRowsRead.addAndGet(count); }
     public void setTokenRangesTotal(long total)  { tokenRangesTotal.set(total); }
     public void incrTokenRangesDone()            { tokenRangesDone.incrementAndGet(); }
@@ -67,6 +71,8 @@ public class MigrationMetrics {
     public long getEsDocsIndexed()    { return esDocsIndexed.get(); }
     public long getDecodeErrors()     { return decodeErrors.get(); }
     public long getWriteErrors()      { return writeErrors.get(); }
+    public long getSuperVertexChunksEmitted() { return superVertexChunksEmitted.get(); }
+    public long getEsEdgeDocsIndexed() { return esEdgeDocsIndexed.get(); }
     public long getCqlRowsRead()       { return cqlRowsRead.get(); }
     public long getTokenRangesDone()  { return tokenRangesDone.get(); }
     public long getTokenRangesTotal() { return tokenRangesTotal.get(); }
@@ -126,7 +132,10 @@ public class MigrationMetrics {
                      queueDepth, queueCapacity,
                      queueCapacity > 0 ? (queueDepth * 100 / queueCapacity) : 0);
         }
-        LOG.info("  ES docs indexed: {}", format(esDocsIndexed.get()));
+        LOG.info("  ES docs indexed: {} (vertices), {} (edges)", format(esDocsIndexed.get()), format(esEdgeDocsIndexed.get()));
+        if (superVertexChunksEmitted.get() > 0) {
+            LOG.info("  Super vertex chunks emitted: {}", format(superVertexChunksEmitted.get()));
+        }
         if (decodeErrors.get() > 0 || writeErrors.get() > 0) {
             LOG.warn("  Errors: decode={}, write={}", decodeErrors.get(), writeErrors.get());
         }
@@ -144,13 +153,17 @@ public class MigrationMetrics {
         long skipped = verticesSkipped.get();
         String skipSuffix = skipped > 0 ? String.format(", Skipped: %s", format(skipped)) : "";
         return String.format(
-            "Migration complete in %s — Vertices: %s%s, Edges: %s, Indexes: %s, TypeDefs: %s, ES docs: %s | " +
-            "Avg rate: %s vertices/s | Decode errors: %d, Write errors: %d | CQL rows: %s",
+            "Migration complete in %s — Vertices: %s%s, Edges: %s, Indexes: %s, TypeDefs: %s, " +
+            "ES docs: %s (vertices) + %s (edges) | " +
+            "Avg rate: %s vertices/s | Decode errors: %d, Write errors: %d | " +
+            "Super vertex chunks: %s | CQL rows: %s",
             formatDuration((long) elapsed),
             format(verticesWritten.get()), skipSuffix, format(edgesWritten.get()),
-            format(indexesWritten.get()), format(typeDefsWritten.get()), format(esDocsIndexed.get()),
+            format(indexesWritten.get()), format(typeDefsWritten.get()),
+            format(esDocsIndexed.get()), format(esEdgeDocsIndexed.get()),
             format((long) vertexRate),
             decodeErrors.get(), writeErrors.get(),
+            format(superVertexChunksEmitted.get()),
             format(cqlRowsRead.get()));
     }
 

@@ -67,6 +67,12 @@ public class MigratorConfig {
     // Parallel ES indexing during Phase 1
     private final boolean esParallel;
 
+    // ES edge index
+    private final String targetEsEdgeIndex;
+
+    // Super vertex chunking
+    private final int superVertexEdgeChunkSize;
+
     // Skip flags
     private final boolean skipEsReindex;
     private final boolean skipClassifications;
@@ -159,6 +165,12 @@ public class MigratorConfig {
         // Parallel ES indexing during Phase 1 (eliminates Phase 2)
         this.esParallel = getBoolean("migration.es.parallel", false);
 
+        // ES edge index
+        this.targetEsEdgeIndex = get("target.elasticsearch.edge.index", "atlas_graph_edge_index");
+
+        // Super vertex chunking
+        this.superVertexEdgeChunkSize = getInt("migration.super.vertex.edge.chunk.size", 10000);
+
         // Skip flags
         this.skipEsReindex      = getBoolean("migration.skip.es.reindex", false);
         this.skipClassifications = getBoolean("migration.skip.classifications", false);
@@ -247,6 +259,8 @@ public class MigratorConfig {
 
     public int     getEsFieldLimit()      { return esFieldLimit; }
     public boolean isEsParallel()         { return esParallel; }
+    public String  getTargetEsEdgeIndex() { return targetEsEdgeIndex; }
+    public int     getSuperVertexEdgeChunkSize() { return superVertexEdgeChunkSize; }
 
     public boolean isSkipEsReindex()      { return skipEsReindex; }
     public boolean isSkipClassifications() { return skipClassifications; }

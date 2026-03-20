@@ -53,7 +53,7 @@ public class CassandraTargetWriter implements AutoCloseable {
     private PreparedStatement insertEdgeIndexStmt;
 
     // Pipeline: scanner threads enqueue, writer threads dequeue
-    private final BlockingQueue<DecodedVertex> queue;
+    private final BlockingQueue<QueueItem> queue;
     private final ExecutorService writerPool;
     private volatile boolean scanningComplete = false;
 
@@ -65,8 +65,9 @@ public class CassandraTargetWriter implements AutoCloseable {
     private final AtomicLong edgeFallbackCount  = new AtomicLong(0);
     private final ConcurrentMap<Long, String> vertexIdOverrides = new ConcurrentHashMap<>();
 
-    // Optional parallel ES indexer — when set, vertices are indexed into ES during Phase 1
+    // Optional parallel ES indexers — when set, vertices/edges are indexed into ES during Phase 1
     private volatile ParallelEsIndexer parallelEsIndexer;
+    private volatile ParallelEsIndexer parallelEsEdgeIndexer;
 
     public CassandraTargetWriter(MigratorConfig config, MigrationMetrics metrics, CqlSession targetSession) {
         this.config        = config;
@@ -87,9 +88,14 @@ public class CassandraTargetWriter implements AutoCloseable {
         prepareStatements();
     }
 
-    /** Set the parallel ES indexer to pipeline ES indexing during Phase 1. */
+    /** Set the parallel ES vertex indexer to pipeline ES indexing during Phase 1. */
     public void setParallelEsIndexer(ParallelEsIndexer indexer) {
         this.parallelEsIndexer = indexer;
+    }
+
+    /** Set the parallel ES edge indexer to pipeline ES edge indexing during Phase 1. */
+    public void setParallelEsEdgeIndexer(ParallelEsIndexer indexer) {
+        this.parallelEsEdgeIndexer = indexer;
     }
 
     private void createSchema() {
@@ -256,16 +262,16 @@ public class CassandraTargetWriter implements AutoCloseable {
     }
 
     /**
-     * Called by scanner threads to enqueue a decoded vertex for writing.
+     * Called by scanner threads to enqueue a decoded vertex or edge chunk for writing.
      * Blocks if the queue is full (backpressure).
      */
-    public void enqueue(DecodedVertex vertex) {
+    public void enqueue(QueueItem item) {
         try {
-            queue.put(vertex);
+            queue.put(item);
             metrics.setQueueDepth(queue.size());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Interrupted while enqueuing vertex", e);
+            throw new RuntimeException("Interrupted while enqueuing item", e);
         }
     }
 
@@ -292,23 +298,27 @@ public class CassandraTargetWriter implements AutoCloseable {
     }
 
     /**
-     * Writer loop: drains vertices from the queue, builds UNLOGGED batches,
+     * Writer loop: drains items from the queue, builds UNLOGGED batches,
      * and fires them asynchronously with a Semaphore cap on in-flight requests.
+     *
+     * Dispatches based on item type:
+     *   - DecodedVertex → full vertex + indexes + edges
+     *   - EdgeChunk → only edge table INSERTs (for super vertex continuation)
      */
     private void writerLoop() {
         Semaphore inflight = new Semaphore(config.getMaxInflightPerThread());
 
         while (true) {
-            DecodedVertex vertex;
+            QueueItem item;
             try {
                 if (scanningComplete && queue.isEmpty()) break;
-                vertex = queue.poll(500, TimeUnit.MILLISECONDS);
+                item = queue.poll(500, TimeUnit.MILLISECONDS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
             }
 
-            if (vertex == null) {
+            if (item == null) {
                 if (scanningComplete && queue.isEmpty()) break;
                 continue;
             }
@@ -316,10 +326,14 @@ public class CassandraTargetWriter implements AutoCloseable {
             metrics.setQueueDepth(queue.size());
 
             try {
-                writeVertexAsync(vertex, inflight);
+                if (item instanceof DecodedVertex) {
+                    writeVertexAsync((DecodedVertex) item, inflight);
+                } else if (item instanceof EdgeChunk) {
+                    writeEdgeChunkAsync((EdgeChunk) item, inflight);
+                }
             } catch (Exception e) {
                 metrics.incrWriteErrors();
-                LOG.error("Failed to process vertex {}", vertex.getVertexId(), e);
+                LOG.error("Failed to process item {}", item, e);
             }
         }
 
@@ -372,6 +386,140 @@ public class CassandraTargetWriter implements AutoCloseable {
             }
             parallelEsIndexer.enqueue(vertexId, propsJson, vertex.getTypeName(), vertex.getState());
         }
+
+        // Pipeline ES edge indexing: enqueue edges for ES edge index
+        if (parallelEsEdgeIndexer != null) {
+            enqueueEdgesForEsIndexing(vertex.getOutEdges());
+        }
+    }
+
+    /**
+     * Write an edge chunk (from a super vertex that was split during scanning).
+     * Only writes edge table INSERTs — no vertex row or indexes.
+     */
+    private void writeEdgeChunkAsync(EdgeChunk chunk, Semaphore inflight) throws InterruptedException {
+        List<DecodedEdge> edges = chunk.getEdges();
+        Instant now = Instant.now();
+        int maxEdges = config.getMaxEdgesPerBatch();
+
+        // Build and dispatch edge batches one at a time (writer-side streaming)
+        for (int i = 0; i < edges.size(); i += maxEdges) {
+            int end = Math.min(i + maxEdges, edges.size());
+            List<BoundStatement> edgeStmts = new ArrayList<>();
+
+            for (int j = i; j < end; j++) {
+                buildEdgeStatementsWithResolvedOutVertex(edges.get(j), now, edgeStmts, chunk.getResolvedVertexId());
+            }
+
+            BatchStatement batch = BatchStatement.newInstance(BatchType.UNLOGGED,
+                edgeStmts.toArray(new BatchableStatement[0]));
+
+            inflight.acquire();
+            writeAttempts.incrementAndGet();
+
+            targetSession.executeAsync(batch).whenComplete((result, error) -> {
+                inflight.release();
+                if (error != null) {
+                    metrics.incrWriteErrors();
+                    long errCount = writeErrors.incrementAndGet();
+                    if (errCount <= WRITE_SAMPLE_LOG_LIMIT) {
+                        LOG.error("Async edge chunk write failed for vertex {}: {}",
+                                  chunk.getResolvedVertexId(), error.toString());
+                    }
+                }
+            });
+        }
+
+        metrics.incrEdgesWritten(edges.size());
+
+        // Pipeline ES edge indexing for this chunk
+        if (parallelEsEdgeIndexer != null) {
+            enqueueEdgesForEsIndexing(edges);
+        }
+    }
+
+    /**
+     * Build edge statements using a pre-resolved out-vertex ID (for EdgeChunks).
+     */
+    private void buildEdgeStatementsWithResolvedOutVertex(DecodedEdge edge, Instant now,
+                                                           List<BoundStatement> stmts,
+                                                           String outVertexId) {
+        String edgePropsJson;
+        try {
+            edgePropsJson = edge.getProperties().isEmpty() ? "{}" :
+                MAPPER.writeValueAsString(edge.getProperties());
+        } catch (Exception e) {
+            edgePropsJson = "{}";
+        }
+
+        Object edgeState = edge.getProperties().get("__state");
+        String state = edgeState != null ? edgeState.toString() : "ACTIVE";
+
+        String inVertexId = resolveVertexId(edge.getInVertexJgId());
+        String edgeId;
+        if (config.getIdStrategy() == IdStrategy.HASH_IDENTITY) {
+            edgeId = DeterministicIdUtil.edgeIdFromIdentity(outVertexId, edge.getLabel(), inVertexId);
+        } else {
+            edgeId = DeterministicIdUtil.edgeIdFromJg(edge.getJgRelationId(), config.getIdStrategy());
+        }
+
+        stmts.add(insertEdgeOutStmt.bind(
+            outVertexId, edge.getLabel(), edgeId,
+            inVertexId, edgePropsJson, state, now, now));
+        stmts.add(insertEdgeInStmt.bind(
+            inVertexId, edge.getLabel(), edgeId,
+            outVertexId, edgePropsJson, state, now, now));
+        stmts.add(insertEdgeByIdStmt.bind(
+            edgeId, outVertexId, inVertexId,
+            edge.getLabel(), edgePropsJson, state, now, now));
+
+        Object relGuid = edge.getProperties().get("_r__guid");
+        if (relGuid != null) {
+            stmts.add(insertEdgeIndexStmt.bind("_r__guid_idx", String.valueOf(relGuid), edgeId));
+        }
+    }
+
+    /**
+     * Enqueue edges for ES edge indexing via the parallel ES edge indexer.
+     */
+    private void enqueueEdgesForEsIndexing(List<DecodedEdge> edges) {
+        for (DecodedEdge edge : edges) {
+            try {
+                Map<String, Object> edgeDoc = buildEsEdgeDoc(edge);
+                String edgeDocJson = MAPPER.writeValueAsString(edgeDoc);
+                // Use the edge ID as the ES doc ID, and edge label as "typeName" for filtering
+                parallelEsEdgeIndexer.enqueueEdge(edge.getEdgeId(), edgeDocJson);
+            } catch (Exception e) {
+                LOG.trace("Failed to enqueue edge {} for ES indexing", edge.getEdgeId(), e);
+            }
+        }
+    }
+
+    /**
+     * Build an ES document for an edge. Includes all edge properties plus metadata fields.
+     */
+    private Map<String, Object> buildEsEdgeDoc(DecodedEdge edge) {
+        Map<String, Object> doc = new LinkedHashMap<>();
+
+        // Add all edge properties with dot→underscore sanitization
+        for (Map.Entry<String, Object> entry : edge.getProperties().entrySet()) {
+            String key = entry.getKey();
+            if (key.contains(".")) {
+                key = key.replace('.', '_');
+            }
+            doc.put(key, entry.getValue());
+        }
+
+        // Add edge metadata
+        doc.put("__edgeId", edge.getEdgeId());
+        doc.put("__edgeLabel", edge.getLabel());
+        doc.put("__outVertexId", edge.getOutVertexId());
+        doc.put("__inVertexId", edge.getInVertexId());
+
+        Object edgeState = edge.getProperties().get("__state");
+        doc.putIfAbsent("__state", edgeState != null ? edgeState.toString() : "ACTIVE");
+
+        return doc;
     }
 
     /**

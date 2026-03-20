@@ -74,6 +74,7 @@ public class MigratorMain {
         LOG.info("Skip flags: esReindex={}, classifications={}, tasks={}",
                  config.isSkipEsReindex(), config.isSkipClassifications(), config.isSkipTasks());
         LOG.info("ES field limit: {}, Max retries: {}, ES parallel: {}", config.getEsFieldLimit(), config.getMaxRetries(), config.isEsParallel());
+        LOG.info("ES edge index: {}, Super vertex chunk size: {}", config.getTargetEsEdgeIndex(), config.getSuperVertexEdgeChunkSize());
         LOG.info("Auxiliary migration: configStore={}, tags={}, sameCluster={}",
                  config.isMigrateConfigStore(), config.isMigrateTags(), config.isSameCassandraCluster());
 
@@ -113,9 +114,10 @@ public class MigratorMain {
             // 2. Truncate all target Cassandra data tables
             writer.truncateAll();
 
-            // 3. Delete target ES index so it's recreated fresh
+            // 3. Delete target ES indexes (vertex + edge) so they're recreated fresh
             ElasticsearchReindexer tempEs = new ElasticsearchReindexer(config, metrics, targetSession);
             tempEs.deleteIndex();
+            tempEs.deleteEdgeIndex();
             tempEs.close();
 
             LOG.info("=== FRESH MODE: All previous migration data cleared ===");
@@ -159,18 +161,27 @@ public class MigratorMain {
             LOG.info("  Source baseline collection: ENABLED (super vertex threshold={})", config.getSuperVertexThreshold());
             LOG.info("========================================");
 
-            // Set up parallel ES indexer if enabled (indexes into ES during Phase 1)
+            // Set up parallel ES indexers if enabled (indexes into ES during Phase 1)
             ParallelEsIndexer parallelEsIndexer = null;
+            ParallelEsIndexer parallelEsEdgeIndexer = null;
             if (config.isEsParallel() && !config.isSkipEsReindex()) {
-                parallelEsIndexer = new ParallelEsIndexer(config, metrics);
-                // Ensure target ES index exists before we start indexing
                 ElasticsearchReindexer tempReindexer = new ElasticsearchReindexer(config, metrics, targetSession);
+
+                // Vertex ES indexer
+                parallelEsIndexer = new ParallelEsIndexer(config, metrics);
                 parallelEsIndexer.ensureIndex(tempReindexer);
-                tempReindexer.close();
-                // Wire into the writer pipeline
                 writer.setParallelEsIndexer(parallelEsIndexer);
                 parallelEsIndexer.start();
-                LOG.info("Parallel ES indexing ENABLED — Phase 2 will be skipped");
+
+                // Edge ES indexer (separate instance targeting the edge index)
+                parallelEsEdgeIndexer = new ParallelEsIndexer(config, metrics,
+                    config.getTargetEsEdgeIndex(), "es-parallel-edge-indexer", true);
+                tempReindexer.ensureEdgeIndexExists(config.getTargetEsEdgeIndex());
+                writer.setParallelEsEdgeIndexer(parallelEsEdgeIndexer);
+                parallelEsEdgeIndexer.start();
+
+                tempReindexer.close();
+                LOG.info("Parallel ES indexing ENABLED (vertex + edge) — Phase 2 will be skipped");
             }
 
             writer.startWriters();
@@ -181,7 +192,7 @@ public class MigratorMain {
             LOG.info("JanusGraph schema resolution ready. Starting CQL token-range scan...");
 
             scanner.scanAll(
-                vertex -> writer.enqueue(vertex),   // Scanner → queue → writer
+                item -> writer.enqueue(item),   // Scanner → queue → writer (vertices + edge chunks)
                 stateStore,
                 PHASE_SCAN
             );
@@ -199,11 +210,16 @@ public class MigratorMain {
             scanner.close();
             writer.close();
 
-            // Complete parallel ES indexing (drain remaining queue)
+            // Complete parallel ES indexing (drain remaining queues)
             if (parallelEsIndexer != null) {
                 parallelEsIndexer.signalComplete();
                 parallelEsIndexer.awaitCompletion();
                 parallelEsIndexer.close();
+            }
+            if (parallelEsEdgeIndexer != null) {
+                parallelEsEdgeIndexer.signalComplete();
+                parallelEsEdgeIndexer.awaitCompletion();
+                parallelEsEdgeIndexer.close();
             }
 
             // Save source baseline for Phase 3 comparison
@@ -238,21 +254,27 @@ public class MigratorMain {
             if (esAlreadyDone) {
                 LOG.info("========================================");
                 LOG.info("=== Phase 2 SKIPPED (ES indexed in parallel during Phase 1) ===");
-                LOG.info("  {} ES docs indexed during Phase 1", String.format("%,d", metrics.getEsDocsIndexed()));
+                LOG.info("  {} ES vertex docs, {} ES edge docs indexed during Phase 1",
+                         String.format("%,d", metrics.getEsDocsIndexed()),
+                         String.format("%,d", metrics.getEsEdgeDocsIndexed()));
                 LOG.info("========================================");
             } else if (!config.isSkipEsReindex()) {
                 LOG.info("========================================");
                 LOG.info("=== Phase 2/3: Elasticsearch re-indexing ===");
-                LOG.info("  Source: {}.vertices", config.getTargetCassandraKeyspace());
-                LOG.info("  Target ES index: {}", config.getTargetEsIndex());
+                LOG.info("  Source: {}.vertices + {}.edges_by_id", config.getTargetCassandraKeyspace(), config.getTargetCassandraKeyspace());
+                LOG.info("  Target ES vertex index: {}", config.getTargetEsIndex());
+                LOG.info("  Target ES edge index: {}", config.getTargetEsEdgeIndex());
                 LOG.info("  Bulk size: {} ", config.getEsBulkSize());
                 LOG.info("========================================");
 
                 ElasticsearchReindexer esReindexer = new ElasticsearchReindexer(config, metrics, targetSession);
                 esReindexer.reindexAll();
+                esReindexer.reindexEdges();
                 esReindexer.close();
 
-                LOG.info("Phase 2 complete: {} ES docs indexed", String.format("%,d", metrics.getEsDocsIndexed()));
+                LOG.info("Phase 2 complete: {} ES vertex docs, {} ES edge docs indexed",
+                         String.format("%,d", metrics.getEsDocsIndexed()),
+                         String.format("%,d", metrics.getEsEdgeDocsIndexed()));
             } else {
                 LOG.info("========================================");
                 LOG.info("=== Phase 2 SKIPPED (migration.skip.es.reindex=true) ===");
@@ -300,9 +322,11 @@ public class MigratorMain {
 
         ElasticsearchReindexer reindexer = new ElasticsearchReindexer(config, metrics, targetSession);
         reindexer.reindexAll();
+        reindexer.reindexEdges();
         reindexer.close();
 
-        LOG.info("ES re-indexing complete: {} docs", metrics.getEsDocsIndexed());
+        LOG.info("ES re-indexing complete: {} vertex docs, {} edge docs",
+                 metrics.getEsDocsIndexed(), metrics.getEsEdgeDocsIndexed());
     }
 
     private static void runValidation(MigratorConfig config, CqlSession sourceSession,
@@ -359,7 +383,7 @@ public class MigratorMain {
             try {
                 writer.startWriters();
                 scanner.scanAll(
-                    vertex -> writer.enqueue(vertex),
+                    item -> writer.enqueue(item),
                     stateStore,
                     phase
                 );

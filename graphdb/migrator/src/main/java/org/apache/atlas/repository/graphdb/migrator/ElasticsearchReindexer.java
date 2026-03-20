@@ -388,6 +388,146 @@ public class ElasticsearchReindexer implements AutoCloseable {
     }
 
     /**
+     * Re-index all edges from the target Cassandra edges_by_id table into the ES edge index.
+     * This populates atlas_graph_edge_index so that directRelationshipIndexSearch works post-cutover.
+     */
+    public void reindexEdges() throws IOException {
+        String ks = config.getTargetCassandraKeyspace();
+        String esEdgeIndex = config.getTargetEsEdgeIndex();
+        int bulkSize = config.getEsBulkSize();
+
+        LOG.info("Starting ES edge re-indexing from {}.edges_by_id to ES index '{}'", ks, esEdgeIndex);
+
+        ensureEdgeIndexExists(esEdgeIndex);
+
+        ResultSet rs = targetSession.execute(
+            "SELECT edge_id, out_vertex_id, in_vertex_id, edge_label, properties, state FROM " + ks + ".edges_by_id");
+
+        StringBuilder bulkBody = new StringBuilder();
+        int batchCount = 0;
+        long totalDocs = 0;
+
+        for (Row row : rs) {
+            String edgeId      = row.getString("edge_id");
+            String outVertexId = row.getString("out_vertex_id");
+            String inVertexId  = row.getString("in_vertex_id");
+            String edgeLabel   = row.getString("edge_label");
+            String propsJson   = row.getString("properties");
+            String state       = row.getString("state");
+
+            try {
+                // Build ES document: edge properties + metadata
+                Map<String, Object> doc;
+                if (propsJson != null && !propsJson.equals("{}")) {
+                    doc = MAPPER.readValue(propsJson, Map.class);
+                    // Sanitize field names (dot→underscore)
+                    Map<String, Object> sanitized = new java.util.LinkedHashMap<>(doc.size());
+                    for (Map.Entry<String, Object> entry : doc.entrySet()) {
+                        String key = entry.getKey();
+                        if (key.contains(".")) {
+                            key = key.replace('.', '_');
+                        }
+                        sanitized.put(key, entry.getValue());
+                    }
+                    doc = sanitized;
+                } else {
+                    doc = new java.util.LinkedHashMap<>();
+                }
+
+                // Add edge metadata fields
+                doc.put("__edgeId", edgeId);
+                doc.put("__edgeLabel", edgeLabel);
+                doc.put("__outVertexId", outVertexId);
+                doc.put("__inVertexId", inVertexId);
+                doc.putIfAbsent("__state", state != null ? state : "ACTIVE");
+
+                String docJson = MAPPER.writeValueAsString(doc);
+
+                bulkBody.append("{\"index\":{\"_index\":\"").append(esEdgeIndex)
+                        .append("\",\"_id\":\"").append(escapeJson(edgeId)).append("\"}}\n");
+                bulkBody.append(docJson).append("\n");
+
+                batchCount++;
+                totalDocs++;
+
+                if (batchCount >= bulkSize) {
+                    executeEdgeBulk(bulkBody.toString(), batchCount, totalDocs);
+                    bulkBody.setLength(0);
+                    batchCount = 0;
+                }
+            } catch (Exception e) {
+                LOG.warn("Failed to index edge {} to ES", edgeId, e);
+            }
+        }
+
+        // Flush remaining
+        if (batchCount > 0) {
+            executeEdgeBulk(bulkBody.toString(), batchCount, totalDocs);
+        }
+
+        LOG.info("ES edge re-indexing complete: {} edge documents indexed into '{}'",
+                 String.format("%,d", totalDocs), esEdgeIndex);
+    }
+
+    /**
+     * Ensure the edge ES index exists. Uses default dynamic mappings (keyword for strings)
+     * since the edge index schema is simpler than the vertex index.
+     */
+    void ensureEdgeIndexExists(String esEdgeIndex) {
+        try {
+            Response response = esClient.performRequest(new Request("HEAD", "/" + esEdgeIndex));
+            if (response.getStatusLine().getStatusCode() == 200) {
+                LOG.info("ES edge index '{}' already exists", esEdgeIndex);
+                return;
+            }
+        } catch (IOException e) {
+            // Index doesn't exist, create it below
+        }
+
+        // Edge index uses simple dynamic mappings (keyword for all strings)
+        String createBody = ensureFieldLimit(
+            "{\"mappings\":{\"dynamic_templates\":[{\"strings_as_keywords\":" +
+            "{\"match_mapping_type\":\"string\",\"mapping\":{\"type\":\"keyword\",\"ignore_above\":5120}}}]}}",
+            config.getEsFieldLimit());
+
+        try {
+            Request createReq = new Request("PUT", "/" + esEdgeIndex);
+            createReq.setJsonEntity(createBody);
+            esClient.performRequest(createReq);
+            LOG.info("Created ES edge index '{}'", esEdgeIndex);
+        } catch (IOException e) {
+            LOG.warn("Failed to create ES edge index '{}' (may already exist): {}", esEdgeIndex, e.getMessage());
+        }
+    }
+
+    private void executeEdgeBulk(String bulkBody, int docCount, long totalSoFar) throws IOException {
+        long bulkStart = System.currentTimeMillis();
+
+        Request request = new Request("POST", "/_bulk");
+        request.setJsonEntity(bulkBody);
+        Response response = esClient.performRequest(request);
+        long bulkMs = System.currentTimeMillis() - bulkStart;
+
+        metrics.incrEsEdgeDocsIndexed(docCount);
+
+        int statusCode = response.getStatusLine().getStatusCode();
+        if (statusCode >= 300) {
+            String body = EntityUtils.toString(response.getEntity());
+            LOG.warn("ES edge bulk response status {}: {}", statusCode, body.substring(0, Math.min(500, body.length())));
+        } else {
+            String body = EntityUtils.toString(response.getEntity());
+            if (body.contains("\"errors\":true")) {
+                LOG.warn("ES edge bulk had item-level errors (total: {}): {}...",
+                         String.format("%,d", totalSoFar),
+                         body.substring(0, Math.min(500, body.length())));
+            }
+        }
+
+        LOG.debug("ES edge bulk indexed {} docs in {}ms (total: {})",
+                  docCount, bulkMs, String.format("%,d", totalSoFar));
+    }
+
+    /**
      * Delete the target ES index entirely.
      * Called during --fresh mode to ensure a clean slate before reindexing.
      * If the index doesn't exist, this is a no-op.
@@ -399,6 +539,20 @@ public class ElasticsearchReindexer implements AutoCloseable {
             LOG.info("Deleted ES index '{}'", esIndex);
         } catch (IOException e) {
             LOG.info("ES index '{}' did not exist or delete failed (non-fatal): {}", esIndex, e.getMessage());
+        }
+    }
+
+    /**
+     * Delete the ES edge index.
+     * Called during --fresh mode.
+     */
+    public void deleteEdgeIndex() {
+        String esEdgeIndex = config.getTargetEsEdgeIndex();
+        try {
+            esClient.performRequest(new Request("DELETE", "/" + esEdgeIndex));
+            LOG.info("Deleted ES edge index '{}'", esEdgeIndex);
+        } catch (IOException e) {
+            LOG.info("ES edge index '{}' did not exist or delete failed (non-fatal): {}", esEdgeIndex, e.getMessage());
         }
     }
 
