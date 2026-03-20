@@ -382,7 +382,16 @@ public class MigrationValidator {
                      "(edges_out={}, edges_in={})", String.format("%,d", edgeOutCount),
                      String.format("%,d", edgeInCount));
         }
-        long edgeByIdCount = countTable(ks + ".edges_by_id"); // always estimated (not scanned by SuperVertexDetector)
+        long edgeByIdCount;
+        if (usingActualCounts) {
+            edgeByIdCount = svReport.getEdgesByIdRowCount();
+            LOG.info("Edge consistency: edges_by_id={} (actual full scan)",
+                     String.format("%,d", edgeByIdCount));
+        } else {
+            edgeByIdCount = countTable(ks + ".edges_by_id");
+            LOG.info("Edge consistency: edges_by_id={} (estimated from size_estimates)",
+                     String.format("%,d", edgeByIdCount));
+        }
 
         report.setEdgeOutCount(edgeOutCount);
         report.setEdgeInCount(edgeInCount);
@@ -405,16 +414,22 @@ public class MigrationValidator {
         outInCheck.addDetail("count_source", usingActualCounts ? "full_scan" : "size_estimates");
         report.addCheck(outInCheck);
 
-        // Check 3: edges_by_id ~= edges_out (5% tolerance, always estimated)
-        boolean byIdMatch = isWithinTolerance(edgeByIdCount, edgeOutCount, 0.05);
+        // Check 3: edges_by_id vs edges_out
+        // With actual counts (full scan): exact match required, FAIL on mismatch
+        // With estimates (size_estimates): 5% tolerance, WARN on mismatch
+        double byIdTolerance = usingActualCounts ? 0.0 : 0.05;
+        boolean byIdMatch = isWithinTolerance(edgeByIdCount, edgeOutCount, byIdTolerance);
+        String byIdSource = usingActualCounts ? "actual full scan" : "estimated, 5% tolerance";
         ValidationCheckResult byIdCheck = new ValidationCheckResult(
             "edge_by_id_consistency",
-            "edges_by_id count matches edges_out count (estimated, 5% tolerance)",
-            byIdMatch ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.WARN,
-            String.format("edges_by_id=%d, edges_out=%d, diff=%d",
-                          edgeByIdCount, edgeOutCount, Math.abs(edgeByIdCount - edgeOutCount)));
+            "edges_by_id count matches edges_out count (" + byIdSource + ")",
+            byIdMatch ? ValidationCheckResult.Severity.PASS :
+                (usingActualCounts ? ValidationCheckResult.Severity.FAIL : ValidationCheckResult.Severity.WARN),
+            String.format("edges_by_id=%d, edges_out=%d, diff=%d (source: %s)",
+                          edgeByIdCount, edgeOutCount, Math.abs(edgeByIdCount - edgeOutCount), byIdSource));
         byIdCheck.addDetail("edges_by_id_count", edgeByIdCount);
         byIdCheck.addDetail("edges_out_count", edgeOutCount);
+        byIdCheck.addDetail("count_source", usingActualCounts ? "full_scan" : "size_estimates");
         report.addCheck(byIdCheck);
     }
 

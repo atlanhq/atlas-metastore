@@ -902,6 +902,7 @@ ${tolerations_yaml}
       export SCANNER_THREADS="${SCANNER_THREADS}"
       export WRITER_THREADS="${WRITER_THREADS}"
       export ES_BULK_SIZE="${ES_BULK_SIZE:-1000}"
+      export QUEUE_CAPACITY="${QUEUE_CAPACITY:-10000}"
       export MIGRATOR_JVM_HEAP="${JVM_HEAP}"
       export MIGRATOR_JVM_MIN_HEAP="${JVM_MIN_HEAP}"
       export SOURCE_CONSISTENCY="ONE"

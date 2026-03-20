@@ -53,6 +53,7 @@ TARGET_ES_INDEX="${TARGET_ES_INDEX:-atlas_graph_vertex_index}"
 SCANNER_THREADS="${SCANNER_THREADS:-16}"
 WRITER_THREADS="${WRITER_THREADS:-8}"
 ES_BULK_SIZE="${ES_BULK_SIZE:-1000}"
+QUEUE_CAPACITY="${QUEUE_CAPACITY:-10000}"
 ES_FIELD_LIMIT="${ES_FIELD_LIMIT:-10000}"
 MAX_RETRIES="${MAX_RETRIES:-3}"
 
@@ -235,7 +236,7 @@ migration.writer.threads=${WRITER_THREADS}
 migration.es.bulk.size=${ES_BULK_SIZE}
 migration.max.retries=${MAX_RETRIES}
 migration.scan.fetch.size=5000
-migration.queue.capacity=10000
+migration.queue.capacity=${QUEUE_CAPACITY}
 migration.resume=true
 
 # ID strategy / dedup
