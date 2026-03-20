@@ -34,6 +34,7 @@ on:
       - hotfix-reindex-refresh
       - nb-switchable-graph-provider
       - zg-dual-deploy
+
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
