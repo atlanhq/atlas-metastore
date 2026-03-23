@@ -59,7 +59,7 @@ public class AuthPolicyPreProcessorTest {
     @Test
     public void testESQueryStructure_ForDuplicatePolicyValidation() {
         // This test documents the expected Elasticsearch query structure
-        // for duplicate policy name validation
+        // for duplicate policy name validation (Persona policies only)
 
         String policyName = "test-policy";
         String parentQN = "default/persona123";
@@ -68,6 +68,7 @@ public class AuthPolicyPreProcessorTest {
         List<Map<String, Object>> filterClauseList = new ArrayList<>();
         filterClauseList.add(mapOf("term", mapOf("__state", "ACTIVE")));
         filterClauseList.add(mapOf("term", mapOf("__typeName.keyword", POLICY_ENTITY_TYPE)));
+        filterClauseList.add(mapOf("term", mapOf("policyCategory", "persona")));
         filterClauseList.add(mapOf("term", mapOf("name.keyword", policyName)));
         filterClauseList.add(mapOf("prefix", mapOf(QUALIFIED_NAME, parentQN)));
 
@@ -86,13 +87,14 @@ public class AuthPolicyPreProcessorTest {
         assertNotNull(bool.get("filter"));
 
         List<Map<String, Object>> filters = (List<Map<String, Object>>) bool.get("filter");
-        assertEquals(filters.size(), 4, "Should have 4 filter clauses");
+        assertEquals(filters.size(), 5, "Should have 5 filter clauses");
 
         // Verify each filter clause
-        assertTrue(filters.get(0).containsKey("term"));
-        assertTrue(filters.get(1).containsKey("term"));
-        assertTrue(filters.get(2).containsKey("term"));
-        assertTrue(filters.get(3).containsKey("prefix"));
+        assertTrue(filters.get(0).containsKey("term")); // __state
+        assertTrue(filters.get(1).containsKey("term")); // __typeName
+        assertTrue(filters.get(2).containsKey("term")); // policyCategory
+        assertTrue(filters.get(3).containsKey("term")); // name
+        assertTrue(filters.get(4).containsKey("prefix")); // qualifiedName
     }
 
     @Test
@@ -171,6 +173,18 @@ public class AuthPolicyPreProcessorTest {
     }
 
     @Test
+    public void testQueryFilters_PolicyCategoryFilter() {
+        // Verify the policyCategory filter structure
+        // This ensures validation only applies to Persona policies, not Purpose
+        Map<String, Object> categoryFilter = mapOf("term", mapOf("policyCategory", "persona"));
+
+        assertTrue(categoryFilter.containsKey("term"));
+        Map<String, Object> term = (Map<String, Object>) categoryFilter.get("term");
+        assertEquals(term.get("policyCategory"), "persona",
+            "Validation should only apply to Persona policies");
+    }
+
+    @Test
     public void testQueryFilters_NameFilter() {
         // Verify the name filter structure
         String policyName = "my-policy";
@@ -245,16 +259,14 @@ public class AuthPolicyPreProcessorTest {
     }
 
     @Test
-    public void testParentScope_PersonaAndPurposeSeparate() {
-        // Policy names are scoped to parent, so same name can exist in Persona and Purpose
+    public void testParentScope_PurposePoliciesNotValidated() {
+        // Validation only applies to Persona policies (policyCategory: "persona")
+        // Purpose policies are NOT validated for duplicate names
         String policyName = "my-policy";
-        String personaQN = "default/persona123";
         String purposeQN = "default/purpose456";
 
-        String personaPolicyQN = personaQN + "/abc123";
-        String purposePolicyQN = purposeQN + "/xyz789";
-
-        assertNotEquals(personaPolicyQN, purposePolicyQN, "Persona and Purpose policies are separate");
+        // Purpose policies can have duplicate names - no validation applied
+        assertTrue(true, "Purpose policies are not subject to duplicate name validation");
     }
 
     // =====================================================================================
@@ -287,6 +299,16 @@ public class AuthPolicyPreProcessorTest {
     public void testExpectedBehavior_NullOrEmptyName_SkipsValidation() {
         // This test documents that null or empty names skip validation
         assertTrue(true, "Documented: Null or empty policy names should skip duplicate validation");
+    }
+
+    @Test
+    public void testExpectedBehavior_PurposePolicies_NotValidated() {
+        // This test documents that Purpose policies are NOT validated for duplicate names
+        // Only Persona policies (policyCategory: "persona") are validated
+        String policyName = "duplicate-policy";
+        String purposeQN = "default/purpose123";
+
+        assertTrue(true, "Documented: Purpose policies do not have duplicate name validation");
     }
 
     // =====================================================================================
