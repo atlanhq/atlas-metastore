@@ -117,8 +117,6 @@ public class AuthPolicyPreProcessor implements PreProcessor {
         if (parent != null) {
             parentEntity = parent.getEntity();
             verifyParentTypeName(parentEntity);
-
-            validateDuplicatePolicyName(policy, parentEntity);
         }
 
         String policyCategory = getPolicyCategory(policy);
@@ -130,6 +128,10 @@ public class AuthPolicyPreProcessor implements PreProcessor {
 
         AuthPolicyValidator validator = new AuthPolicyValidator(entityRetriever);
         if (POLICY_CATEGORY_PERSONA.equals(policyCategory)) {
+            if (parentEntity != null) {
+                validateDuplicatePolicyName(policy, parentEntity);
+            }
+
             String policySubCategory = getPolicySubCategory(policy);
 
             if (!POLICY_SUB_CATEGORY_DOMAIN.equals(policySubCategory)) {
@@ -283,7 +285,7 @@ public class AuthPolicyPreProcessor implements PreProcessor {
         List<Map<String, Object>> filterClauseList = new ArrayList<>();
         filterClauseList.add(mapOf("term", mapOf("__state", "ACTIVE")));
         filterClauseList.add(mapOf("term", mapOf("__typeName.keyword", POLICY_ENTITY_TYPE)));
-        filterClauseList.add(mapOf("term", mapOf("policyCategory", "persona")));
+        filterClauseList.add(mapOf("term", mapOf("policyCategory", POLICY_CATEGORY_PERSONA)));
         filterClauseList.add(mapOf("term", mapOf("name.keyword", policyName)));
         filterClauseList.add(mapOf("prefix", mapOf(QUALIFIED_NAME, parentQN)));
 
