@@ -278,6 +278,7 @@ public class AuthPolicyPreProcessor implements PreProcessor {
         List filterClauseList = new ArrayList();
         filterClauseList.add(mapOf("term", mapOf("__state", "ACTIVE")));
         filterClauseList.add(mapOf("term", mapOf("__typeName.keyword", POLICY_ENTITY_TYPE)));
+        filterClauseList.add(mapOf("term", mapOf("policyCategory", "persona")));
         filterClauseList.add(mapOf("term", mapOf("name.keyword", policyName)));
         filterClauseList.add(mapOf("prefix", mapOf(QUALIFIED_NAME, parentQN)));
 
