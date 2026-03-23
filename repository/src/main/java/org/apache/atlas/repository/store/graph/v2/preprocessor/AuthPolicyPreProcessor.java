@@ -271,11 +271,16 @@ public class AuthPolicyPreProcessor implements PreProcessor {
             return;
         }
 
+        if (discovery == null) {
+            LOG.warn("EntityDiscoveryService not initialized - skipping duplicate policy name validation for policy: {}", policyName);
+            return;
+        }
+
         String parentQN = getEntityQualifiedName(parentEntity);
 
         IndexSearchParams indexSearchParams = new IndexSearchParams();
 
-        List filterClauseList = new ArrayList();
+        List<Map<String, Object>> filterClauseList = new ArrayList<>();
         filterClauseList.add(mapOf("term", mapOf("__state", "ACTIVE")));
         filterClauseList.add(mapOf("term", mapOf("__typeName.keyword", POLICY_ENTITY_TYPE)));
         filterClauseList.add(mapOf("term", mapOf("policyCategory", "persona")));
