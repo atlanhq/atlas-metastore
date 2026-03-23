@@ -128,7 +128,7 @@ public class MigrationMetrics {
         LOG.info("  Edges written: {} (current: {}/s) | Indexes: {}",
                  format(curEdgesWritten), format((long) edgeRate), format(indexesWritten.get()));
         if (queueCapacity > 0) {
-            LOG.info("  Writer queue: {}/{} ({}% full)",
+            LOG.info("  Writer queue:  {}/{} ({}% full)",
                      queueDepth, queueCapacity,
                      queueCapacity > 0 ? (queueDepth * 100 / queueCapacity) : 0);
         }
