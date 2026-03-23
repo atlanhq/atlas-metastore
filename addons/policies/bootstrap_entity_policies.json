@@ -2894,7 +2894,7 @@
                 [
                     "entity-type:DataDomain",
                     "entity-type:DataProduct",
-                    "entity-type:Dataset",
+                    "entity-type:DataMeshDataset",
                     "entity-classification:*",
                     "entity:*"
                 ],
@@ -2933,7 +2933,7 @@
                 [
                     "entity-type:DataDomain",
                     "entity-type:DataProduct",
-                    "entity-type:Dataset",
+                    "entity-type:DataMeshDataset",
                     "entity-classification:*",
                     "entity:*",
                     "classification:*"
@@ -2971,7 +2971,7 @@
                 "policyResources":
                 [
                     "entity-type:DataDomain",
-                    "entity-type:Dataset",
+                    "entity-type:DataMeshDataset",
                     "entity-classification:*",
                     "entity:*"
                 ],
@@ -3805,7 +3805,7 @@
                     "entity:*",
                     "entity-type:DataDomain",
                     "entity-type:DataProduct",
-                    "entity-type:Dataset",
+                    "entity-type:DataMeshDataset",
                     "entity-classification:*",
                     "entity-business-metadata:*"
                 ],
