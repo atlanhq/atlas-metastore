@@ -52,11 +52,11 @@ public class SuperVertexDetector {
 
         LOG.info("  Scanning edges_out...");
         Map<String, Long> outEdgeCounts = new HashMap<>();
-        scanEdgeCountsOnly(keyspace + ".edges_out", "out_vertex_id", outEdgeCounts);
+        long edgesOutRowCount = scanEdgeCountsOnly(keyspace + ".edges_out", "out_vertex_id", outEdgeCounts);
 
         LOG.info("  Scanning edges_in...");
         Map<String, Long> inEdgeCounts = new HashMap<>();
-        scanEdgeCountsOnly(keyspace + ".edges_in", "in_vertex_id", inEdgeCounts);
+        long edgesInRowCount = scanEdgeCountsOnly(keyspace + ".edges_in", "in_vertex_id", inEdgeCounts);
 
         // Merge and identify super vertices + compute stats
         Set<String> allVertexIds = new HashSet<>(outEdgeCounts.keySet());
@@ -124,6 +124,8 @@ public class SuperVertexDetector {
         report.setVerticesOver10kEdges(over10k);
         report.setVerticesOver100kEdges(over100k);
         report.setVerticesOver1mEdges(over1m);
+        report.setEdgesOutRowCount(edgesOutRowCount);
+        report.setEdgesInRowCount(edgesInRowCount);
 
         // Top-N in descending order
         List<SuperVertexReport.SuperVertexEntry> topList = new ArrayList<>(topQueue);
@@ -143,7 +145,7 @@ public class SuperVertexDetector {
      * Pass 1: Scan an edge table counting edges per vertex. Only selects
      * the partition key column — no label tracking to save memory.
      */
-    private void scanEdgeCountsOnly(String table, String partitionKeyColumn,
+    private long scanEdgeCountsOnly(String table, String partitionKeyColumn,
                                      Map<String, Long> edgeCounts) {
         SimpleStatement stmt = SimpleStatement.builder(
                 "SELECT " + partitionKeyColumn + " FROM " + table)
@@ -166,6 +168,7 @@ public class SuperVertexDetector {
 
         LOG.info("Scan complete for {}: {} rows, {} distinct vertices",
                  table, String.format("%,d", rowsRead), edgeCounts.size());
+        return rowsRead;
     }
 
     /**

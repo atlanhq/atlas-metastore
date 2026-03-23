@@ -61,7 +61,12 @@ public class CassandraTargetWriter implements AutoCloseable {
     private final AtomicLong writeAttempts = new AtomicLong(0);
     private final AtomicLong writeErrors   = new AtomicLong(0);
     private static final int WRITE_SAMPLE_LOG_LIMIT = 10;
+    private final AtomicLong claimRedirectCount = new AtomicLong(0);
+    private final AtomicLong edgeFallbackCount  = new AtomicLong(0);
     private final ConcurrentMap<Long, String> vertexIdOverrides = new ConcurrentHashMap<>();
+
+    // Optional parallel ES indexer — when set, vertices are indexed into ES during Phase 1
+    private volatile ParallelEsIndexer parallelEsIndexer;
 
     public CassandraTargetWriter(MigratorConfig config, MigrationMetrics metrics, CqlSession targetSession) {
         this.config        = config;
@@ -80,6 +85,11 @@ public class CassandraTargetWriter implements AutoCloseable {
     public void init() {
         createSchema();
         prepareStatements();
+    }
+
+    /** Set the parallel ES indexer to pipeline ES indexing during Phase 1. */
+    public void setParallelEsIndexer(ParallelEsIndexer indexer) {
+        this.parallelEsIndexer = indexer;
     }
 
     private void createSchema() {
@@ -350,6 +360,18 @@ public class CassandraTargetWriter implements AutoCloseable {
         // Count metrics optimistically — async writes to local Cassandra nearly always succeed
         metrics.incrVerticesWritten();
         metrics.incrEdgesWritten(vertex.getOutEdges().size());
+
+        // Pipeline ES indexing: enqueue the vertex for ES bulk indexing in parallel
+        if (parallelEsIndexer != null) {
+            String vertexId = resolveVertexId(vertex);
+            String propsJson;
+            try {
+                propsJson = MAPPER.writeValueAsString(vertex.getProperties());
+            } catch (Exception e) {
+                propsJson = "{}";
+            }
+            parallelEsIndexer.enqueue(vertexId, propsJson, vertex.getTypeName(), vertex.getState());
+        }
     }
 
     /**
@@ -573,8 +595,14 @@ public class CassandraTargetWriter implements AutoCloseable {
         String claimedVertexId = claimVertexId(identityKey, computed);
         if (!claimedVertexId.equals(computed)) {
             vertexIdOverrides.put(vertex.getJgVertexId(), claimedVertexId);
-            LOG.info("Vertex claim redirect: jgVertexId={} computedId={} claimedId={} identityKey={}",
-                    vertex.getJgVertexId(), computed, claimedVertexId, identityKey);
+            long count = claimRedirectCount.incrementAndGet();
+            if (count <= 10 || count % 1000 == 0) {
+                LOG.info("Vertex claim redirect #{}: jgVertexId={} computedId={} claimedId={} identityKey={}",
+                        count, vertex.getJgVertexId(), computed, claimedVertexId, identityKey);
+            } else {
+                LOG.debug("Vertex claim redirect #{}: jgVertexId={} computedId={} claimedId={} identityKey={}",
+                        count, vertex.getJgVertexId(), computed, claimedVertexId, identityKey);
+            }
         }
 
         return claimedVertexId;
@@ -589,7 +617,12 @@ public class CassandraTargetWriter implements AutoCloseable {
         // Use HASH_JG as a stable fallback — the edge will still land on a deterministic ID,
         // just not the identity-based one. Log a warning so we can track how often this happens.
         if (config.getIdStrategy() == IdStrategy.HASH_IDENTITY) {
-            LOG.warn("Edge endpoint jgVertexId={} not in override map; falling back to HASH_JG", jgVertexId);
+            long count = edgeFallbackCount.incrementAndGet();
+            if (count <= 10 || count % 1000 == 0) {
+                LOG.warn("Edge endpoint jgVertexId={} not in override map (#{}); falling back to HASH_JG", jgVertexId, count);
+            } else {
+                LOG.debug("Edge endpoint jgVertexId={} not in override map (#{}); falling back to HASH_JG", jgVertexId, count);
+            }
         }
         return DeterministicIdUtil.vertexIdFromJg(jgVertexId,
                 config.getIdStrategy() == IdStrategy.HASH_IDENTITY ? IdStrategy.HASH_JG : config.getIdStrategy());
@@ -618,6 +651,30 @@ public class CassandraTargetWriter implements AutoCloseable {
         }
 
         return candidateVertexId;
+    }
+
+    /**
+     * Truncate all data tables in the target keyspace.
+     * Called during --fresh mode to ensure a clean slate before migration.
+     * Does NOT drop the keyspace or schema — only removes data.
+     */
+    public void truncateAll() {
+        String[] tables = {
+            "vertices", "edges_out", "edges_in", "edges_by_id",
+            "vertex_index", "vertex_property_index", "edge_index",
+            "entity_claims", "type_definitions", "type_definitions_by_category",
+            "schema_registry"
+        };
+        for (String table : tables) {
+            try {
+                LOG.info("Truncating {}.{}", ks, table);
+                targetSession.execute("TRUNCATE " + ks + "." + table);
+            } catch (Exception e) {
+                // Table may not exist yet on first run — that's fine
+                LOG.debug("Could not truncate {}.{} (may not exist yet): {}", ks, table, e.getMessage());
+            }
+        }
+        LOG.info("All target tables truncated in keyspace '{}'", ks);
     }
 
     @Override

@@ -166,7 +166,7 @@ public class ElasticsearchReindexer implements AutoCloseable {
                  String.format("%,d", totalDocs), String.format("%,d", skipped));
     }
 
-    private void ensureIndexExists(String esIndex) {
+    void ensureIndexExists(String esIndex) {
         try {
             Response response = esClient.performRequest(new Request("HEAD", "/" + esIndex));
             if (response.getStatusLine().getStatusCode() == 200) {
@@ -182,6 +182,9 @@ public class ElasticsearchReindexer implements AutoCloseable {
         // so the ES index template (atlan-template) applies its defaults.
         String sourceIndex = config.getSourceEsIndex();
         String createBody = getCreateBodyFromSourceIndex(sourceIndex);
+
+        // Ensure field limit is set in the create body
+        createBody = ensureFieldLimit(createBody, config.getEsFieldLimit());
 
         try {
             Request createReq = new Request("PUT", "/" + esIndex);
@@ -271,13 +274,14 @@ public class ElasticsearchReindexer implements AutoCloseable {
                 if (settings != null) {
                     Map<String, Object> indexSettings = (Map<String, Object>) settings.get("index");
                     if (indexSettings != null) {
-                        // Remove read-only / auto-generated settings that can't be set on creation
-                        indexSettings.remove("creation_date");
-                        indexSettings.remove("provided_name");
-                        indexSettings.remove("uuid");
-                        indexSettings.remove("version");
-                        indexSettings.remove("routing");
-                        indexSettings.remove("history");
+                        // Allowlist: only keep settings that are safe and meaningful for index creation.
+                        // ES returns many read-only / auto-generated settings (creation_date, uuid, version,
+                        // resize, routing, blocks, etc.) that cause 400 errors if included in PUT /{index}.
+                        java.util.Set<String> ALLOWED_SETTINGS = java.util.Set.of(
+                            "analysis", "number_of_shards", "number_of_replicas", "refresh_interval",
+                            "max_result_window", "mapping", "similarity"
+                        );
+                        indexSettings.keySet().retainAll(ALLOWED_SETTINGS);
                         settingsJson = MAPPER.writeValueAsString(Map.of("index", indexSettings));
                     }
                 }
@@ -301,6 +305,50 @@ public class ElasticsearchReindexer implements AutoCloseable {
             LOG.warn("Failed to read mappings/settings from source index '{}', falling back to default Atlas mappings: {}",
                      sourceIndex, e.getMessage());
             return "{\"mappings\":" + DEFAULT_MAPPINGS_JSON + "}";
+        }
+    }
+
+    /**
+     * Ensures the index creation body includes index.mapping.total_fields.limit.
+     * Injects the setting into the "settings" block if not already present.
+     */
+    @SuppressWarnings("unchecked")
+    private String ensureFieldLimit(String createBody, int fieldLimit) {
+        if (fieldLimit <= 0) return createBody;
+
+        try {
+            Map<String, Object> body = MAPPER.readValue(createBody, Map.class);
+
+            Map<String, Object> settings = (Map<String, Object>) body.get("settings");
+            if (settings == null) {
+                settings = new java.util.LinkedHashMap<>();
+                body.put("settings", settings);
+            }
+
+            Map<String, Object> indexSettings = (Map<String, Object>) settings.get("index");
+            if (indexSettings == null) {
+                indexSettings = new java.util.LinkedHashMap<>();
+                settings.put("index", indexSettings);
+            }
+
+            // Set mapping.total_fields.limit
+            Map<String, Object> mapping = (Map<String, Object>) indexSettings.get("mapping");
+            if (mapping == null) {
+                mapping = new java.util.LinkedHashMap<>();
+                indexSettings.put("mapping", mapping);
+            }
+            Map<String, Object> totalFields = (Map<String, Object>) mapping.get("total_fields");
+            if (totalFields == null) {
+                totalFields = new java.util.LinkedHashMap<>();
+                mapping.put("total_fields", totalFields);
+            }
+            totalFields.put("limit", fieldLimit);
+
+            LOG.info("ES index field limit set to: {}", fieldLimit);
+            return MAPPER.writeValueAsString(body);
+        } catch (Exception e) {
+            LOG.warn("Failed to inject field limit into index settings: {}", e.getMessage());
+            return createBody;
         }
     }
 
@@ -328,15 +376,30 @@ public class ElasticsearchReindexer implements AutoCloseable {
             }
         }
 
-        LOG.info("ES bulk indexed {} docs in {}ms (total: {}, rate: {}/s)",
-                 docCount, bulkMs, String.format("%,d", totalSoFar),
-                 bulkMs > 0 ? (docCount * 1000L / bulkMs) : "N/A");
+        LOG.debug("ES bulk indexed {} docs in {}ms (total: {}, rate: {}/s)",
+                  docCount, bulkMs, String.format("%,d", totalSoFar),
+                  bulkMs > 0 ? (docCount * 1000L / bulkMs) : "N/A");
     }
 
     /** Escape special JSON characters in a string value */
     private static String escapeJson(String value) {
         if (value == null) return "";
         return value.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    /**
+     * Delete the target ES index entirely.
+     * Called during --fresh mode to ensure a clean slate before reindexing.
+     * If the index doesn't exist, this is a no-op.
+     */
+    public void deleteIndex() {
+        String esIndex = config.getTargetEsIndex();
+        try {
+            esClient.performRequest(new Request("DELETE", "/" + esIndex));
+            LOG.info("Deleted ES index '{}'", esIndex);
+        } catch (IOException e) {
+            LOG.info("ES index '{}' did not exist or delete failed (non-fatal): {}", esIndex, e.getMessage());
+        }
     }
 
     @Override

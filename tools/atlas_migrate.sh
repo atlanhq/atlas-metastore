@@ -53,10 +53,16 @@ TARGET_ES_INDEX="${TARGET_ES_INDEX:-atlas_graph_vertex_index}"
 SCANNER_THREADS="${SCANNER_THREADS:-16}"
 WRITER_THREADS="${WRITER_THREADS:-8}"
 ES_BULK_SIZE="${ES_BULK_SIZE:-1000}"
+ES_FIELD_LIMIT="${ES_FIELD_LIMIT:-10000}"
+MAX_RETRIES="${MAX_RETRIES:-3}"
 
 # ID strategy and dedup claims
 ID_STRATEGY="${ID_STRATEGY:-legacy}"          # "legacy" (UUID), "hash-jg" (SHA-256 of JG ID), or "deterministic" (identity-based SHA-256)
 CLAIM_ENABLED="${CLAIM_ENABLED:-false}"       # LWT dedup claims during migration
+
+# Cassandra consistency levels
+SOURCE_CONSISTENCY="${SOURCE_CONSISTENCY:-ONE}"            # Read consistency (ONE = fast scans)
+TARGET_CONSISTENCY="${TARGET_CONSISTENCY:-LOCAL_QUORUM}"   # Write consistency (LOCAL_QUORUM = durable)
 
 # Skip flags
 SKIP_ES_REINDEX="${SKIP_ES_REINDEX:-false}"
@@ -221,11 +227,13 @@ target.elasticsearch.protocol=${ES_PROTOCOL}
 target.elasticsearch.index=${TARGET_ES_INDEX}
 target.elasticsearch.username=
 target.elasticsearch.password=
+target.elasticsearch.field.limit=${ES_FIELD_LIMIT}
 
 # Tuning
 migration.scanner.threads=${SCANNER_THREADS}
 migration.writer.threads=${WRITER_THREADS}
 migration.es.bulk.size=${ES_BULK_SIZE}
+migration.max.retries=${MAX_RETRIES}
 migration.scan.fetch.size=5000
 migration.queue.capacity=10000
 migration.resume=true
@@ -233,6 +241,10 @@ migration.resume=true
 # ID strategy / dedup
 migration.id.strategy=${ID_STRATEGY}
 migration.claim.enabled=${CLAIM_ENABLED}
+
+# Cassandra consistency levels
+source.cassandra.consistency=${SOURCE_CONSISTENCY}
+target.cassandra.consistency=${TARGET_CONSISTENCY}
 
 # Skip flags
 migration.skip.es.reindex=${SKIP_ES_REINDEX}
@@ -300,7 +312,7 @@ run() {
     # Use pipefail + PIPESTATUS to capture the JAR's exit code through tee
     set +e
     java \
-        -Xmx4g -Xms2g \
+        -Xmx${MIGRATOR_JVM_HEAP:-4g} -Xms${MIGRATOR_JVM_MIN_HEAP:-2g} \
         --add-opens java.base/java.lang=ALL-UNNAMED \
         -jar "$MIGRATOR_JAR" \
         "$PROPERTIES_FILE" \
@@ -346,6 +358,8 @@ show_help() {
     echo "  SKIP_CLASSIFICATIONS     Skip classification vertices: true/false (default: false)"
     echo "  SKIP_TASKS               Skip task vertices: true/false (default: false)"
     echo "  VALIDATION_TENANT_ID     Tenant ID for validation report (default: auto-derived from hostname)"
+    echo "  MIGRATOR_JVM_HEAP        JVM max heap (default: 4g)"
+    echo "  MIGRATOR_JVM_MIN_HEAP    JVM initial heap (default: 2g)"
     echo ""
     echo "Quick start (from kubectl):"
     echo "  kubectl exec -it atlas-0 -n atlas -c atlas-main -- /opt/apache-atlas/bin/atlas_migrate.sh --dry-run"
@@ -366,7 +380,7 @@ case "${1:-}" in
         preflight
         log ""
         log "Dry run complete. Properties at $PROPERTIES_FILE"
-        log "To run: java -Xmx4g -jar $MIGRATOR_JAR $PROPERTIES_FILE"
+        log "To run: java -Xmx${MIGRATOR_JVM_HEAP:-4g} -jar $MIGRATOR_JAR $PROPERTIES_FILE"
         ;;
     --es-only|--validate-only|--fresh|"")
         find_migrator_jar
