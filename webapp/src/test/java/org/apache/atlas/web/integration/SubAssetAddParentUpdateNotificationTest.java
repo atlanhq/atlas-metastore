@@ -17,12 +17,20 @@
  */
 package org.apache.atlas.web.integration;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntitiesWithExtInfo;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntityWithExtInfo;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.instance.EntityMutationResponse;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -31,10 +39,14 @@ import org.junit.jupiter.api.TestMethodOrder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Properties;
 import java.util.Set;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -46,8 +58,8 @@ import static org.junit.jupiter.api.Assertions.*;
  *   <li>Create a Table entity (parent/main asset)</li>
  *   <li>Send a bulk createOrUpdate with the SAME Table (unchanged attributes)
  *       plus a NEW Process with inputs referencing the Table</li>
- *   <li>Expect: Table should appear as UPDATED in the response because its
- *       relationship (inputs/outputs) changed</li>
+ *   <li>Expect: Table should appear as UPDATED in the REST response AND
+ *       receive an ENTITY_UPDATE Kafka notification</li>
  * </ol>
  *
  * <p>Bug: The Table is marked as "unchanged" by the diff check and added to
@@ -66,6 +78,10 @@ import static org.junit.jupiter.api.Assertions.*;
 public class SubAssetAddParentUpdateNotificationTest extends AtlasInProcessBaseIT {
 
     private static final Logger LOG = LoggerFactory.getLogger(SubAssetAddParentUpdateNotificationTest.class);
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    private static final String KAFKA_TOPIC = "ATLAS_ENTITIES";
+    private static final long KAFKA_POLL_TIMEOUT_MS = 15000;
 
     private final long testId = System.currentTimeMillis();
 
@@ -98,6 +114,10 @@ public class SubAssetAddParentUpdateNotificationTest extends AtlasInProcessBaseI
         LOG.info("=== Step 2: MS-701 - Sub-asset add should trigger parent UPDATE ===");
         assertNotNull(tableGuid, "Table must exist from previous test");
 
+        // Create Kafka consumer BEFORE the operation to capture notifications
+        KafkaConsumer<String, String> consumer = createEntityNotificationConsumer();
+        long operationStartTime = System.currentTimeMillis();
+
         // Build the bulk payload:
         //   - The SAME Table (no attribute changes → will be marked as "unchanged")
         //   - A NEW Process with inputs=[Table] (creates a relationship edge back to the Table)
@@ -120,6 +140,8 @@ public class SubAssetAddParentUpdateNotificationTest extends AtlasInProcessBaseI
         EntityMutationResponse response = atlasClient.createEntities(bulkEntities);
 
         assertNotNull(response, "Mutation response should not be null");
+
+        // ===== REST Response Assertions =====
 
         // Process should be CREATED
         List<AtlasEntityHeader> createdEntities = response.getCreatedEntities();
@@ -150,14 +172,123 @@ public class SubAssetAddParentUpdateNotificationTest extends AtlasInProcessBaseI
 
         LOG.info("All updated GUIDs in REST response: {}", updatedGuids);
 
-        // KEY ASSERTION: The Table should appear as UPDATED because its relationship changed
-        // (a new Process now references it via inputs)
+        // KEY ASSERTION 1: The Table should appear as UPDATED in the REST response
         assertTrue(updatedGuids.contains(tableGuid),
                 "MS-701 BUG: Table should appear as UPDATED in REST response when a new " +
                 "sub-asset (Process) creates a relationship to it, even though the Table's " +
                 "own attributes are unchanged. Table GUID: " + tableGuid +
                 ", Updated GUIDs: " + updatedGuids);
 
-        LOG.info("=== TEST PASSED: Table correctly appears as UPDATED ===");
+        LOG.info("REST assertion passed: Table correctly appears as UPDATED");
+
+        // ===== Kafka Notification Assertions =====
+
+        // Wait briefly for async notification delivery
+        Thread.sleep(3000);
+
+        List<JsonNode> tableUpdateNotifications = collectEntityUpdateNotifications(
+                consumer, tableGuid, operationStartTime, KAFKA_POLL_TIMEOUT_MS);
+
+        LOG.info("Kafka ENTITY_UPDATE notifications for Table: {}", tableUpdateNotifications.size());
+        for (JsonNode notif : tableUpdateNotifications) {
+            LOG.info("  Notification: {}", notif);
+        }
+
+        // KEY ASSERTION 2: Table should have received an ENTITY_UPDATE Kafka notification
+        assertFalse(tableUpdateNotifications.isEmpty(),
+                "MS-701 BUG: Table should receive ENTITY_UPDATE Kafka notification when a new " +
+                "sub-asset (Process) creates a relationship to it. Table GUID: " + tableGuid);
+
+        LOG.info("=== TEST PASSED: Table appears as UPDATED in both REST response and Kafka ===");
+        consumer.close();
+    }
+
+    // ==================== Kafka Helper Methods ====================
+
+    /**
+     * Creates a Kafka consumer subscribed to ATLAS_ENTITIES topic.
+     * Uses the same bootstrap servers configured for the in-process Atlas server.
+     */
+    private KafkaConsumer<String, String> createEntityNotificationConsumer() throws Exception {
+        String bootstrapServers = ApplicationProperties.get().getString("atlas.kafka.bootstrap.servers");
+
+        Properties props = new Properties();
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        props.put(ConsumerConfig.GROUP_ID_CONFIG, "ms701-test-" + UUID.randomUUID());
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+
+        KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props);
+        consumer.subscribe(Collections.singletonList(KAFKA_TOPIC));
+        return consumer;
+    }
+
+    /**
+     * Polls Kafka for ENTITY_UPDATE notifications matching the given entity GUID.
+     * Filters by startTime to avoid stale messages from earlier tests.
+     *
+     * <p>Message format on ATLAS_ENTITIES topic:
+     * <pre>
+     * { "message": { "operationType": "ENTITY_UPDATE", "entity": { "guid": "...", "typeName": "..." }, "eventTime": ... } }
+     * </pre>
+     */
+    private List<JsonNode> collectEntityUpdateNotifications(
+            KafkaConsumer<String, String> consumer,
+            String targetGuid,
+            long startTime,
+            long timeoutMs) {
+
+        List<JsonNode> matched = new ArrayList<>();
+        long deadline = System.currentTimeMillis() + timeoutMs;
+
+        while (System.currentTimeMillis() < deadline) {
+            ConsumerRecords<String, String> records = consumer.poll(Duration.ofSeconds(2));
+
+            for (ConsumerRecord<String, String> record : records) {
+                try {
+                    JsonNode kafkaMessage = MAPPER.readTree(record.value());
+
+                    if (!kafkaMessage.has("message")) {
+                        continue;
+                    }
+
+                    JsonNode message = kafkaMessage.get("message");
+                    long eventTime = message.has("eventTime") ? message.get("eventTime").asLong() : 0;
+
+                    // Skip stale messages
+                    if (startTime > 0 && eventTime > 0 && eventTime < startTime) {
+                        continue;
+                    }
+
+                    String opType = message.has("operationType") ? message.get("operationType").asText() : "";
+                    String guid = message.has("entity") && message.get("entity").has("guid")
+                            ? message.get("entity").get("guid").asText() : "";
+
+                    if ("ENTITY_UPDATE".equals(opType) && targetGuid.equals(guid)) {
+                        matched.add(message);
+                        LOG.debug("Found ENTITY_UPDATE for target GUID {}", targetGuid);
+                    }
+                } catch (Exception e) {
+                    LOG.warn("Failed to parse Kafka message: {}", e.getMessage());
+                }
+            }
+
+            // If we found what we need, no need to keep polling
+            if (!matched.isEmpty()) {
+                break;
+            }
+
+            if (records.isEmpty()) {
+                try {
+                    Thread.sleep(200);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+
+        return matched;
     }
 }
