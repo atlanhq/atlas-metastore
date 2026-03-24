@@ -852,6 +852,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                 return;
             }
 
+            boolean migrationSucceeded = false;
             try {
                 Request putSettings = new Request("PUT", INDEX_NAME + "/_settings");
                 String settingsBody = "{\"index.store.type\": \"niofs\"}";
@@ -859,6 +860,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                 Response putResponse = lowLevelClient.performRequest(putSettings);
                 if (isSuccess(putResponse)) {
                     LOG.info("entity_audits index store type set to niofs");
+                    migrationSucceeded = true;
                 } else {
                     LOG.error("Failed to set niofs store type on entity_audits");
                 }
@@ -869,10 +871,13 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                     LOG.info("entity_audits index reopened after niofs migration");
                 } else {
                     LOG.error("Failed to reopen entity_audits index after niofs migration");
+                    migrationSucceeded = false;
+                }
+
+                if (migrationSucceeded) {
+                    writeNiofsMigrationMarker();
                 }
             }
-
-            writeNiofsMigrationMarker();
         } catch (Exception e) {
             LOG.warn("Failed to ensure niofs store type on entity_audits, will retry on next startup", e);
         }
