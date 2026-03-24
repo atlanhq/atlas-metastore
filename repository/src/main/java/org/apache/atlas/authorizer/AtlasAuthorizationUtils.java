@@ -227,6 +227,7 @@ public class AtlasAuthorizationUtils {
 
                 metric = RequestContext.get().startMetricRecord("isAccessAllowed.abac");
                 AtlasAccessResult finalResult = new AtlasAccessResult(false);
+                AtlasAccessResult abacPoliciesResult = null;
 
                 try {
                     // if priority is override, then it's an explicit deny as implicit deny won't have priority set to override
@@ -235,7 +236,7 @@ public class AtlasAuthorizationUtils {
                         return finalResult.isAllowed();
                     }
 
-                    AtlasAccessResult abacPoliciesResult = ABACAuthorizerUtils.isAccessAllowed(request.getEntity(), request.getAction());
+                    abacPoliciesResult = ABACAuthorizerUtils.isAccessAllowed(request.getEntity(), request.getAction());
 
                     /* reference - https://docs.google.com/spreadsheets/d/1npyX1cpm8-a8LwzmObgf8U1hZh6bO7FF8cpXjHMMQ08/edit?usp=sharing
                      * Result of Atlas policy engine and ABAC evaluator is merged with below priority
@@ -281,10 +282,9 @@ public class AtlasAuthorizationUtils {
 
                     return finalResult.isAllowed();
                 } finally {
-                    // log final result audit
                     NewAtlasAuditHandler auditHandler = new NewAtlasAuditHandler(request, SERVICE_DEF_ATLAS);
                     try {
-                        finalResult.setEnforcer("merged_auth");
+                        finalResult.setEnforcer(buildMergedEnforcer(atlasPoliciesResult, abacPoliciesResult));
                         auditHandler.processResult(finalResult, request);
                     } finally {
                         auditHandler.flushAudit();
@@ -355,6 +355,7 @@ public class AtlasAuthorizationUtils {
 
                 metric = RequestContext.get().startMetricRecord("isAccessAllowed.abac");
                 AtlasAccessResult finalResult = new AtlasAccessResult(false);
+                AtlasAccessResult abacPoliciesResult = null;
 
                 try {
                     if (!atlasPoliciesResult.isAllowed() && atlasPoliciesResult.getPolicyPriority() == RangerPolicy.POLICY_PRIORITY_OVERRIDE) {
@@ -363,7 +364,7 @@ public class AtlasAuthorizationUtils {
                         return finalResult.isAllowed();
                     }
 
-                    AtlasAccessResult abacPoliciesResult = ABACAuthorizerUtils.isAccessAllowed(request.getRelationshipType(),
+                    abacPoliciesResult = ABACAuthorizerUtils.isAccessAllowed(request.getRelationshipType(),
                             request.getEnd1Entity(),
                             request.getEnd2Entity(),
                             request.getAction());
@@ -394,10 +395,9 @@ public class AtlasAuthorizationUtils {
                     return finalResult.isAllowed();
 
                 } finally {
-                    // log final result audit
                     NewAtlasAuditHandler auditHandler = new NewAtlasAuditHandler(request, SERVICE_DEF_ATLAS);
                     try {
-                        finalResult.setEnforcer("merged_auth");
+                        finalResult.setEnforcer(buildMergedEnforcer(atlasPoliciesResult, abacPoliciesResult));
                         auditHandler.processResult(finalResult, request);
                     } finally {
                         auditHandler.flushAudit();
@@ -555,6 +555,16 @@ public class AtlasAuthorizationUtils {
         }
 
         return ret;
+    }
+
+    private static String buildMergedEnforcer(AtlasAccessResult rangerResult, AtlasAccessResult abacResult) {
+        String rangerInfo = rangerResult != null
+                ? String.format("ranger:%s:%s", rangerResult.isAllowed() ? "ALLOW" : "DENY", rangerResult.getPolicyId())
+                : "ranger:N/A";
+        String abacInfo = abacResult != null
+                ? String.format("abac:%s:%s", abacResult.isAllowed() ? "ALLOW" : "DENY", abacResult.getPolicyId())
+                : "abac:N/A";
+        return String.format("merged|%s|%s", rangerInfo, abacInfo);
     }
 
     private static void setAuthInfo(AtlasAccessRequest request) {
