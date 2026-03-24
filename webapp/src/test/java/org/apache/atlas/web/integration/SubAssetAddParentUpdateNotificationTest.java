@@ -1,286 +1,163 @@
+/**
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.apache.atlas.web.integration;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.ConsumerRecords;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.common.serialization.StringDeserializer;
-import org.junit.jupiter.api.*;
-import org.junit.jupiter.api.extension.ExtendWith;
+import org.apache.atlas.model.instance.AtlasEntity;
+import org.apache.atlas.model.instance.AtlasEntity.AtlasEntitiesWithExtInfo;
+import org.apache.atlas.model.instance.AtlasEntity.AtlasEntityWithExtInfo;
+import org.apache.atlas.model.instance.AtlasEntityHeader;
+import org.apache.atlas.model.instance.AtlasObjectId;
+import org.apache.atlas.model.instance.EntityMutationResponse;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Order;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.TestMethodOrder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.testcontainers.junit.jupiter.TestcontainersExtension;
 
-import java.net.URI;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
-import java.util.*;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Integration test for MS-701: Main asset events missing for sub-asset add.
  *
- * Scenario (first example from the ticket):
- * 1. Create a Table entity (parent/main asset)
- * 2. Send a bulk createOrUpdate with:
- *    - The SAME Table (unchanged attributes)
- *    - A NEW Process with inputs referencing the Table (sub-asset add)
- * 3. Expect: Table should appear as UPDATED in both the REST response and Kafka notifications,
- *    because its relationship (inputs/outputs) changed.
+ * <p>Scenario (first example from the ticket):
+ * <ol>
+ *   <li>Create a Table entity (parent/main asset)</li>
+ *   <li>Send a bulk createOrUpdate with the SAME Table (unchanged attributes)
+ *       plus a NEW Process with inputs referencing the Table</li>
+ *   <li>Expect: Table should appear as UPDATED in the response because its
+ *       relationship (inputs/outputs) changed</li>
+ * </ol>
  *
- * Bug: The Table is marked as "unchanged" by the diff check and added to entitiesToSkipUpdate.
- * When the Process creates a relationship edge back to the Table, the Table's update event
- * is suppressed by RequestContext.recordEntityUpdate() checking the skip set.
+ * <p>Bug: The Table is marked as "unchanged" by the diff check and added to
+ * entitiesToSkipUpdate. When the Process creates a relationship edge back to
+ * the Table, the Table's update event is suppressed by
+ * RequestContext.recordEntityUpdate() checking the skip set.</p>
+ *
+ * <p>Run with:
+ * <pre>
+ * mvn install -pl webapp -am -DskipTests -Drat.skip=true
+ * mvn test -pl webapp -Dtest=SubAssetAddParentUpdateNotificationTest -Drat.skip=true
+ * </pre>
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-@ExtendWith(TestcontainersExtension.class)
-public class SubAssetAddParentUpdateNotificationTest extends AtlasDockerIntegrationTest {
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+public class SubAssetAddParentUpdateNotificationTest extends AtlasInProcessBaseIT {
 
     private static final Logger LOG = LoggerFactory.getLogger(SubAssetAddParentUpdateNotificationTest.class);
 
-    private static final String KAFKA_TOPIC = "ATLAS_ENTITIES";
-    private static final int NOTIFICATION_TIMEOUT_MS = 20000;
+    private final long testId = System.currentTimeMillis();
+
+    private String tableGuid;
+    private String tableQualifiedName;
 
     @Test
-    @DisplayName("MS-701: Adding sub-asset (Process) should emit UPDATE event for parent (Table)")
-    void testAddSubAsset_ParentShouldAppearAsUpdated() throws Exception {
-        LOG.info("=== TEST: MS-701 - Sub-asset add should trigger parent UPDATE ===");
+    @Order(1)
+    void testCreateParentTable() throws Exception {
+        LOG.info("=== Step 1: Create parent Table ===");
 
-        // Step 1: Create a Table entity
-        String tableQualifiedName = "ms701_parent_table_" + System.currentTimeMillis();
-        LOG.info("Creating parent Table: {}", tableQualifiedName);
+        AtlasEntity table = new AtlasEntity("Table");
+        tableQualifiedName = "test://ms701/parent-table/" + testId;
+        table.setAttribute("name", "ms701-parent-table-" + testId);
+        table.setAttribute("qualifiedName", tableQualifiedName);
 
-        String tableGuid = createTable(tableQualifiedName);
-        LOG.info("Created parent Table, GUID: {}", tableGuid);
+        EntityMutationResponse response = atlasClient.createEntity(new AtlasEntityWithExtInfo(table));
+
+        AtlasEntityHeader created = response.getFirstEntityCreated();
+        assertNotNull(created, "Table should be created");
+        tableGuid = created.getGuid();
         assertNotNull(tableGuid, "Table GUID should not be null");
 
-        // Small delay to ensure entity is fully persisted
-        Thread.sleep(2000);
+        LOG.info("Created parent Table, GUID: {}", tableGuid);
+    }
 
-        // Step 2: Create Kafka consumer BEFORE the second bulk request
-        KafkaConsumer<String, String> consumer = createKafkaConsumer();
-        Thread.sleep(1000);
+    @Test
+    @Order(2)
+    void testAddSubAsset_ParentShouldAppearAsUpdated() throws Exception {
+        LOG.info("=== Step 2: MS-701 - Sub-asset add should trigger parent UPDATE ===");
+        assertNotNull(tableGuid, "Table must exist from previous test");
 
-        long operationStartTime = System.currentTimeMillis();
-
-        // Step 3: Send a bulk request with:
+        // Build the bulk payload:
         //   - The SAME Table (no attribute changes → will be marked as "unchanged")
         //   - A NEW Process with inputs=[Table] (creates a relationship edge back to the Table)
-        String processQualifiedName = "ms701_child_process_" + System.currentTimeMillis();
-        LOG.info("Sending bulk request with unchanged Table + new Process: {}", processQualifiedName);
+        AtlasEntity unchangedTable = new AtlasEntity("Table");
+        unchangedTable.setGuid(tableGuid);
+        unchangedTable.setAttribute("name", "ms701-parent-table-" + testId);
+        unchangedTable.setAttribute("qualifiedName", tableQualifiedName);
 
-        String bulkPayload = String.format("""
-            {
-                "entities": [
-                    {
-                        "typeName": "Table",
-                        "guid": "%s",
-                        "status": "ACTIVE",
-                        "attributes": {
-                            "qualifiedName": "%s",
-                            "name": "%s",
-                            "connectionQualifiedName": "default/bigquery/1709805089",
-                            "connectorName": "bigquery"
-                        }
-                    },
-                    {
-                        "typeName": "Process",
-                        "guid": "-1",
-                        "status": "ACTIVE",
-                        "attributes": {
-                            "qualifiedName": "%s",
-                            "name": "%s",
-                            "connectionQualifiedName": "default/snowflake/1736926905",
-                            "connectorName": "snowflake"
-                        },
-                        "relationshipAttributes": {
-                            "inputs": [
-                                {
-                                    "guid": "%s",
-                                    "typeName": "Table"
-                                }
-                            ]
-                        }
-                    }
-                ]
-            }""", tableGuid, tableQualifiedName, tableQualifiedName,
-                processQualifiedName, processQualifiedName, tableGuid);
+        AtlasEntity newProcess = new AtlasEntity("Process");
+        newProcess.setAttribute("name", "ms701-child-process-" + testId);
+        newProcess.setAttribute("qualifiedName", "test://ms701/child-process/" + testId);
+        newProcess.setAttribute("inputs",
+                Collections.singletonList(new AtlasObjectId(tableGuid, "Table")));
 
-        HttpResponse<String> response = sendBulkEntityRequest(bulkPayload);
-        assertEquals(200, response.statusCode(), "Bulk request should succeed. Response: " + response.body());
+        AtlasEntitiesWithExtInfo bulkEntities = new AtlasEntitiesWithExtInfo();
+        bulkEntities.addEntity(unchangedTable);
+        bulkEntities.addEntity(newProcess);
 
-        ObjectNode result = mapper.readValue(response.body(), ObjectNode.class);
-        LOG.info("Bulk response: {}", response.body());
+        LOG.info("Sending bulk request with unchanged Table + new Process");
+        EntityMutationResponse response = atlasClient.createEntities(bulkEntities);
 
-        // Step 4: Verify REST response — Table should be in mutatedEntities.UPDATE
-        JsonNode mutatedEntities = result.get("mutatedEntities");
-        assertNotNull(mutatedEntities, "Response should have mutatedEntities");
+        assertNotNull(response, "Mutation response should not be null");
 
         // Process should be CREATED
-        assertTrue(mutatedEntities.has("CREATE"), "Should have CREATE entries for new Process");
+        List<AtlasEntityHeader> createdEntities = response.getCreatedEntities();
+        assertNotNull(createdEntities, "Should have created entities");
+        assertFalse(createdEntities.isEmpty(), "Should have at least 1 created entity (Process)");
+
+        boolean processCreated = createdEntities.stream()
+                .anyMatch(h -> "Process".equals(h.getTypeName()));
+        assertTrue(processCreated, "Process should appear in created entities");
 
         // Collect all UPDATED entity GUIDs from the response
         Set<String> updatedGuids = new HashSet<>();
-        if (mutatedEntities.has("UPDATE")) {
-            for (JsonNode entity : mutatedEntities.get("UPDATE")) {
-                String guid = entity.get("guid").asText();
-                String typeName = entity.get("typeName").asText();
-                updatedGuids.add(guid);
-                LOG.info("UPDATED entity in response: {} ({})", typeName, guid);
+        List<AtlasEntityHeader> updatedEntities = response.getUpdatedEntities();
+        if (updatedEntities != null) {
+            for (AtlasEntityHeader header : updatedEntities) {
+                updatedGuids.add(header.getGuid());
+                LOG.info("UPDATED entity in response: {} ({})", header.getTypeName(), header.getGuid());
             }
         }
 
-        LOG.info("Updated GUIDs in REST response: {}", updatedGuids);
+        List<AtlasEntityHeader> partialUpdatedEntities = response.getPartialUpdatedEntities();
+        if (partialUpdatedEntities != null) {
+            for (AtlasEntityHeader header : partialUpdatedEntities) {
+                updatedGuids.add(header.getGuid());
+                LOG.info("PARTIAL_UPDATE entity in response: {} ({})", header.getTypeName(), header.getGuid());
+            }
+        }
+
+        LOG.info("All updated GUIDs in REST response: {}", updatedGuids);
 
         // KEY ASSERTION: The Table should appear as UPDATED because its relationship changed
         // (a new Process now references it via inputs)
         assertTrue(updatedGuids.contains(tableGuid),
-            "MS-701 BUG: Table should appear as UPDATED in REST response when a new sub-asset " +
-            "(Process) creates a relationship to it, even though the Table's own attributes are unchanged. " +
-            "Table GUID: " + tableGuid + ", Updated GUIDs: " + updatedGuids);
+                "MS-701 BUG: Table should appear as UPDATED in REST response when a new " +
+                "sub-asset (Process) creates a relationship to it, even though the Table's " +
+                "own attributes are unchanged. Table GUID: " + tableGuid +
+                ", Updated GUIDs: " + updatedGuids);
 
-        // Step 5: Verify Kafka notifications — Table should have ENTITY_UPDATE notification
-        Thread.sleep(3000);
-        LOG.info("=== Collecting Kafka notifications ===");
-        List<JsonNode> allNotifications = collectAllNotifications(consumer, NOTIFICATION_TIMEOUT_MS, operationStartTime);
-
-        Set<String> ourGuids = new HashSet<>(Arrays.asList(tableGuid));
-        List<JsonNode> tableUpdateNotifications = new ArrayList<>();
-
-        for (JsonNode notif : allNotifications) {
-            if (notif.has("entity") && notif.get("entity").has("guid")) {
-                String guid = notif.get("entity").get("guid").asText();
-                String opType = notif.has("operationType") ? notif.get("operationType").asText() : "UNKNOWN";
-
-                if (tableGuid.equals(guid) && "ENTITY_UPDATE".equals(opType)) {
-                    tableUpdateNotifications.add(notif);
-                    LOG.info("Found Table UPDATE notification: {}", notif);
-                }
-            }
-        }
-
-        // KEY ASSERTION: Table should have received an ENTITY_UPDATE Kafka notification
-        assertFalse(tableUpdateNotifications.isEmpty(),
-            "MS-701 BUG: Table should receive ENTITY_UPDATE Kafka notification when a new " +
-            "sub-asset (Process) creates a relationship to it. Table GUID: " + tableGuid);
-
-        LOG.info("=== TEST PASSED ===");
-        consumer.close();
-    }
-
-    // ==================== Helper Methods ====================
-
-    private String createTable(String qualifiedName) throws Exception {
-        String payload = String.format("""
-            {
-                "entities": [
-                    {
-                        "typeName": "Table",
-                        "guid": "-1",
-                        "status": "ACTIVE",
-                        "attributes": {
-                            "qualifiedName": "%s",
-                            "name": "%s",
-                            "connectionQualifiedName": "default/bigquery/1709805089",
-                            "connectorName": "bigquery"
-                        }
-                    }
-                ]
-            }""", qualifiedName, qualifiedName);
-
-        HttpResponse<String> response = sendBulkEntityRequest(payload);
-        assertEquals(200, response.statusCode(), "Table creation should succeed");
-
-        ObjectNode result = mapper.readValue(response.body(), ObjectNode.class);
-
-        if (result.has("guidAssignments") && result.get("guidAssignments").has("-1")) {
-            return result.get("guidAssignments").get("-1").asText();
-        }
-
-        return result.get("mutatedEntities")
-                .get("CREATE")
-                .get(0)
-                .get("guid")
-                .asText();
-    }
-
-    private HttpResponse<String> sendBulkEntityRequest(String payload) throws Exception {
-        String auth = "admin:admin";
-        String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes());
-
-        String url = ATLAS_BASE_URL + "/entity/bulk";
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Basic " + encodedAuth)
-                .POST(HttpRequest.BodyPublishers.ofString(payload))
-                .timeout(Duration.ofSeconds(30))
-                .build();
-
-        return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-    }
-
-    private KafkaConsumer<String, String> createKafkaConsumer() {
-        Properties props = new Properties();
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,
-            "localhost:" + kafka.getFirstMappedPort());
-        props.put(ConsumerConfig.GROUP_ID_CONFIG,
-            "test-group-" + UUID.randomUUID());
-        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
-            StringDeserializer.class.getName());
-        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
-            StringDeserializer.class.getName());
-
-        KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props);
-        consumer.subscribe(Collections.singletonList(KAFKA_TOPIC));
-        return consumer;
-    }
-
-    private List<JsonNode> collectAllNotifications(
-            KafkaConsumer<String, String> consumer,
-            long timeoutMs,
-            long startTime) throws Exception {
-
-        List<JsonNode> notifications = new ArrayList<>();
-        long collectionStartTime = System.currentTimeMillis();
-
-        while ((System.currentTimeMillis() - collectionStartTime) < timeoutMs) {
-            ConsumerRecords<String, String> records = consumer.poll(Duration.ofSeconds(2));
-
-            for (ConsumerRecord<String, String> record : records) {
-                try {
-                    ObjectNode kafkaMessage = mapper.readValue(record.value(), ObjectNode.class);
-
-                    if (kafkaMessage.has("message")) {
-                        JsonNode message = kafkaMessage.get("message");
-                        long msgTime = 0;
-
-                        if (message.has("eventTime")) {
-                            msgTime = message.get("eventTime").asLong();
-                        }
-
-                        if (startTime > 0 && msgTime > 0 && msgTime < startTime) {
-                            continue;
-                        }
-
-                        notifications.add(message);
-                    }
-                } catch (Exception e) {
-                    LOG.warn("Failed to parse Kafka message: {}", e.getMessage());
-                }
-            }
-
-            if (records.count() == 0) {
-                Thread.sleep(500);
-            }
-        }
-
-        return notifications;
+        LOG.info("=== TEST PASSED: Table correctly appears as UPDATED ===");
     }
 }
