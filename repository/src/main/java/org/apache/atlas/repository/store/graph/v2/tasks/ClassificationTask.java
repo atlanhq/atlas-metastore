@@ -261,6 +261,14 @@ public abstract class ClassificationTask extends AbstractTask {
             notification.setEndTime(endTime);
             notification.setErrorMessage(errorMessage);
 
+            Map<String, Object> params = getTaskDef().getParameters();
+            if (params != null) {
+                notification.setRestrictPropagationThroughLineage(
+                        (Boolean) params.get(PARAM_PREVIOUS_CLASSIFICATION_RESTRICT_PROPAGATE_THROUGH_LINEAGE));
+                notification.setRestrictPropagationThroughHierarchy(
+                        (Boolean) params.get(PARAM_PREVIOUS_CLASSIFICATION_RESTRICT_PROPAGATE_THROUGH_HIERARCHY));
+            }
+
             taskNotificationSender.sendTaskEvent(notification);
         } catch (Exception e) {
             LOG.warn("Failed to send task lifecycle notification for task: {}", getTaskGuid(), e);
