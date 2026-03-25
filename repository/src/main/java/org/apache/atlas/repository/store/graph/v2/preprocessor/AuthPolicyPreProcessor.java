@@ -76,32 +76,16 @@ public class AuthPolicyPreProcessor implements PreProcessor {
     public AuthPolicyPreProcessor(AtlasGraph graph,
                                   AtlasTypeRegistry typeRegistry,
                                   EntityGraphRetriever entityRetriever) {
-        this(graph, typeRegistry, entityRetriever, null, null);
-    }
-
-    public AuthPolicyPreProcessor(AtlasGraph graph,
-                                  AtlasTypeRegistry typeRegistry,
-                                  EntityGraphRetriever entityRetriever,
-                                  EntityDiscoveryService discoveryService,
-                                  IndexAliasStore aliasStore) {
         this.graph = graph;
         this.typeRegistry = typeRegistry;
         this.entityRetriever = entityRetriever;
 
-        if (aliasStore != null) {
-            this.aliasStore = aliasStore;
-        } else {
-            this.aliasStore = new ESAliasStore(graph, entityRetriever);
-        }
+        aliasStore = new ESAliasStore(graph, entityRetriever);
 
-        if (discoveryService != null) {
-            this.discovery = discoveryService;
-        } else {
-            try {
-                this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null, entityRetriever);
-            } catch (AtlasException e) {
-                LOG.error("Failed to initialize EntityDiscoveryService", e);
-            }
+        try {
+            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null, entityRetriever);
+        } catch (AtlasException e) {
+            LOG.error("Failed to initialize EntityDiscoveryService", e);
         }
     }
 
@@ -282,7 +266,7 @@ public class AuthPolicyPreProcessor implements PreProcessor {
         RequestContext.get().endMetricRecord(metricRecorder);
     }
 
-    private void validateDuplicatePolicyName(AtlasEntity policy, AtlasEntity parentEntity) throws AtlasBaseException {
+    void validateDuplicatePolicyName(AtlasEntity policy, AtlasEntity parentEntity) throws AtlasBaseException {
         String policyName = getEntityName(policy);
 
         if (StringUtils.isEmpty(policyName)) {

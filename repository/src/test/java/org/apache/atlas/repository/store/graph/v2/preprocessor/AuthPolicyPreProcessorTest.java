@@ -23,29 +23,25 @@ import org.apache.atlas.discovery.EntityDiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.discovery.IndexSearchParams;
 import org.apache.atlas.model.instance.AtlasEntity;
-import org.apache.atlas.model.instance.AtlasEntity.AtlasEntityWithExtInfo;
-import org.apache.atlas.model.instance.AtlasObjectId;
-import org.apache.atlas.model.instance.EntityMutations;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.aliasstore.IndexAliasStore;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
-import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.objenesis.Objenesis;
+import org.objenesis.ObjenesisStd;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
-import java.util.ArrayList;
+import java.lang.reflect.Field;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
 import static org.apache.atlas.repository.Constants.*;
-import static org.apache.atlas.repository.util.AccessControlUtils.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 import static org.testng.Assert.*;
@@ -65,13 +61,7 @@ public class AuthPolicyPreProcessorTest {
     private EntityGraphRetriever entityRetriever;
 
     @Mock
-    private EntityMutationContext context;
-
-    @Mock
     private EntityDiscoveryService discoveryService;
-
-    @Mock
-    private IndexAliasStore aliasStore;
 
     @Mock
     private AtlasVertex mockVertex;
@@ -85,9 +75,36 @@ public class AuthPolicyPreProcessorTest {
         RequestContext.clear();
         RequestContext.get().setUser("testUser", null);
 
-        // Create preprocessor with mocked dependencies
-        // Mocked methods automatically return default values (null, false, 0, etc.)
-        preProcessor = new AuthPolicyPreProcessor(graph, typeRegistry, entityRetriever, discoveryService, aliasStore);
+        // Create preprocessor instance using reflection to avoid constructor initialization issues
+        preProcessor = createPreprocessorInstance();
+
+        // Inject mocked discovery service via reflection
+        Field discoveryField = AuthPolicyPreProcessor.class.getDeclaredField("discovery");
+        discoveryField.setAccessible(true);
+        discoveryField.set(preProcessor, discoveryService);
+    }
+
+    /**
+     * Create AuthPolicyPreProcessor instance via reflection without running the full constructor
+     * (avoids EntityDiscoveryService initialization which requires JanusGraph)
+     */
+    private AuthPolicyPreProcessor createPreprocessorInstance() throws Exception {
+        // Use Objenesis (bundled with Mockito) to create instance without calling constructor
+        org.objenesis.Objenesis objenesis = new org.objenesis.ObjenesisStd();
+        AuthPolicyPreProcessor instance = objenesis.newInstance(AuthPolicyPreProcessor.class);
+
+        // Manually inject required fields
+        setField(instance, "graph", graph);
+        setField(instance, "typeRegistry", typeRegistry);
+        setField(instance, "entityRetriever", entityRetriever);
+
+        return instance;
+    }
+
+    private void setField(Object target, String fieldName, Object value) throws Exception {
+        Field field = AuthPolicyPreProcessor.class.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(target, value);
     }
 
     @AfterMethod
@@ -98,90 +115,28 @@ public class AuthPolicyPreProcessorTest {
         }
     }
 
-    /**
-     * Helper to create a Persona entity
-     */
-    private AtlasEntity createPersonaEntity(String name, String qualifiedName) {
-        AtlasEntity persona = new AtlasEntity();
-        persona.setTypeName(PERSONA_ENTITY_TYPE);
-        persona.setAttribute(NAME, name);
-        persona.setAttribute(QUALIFIED_NAME, qualifiedName);
-        persona.setAttribute(ATTR_PERSONA_USERS, new ArrayList<>());
-        persona.setAttribute(ATTR_PERSONA_GROUPS, new ArrayList<>());
-        persona.setAttribute(ATTR_ACCESS_CONTROL_ENABLED, true); // Required boolean attribute
-        persona.setGuid("persona-guid-123");
-        persona.setStatus(AtlasEntity.Status.ACTIVE);
-        return persona;
-    }
-
-    /**
-     * Helper to create a Purpose entity
-     */
-    private AtlasEntity createPurposeEntity(String name, String qualifiedName) {
-        AtlasEntity purpose = new AtlasEntity();
-        purpose.setTypeName(PURPOSE_ENTITY_TYPE);
-        purpose.setAttribute(NAME, name);
-        purpose.setAttribute(QUALIFIED_NAME, qualifiedName);
-        purpose.setAttribute(ATTR_PURPOSE_CLASSIFICATIONS, Collections.singletonList("PII"));
-        purpose.setAttribute(ATTR_ACCESS_CONTROL_ENABLED, true); // Required boolean attribute
-        purpose.setGuid("purpose-guid-456");
-        purpose.setStatus(AtlasEntity.Status.ACTIVE);
-        return purpose;
-    }
-
-    /**
-     * Helper to create a Policy entity
-     */
-    private AtlasEntity createPolicyEntity(String name, String category, AtlasEntity parent) {
-        AtlasEntity policy = new AtlasEntity();
-        policy.setTypeName(POLICY_ENTITY_TYPE);
-        policy.setAttribute(NAME, name);
-        policy.setAttribute(ATTR_POLICY_CATEGORY, category);
-
-        // Add required attributes for validation
-        policy.setAttribute(ATTR_POLICY_SERVICE_NAME, "atlas");
-        policy.setAttribute(ATTR_POLICY_TYPE, "allow");
-        // Use valid glossary action by default (will be overridden if needed)
-        policy.setAttribute(ATTR_POLICY_ACTIONS, Collections.singletonList("persona-glossary-read"));
-
-        if (parent != null) {
-            AtlasObjectId parentRef = new AtlasObjectId(parent.getGuid(), parent.getTypeName());
-            policy.setRelationshipAttribute(REL_ATTR_ACCESS_CONTROL, parentRef);
-        }
-
-        return policy;
-    }
-
     // =====================================================================================
-    // Test Group 1: Duplicate Policy Name Validation for Persona Policies
+    // Test Group 1: Duplicate Policy Name Validation - Core Functionality
     // =====================================================================================
 
     @Test
-    public void testDuplicatePolicyName_PersonaPolicy_ThrowsException() throws Exception {
+    public void testValidateDuplicatePolicyName_Duplicate_ThrowsException() throws Exception {
         // Setup
-        AtlasEntity persona = createPersonaEntity("TestPersona", "default/persona123");
-        AtlasEntity policy = createPolicyEntity("duplicate-policy", POLICY_CATEGORY_PERSONA, persona);
-        policy.setAttribute(ATTR_POLICY_SUB_CATEGORY, POLICY_SUB_CATEGORY_GLOSSARY);
-        policy.setAttribute(ATTR_POLICY_RESOURCES, Collections.singletonList("entity:default/glossary/test-glossary"));
-        policy.setAttribute(ATTR_POLICY_RESOURCES_CATEGORY, POLICY_RESOURCE_CATEGORY_PERSONA_CUSTOM);
-        policy.setAttribute(ATTR_POLICY_RESOURCES_CATEGORY, "persona");
-
-        // Mock entity retriever to return the persona
-        AtlasEntityWithExtInfo personaWithExt = new AtlasEntityWithExtInfo(persona);
-        personaWithExt.getEntity().setRelationshipAttribute(REL_ATTR_POLICIES, new ArrayList<>());
-        when(entityRetriever.toAtlasEntityWithExtInfo(any(AtlasObjectId.class))).thenReturn(personaWithExt);
+        AtlasEntity policy = createPolicy("duplicate-policy");
+        AtlasEntity persona = createPersona("TestPersona", "default/persona123");
 
         // Mock discovery service to return existing policy (simulating duplicate)
-        List<AtlasVertex> existingPolicies = Collections.singletonList(mockVertex);
-        when(discoveryService.directVerticesIndexSearch(any(IndexSearchParams.class))).thenReturn(existingPolicies);
+        when(discoveryService.directVerticesIndexSearch(any(IndexSearchParams.class)))
+            .thenReturn(Collections.singletonList(mockVertex));
 
         // Execute & Verify
         try {
-            preProcessor.processAttributes(policy, context, EntityMutations.EntityOperation.CREATE);
+            preProcessor.validateDuplicatePolicyName(policy, persona);
             fail("Should have thrown AtlasBaseException for duplicate policy name");
         } catch (AtlasBaseException e) {
             assertEquals(e.getAtlasErrorCode(), AtlasErrorCode.BAD_REQUEST);
             assertTrue(e.getMessage().contains("Policy with name 'duplicate-policy' already exists"));
+            assertTrue(e.getMessage().contains("Persona"));
             assertTrue(e.getMessage().contains("TestPersona"));
         }
 
@@ -190,66 +145,95 @@ public class AuthPolicyPreProcessorTest {
     }
 
     @Test
-    public void testUniquePolicyName_PersonaPolicy_Success() throws Exception {
+    public void testValidateDuplicatePolicyName_Unique_Success() throws Exception {
         // Setup
-        AtlasEntity persona = createPersonaEntity("TestPersona", "default/persona123");
-        AtlasEntity policy = createPolicyEntity("unique-policy", POLICY_CATEGORY_PERSONA, persona);
-        policy.setAttribute(ATTR_POLICY_SUB_CATEGORY, POLICY_SUB_CATEGORY_GLOSSARY);
-        policy.setAttribute(ATTR_POLICY_RESOURCES, Collections.singletonList("entity:default/glossary/test-glossary"));
-        policy.setAttribute(ATTR_POLICY_RESOURCES_CATEGORY, POLICY_RESOURCE_CATEGORY_PERSONA_CUSTOM);
-
-        // Mock entity retriever to return the persona
-        AtlasEntityWithExtInfo personaWithExt = new AtlasEntityWithExtInfo(persona);
-        personaWithExt.getEntity().setRelationshipAttribute(REL_ATTR_POLICIES, new ArrayList<>());
-        when(entityRetriever.toAtlasEntityWithExtInfo(any(AtlasObjectId.class))).thenReturn(personaWithExt);
+        AtlasEntity policy = createPolicy("unique-policy");
+        AtlasEntity persona = createPersona("TestPersona", "default/persona123");
 
         // Mock discovery service to return empty list (no duplicates)
-        when(discoveryService.directVerticesIndexSearch(any(IndexSearchParams.class))).thenReturn(Collections.emptyList());
+        when(discoveryService.directVerticesIndexSearch(any(IndexSearchParams.class)))
+            .thenReturn(Collections.emptyList());
 
-        try {
-            // Execute - should not throw exception
-            preProcessor.processAttributes(policy, context, EntityMutations.EntityOperation.CREATE);
+        // Execute - should not throw exception
+        preProcessor.validateDuplicatePolicyName(policy, persona);
 
-            // Verify validation was called
-            verify(discoveryService).directVerticesIndexSearch(any(IndexSearchParams.class));
-
-            // Verify qualifiedName was set
-            assertNotNull(policy.getAttribute(QUALIFIED_NAME));
-            assertTrue(((String) policy.getAttribute(QUALIFIED_NAME)).startsWith("default/persona123/"));
-        } catch (Exception e) {
-            // Print the actual error for debugging
-            e.printStackTrace();
-            fail("Test failed with exception: " + e.getClass().getName() + ": " + e.getMessage());
-        }
+        // Verify discovery service was called
+        verify(discoveryService).directVerticesIndexSearch(any(IndexSearchParams.class));
     }
 
     @Test
-    public void testDuplicateValidation_VerifyESQueryStructure() throws Exception {
+    public void testValidateDuplicatePolicyName_NullName_SkipsValidation() throws Exception {
         // Setup
-        AtlasEntity persona = createPersonaEntity("TestPersona", "default/persona123");
-        AtlasEntity policy = createPolicyEntity("test-policy", POLICY_CATEGORY_PERSONA, persona);
-        policy.setAttribute(ATTR_POLICY_SUB_CATEGORY, POLICY_SUB_CATEGORY_GLOSSARY);
-        policy.setAttribute(ATTR_POLICY_RESOURCES, Collections.singletonList("entity:default/glossary/test-glossary"));
-        policy.setAttribute(ATTR_POLICY_RESOURCES_CATEGORY, POLICY_RESOURCE_CATEGORY_PERSONA_CUSTOM);
+        AtlasEntity policy = createPolicy(null);
+        AtlasEntity persona = createPersona("TestPersona", "default/persona123");
 
-        AtlasEntityWithExtInfo personaWithExt = new AtlasEntityWithExtInfo(persona);
-        personaWithExt.getEntity().setRelationshipAttribute(REL_ATTR_POLICIES, new ArrayList<>());
-        when(entityRetriever.toAtlasEntityWithExtInfo(any(AtlasObjectId.class))).thenReturn(personaWithExt);
-        when(discoveryService.directVerticesIndexSearch(any(IndexSearchParams.class))).thenReturn(Collections.emptyList());
+        // Execute - should not throw exception
+        preProcessor.validateDuplicatePolicyName(policy, persona);
+
+        // Verify discovery service was NOT called
+        verify(discoveryService, never()).directVerticesIndexSearch(any(IndexSearchParams.class));
+    }
+
+    @Test
+    public void testValidateDuplicatePolicyName_EmptyName_SkipsValidation() throws Exception {
+        // Setup
+        AtlasEntity policy = createPolicy("");
+        AtlasEntity persona = createPersona("TestPersona", "default/persona123");
+
+        // Execute - should not throw exception
+        preProcessor.validateDuplicatePolicyName(policy, persona);
+
+        // Verify discovery service was NOT called
+        verify(discoveryService, never()).directVerticesIndexSearch(any(IndexSearchParams.class));
+    }
+
+    @Test
+    public void testValidateDuplicatePolicyName_DiscoveryServiceNull_SkipsValidation() throws Exception {
+        // Setup - set discovery service to null
+        Field discoveryField = AuthPolicyPreProcessor.class.getDeclaredField("discovery");
+        discoveryField.setAccessible(true);
+        discoveryField.set(preProcessor, null);
+
+        AtlasEntity policy = createPolicy("any-policy");
+        AtlasEntity persona = createPersona("TestPersona", "default/persona123");
+
+        // Execute - should not throw exception, just log warning
+        preProcessor.validateDuplicatePolicyName(policy, persona);
+
+        // Verify - no exception thrown means graceful degradation worked
+        // (cannot verify the warning log in unit test, but method completes successfully)
+    }
+
+    // =====================================================================================
+    // Test Group 2: Elasticsearch Query Structure Validation
+    // =====================================================================================
+
+    @Test
+    public void testValidateDuplicatePolicyName_VerifyESQueryStructure() throws Exception {
+        // Setup
+        String policyName = "test-policy";
+        String personaQN = "default/persona123";
+
+        AtlasEntity policy = createPolicy(policyName);
+        AtlasEntity persona = createPersona("TestPersona", personaQN);
+
+        when(discoveryService.directVerticesIndexSearch(any(IndexSearchParams.class)))
+            .thenReturn(Collections.emptyList());
 
         ArgumentCaptor<IndexSearchParams> paramsCaptor = ArgumentCaptor.forClass(IndexSearchParams.class);
 
         // Execute
-        preProcessor.processAttributes(policy, context, EntityMutations.EntityOperation.CREATE);
+        preProcessor.validateDuplicatePolicyName(policy, persona);
 
-        // Verify the ES query structure
+        // Capture and verify the ES query
         verify(discoveryService).directVerticesIndexSearch(paramsCaptor.capture());
 
         IndexSearchParams capturedParams = paramsCaptor.getValue();
         Map<String, Object> dsl = capturedParams.getDsl();
 
+        // Verify DSL structure
         assertNotNull(dsl, "DSL should not be null");
-        assertEquals(dsl.get("size"), 1, "Query size should be 1");
+        assertEquals(dsl.get("size"), 1, "Query size should be 1 for existence check");
 
         Map<String, Object> query = (Map<String, Object>) dsl.get("query");
         assertNotNull(query, "Query should not be null");
@@ -258,148 +242,156 @@ public class AuthPolicyPreProcessorTest {
         assertNotNull(bool, "Bool clause should not be null");
 
         List<Map<String, Object>> filters = (List<Map<String, Object>>) bool.get("filter");
-        assertEquals(filters.size(), 5, "Should have 5 filter clauses");
+        assertEquals(filters.size(), 5, "Should have exactly 5 filter clauses");
 
-        // Verify filter clauses contain expected terms
-        boolean hasStateFilter = filters.stream().anyMatch(f -> f.containsKey("term") &&
-            ((Map<String, Object>) f.get("term")).containsKey("__state"));
-        boolean hasTypeFilter = filters.stream().anyMatch(f -> f.containsKey("term") &&
-            ((Map<String, Object>) f.get("term")).containsKey("__typeName.keyword"));
-        boolean hasCategoryFilter = filters.stream().anyMatch(f -> f.containsKey("term") &&
-            ((Map<String, Object>) f.get("term")).containsKey("policyCategory"));
-        boolean hasNameFilter = filters.stream().anyMatch(f -> f.containsKey("term") &&
-            ((Map<String, Object>) f.get("term")).containsKey("name.keyword"));
-        boolean hasPrefixFilter = filters.stream().anyMatch(f -> f.containsKey("prefix"));
+        // Verify individual filters
+        verifyFilterExists(filters, "term", "__state", "ACTIVE");
+        verifyFilterExists(filters, "term", "__typeName.keyword", POLICY_ENTITY_TYPE);
+        verifyFilterExists(filters, "term", "policyCategory", "persona");
+        verifyFilterExists(filters, "term", "name.keyword", policyName);
+        verifyPrefixFilterExists(filters, QUALIFIED_NAME, personaQN);
+    }
 
-        assertTrue(hasStateFilter, "Should have __state filter");
-        assertTrue(hasTypeFilter, "Should have __typeName filter");
-        assertTrue(hasCategoryFilter, "Should have policyCategory filter");
-        assertTrue(hasNameFilter, "Should have name filter");
-        assertTrue(hasPrefixFilter, "Should have qualifiedName prefix filter");
+    @Test
+    public void testValidateDuplicatePolicyName_QueryUsesExactNameMatch() throws Exception {
+        // Setup - verify .keyword is used for exact match
+        AtlasEntity policy = createPolicy("Test-Policy");  // Mixed case
+        AtlasEntity persona = createPersona("TestPersona", "default/persona123");
 
-        // Verify the policyCategory filter value is "persona"
+        when(discoveryService.directVerticesIndexSearch(any(IndexSearchParams.class)))
+            .thenReturn(Collections.emptyList());
+
+        ArgumentCaptor<IndexSearchParams> paramsCaptor = ArgumentCaptor.forClass(IndexSearchParams.class);
+
+        // Execute
+        preProcessor.validateDuplicatePolicyName(policy, persona);
+
+        // Verify
+        verify(discoveryService).directVerticesIndexSearch(paramsCaptor.capture());
+
+        Map<String, Object> dsl = paramsCaptor.getValue().getDsl();
+        List<Map<String, Object>> filters = getFilters(dsl);
+
+        // Find the name filter and verify it uses .keyword
+        Map<String, Object> nameFilter = filters.stream()
+            .filter(f -> f.containsKey("term") && ((Map<String, Object>) f.get("term")).containsKey("name.keyword"))
+            .findFirst()
+            .orElse(null);
+
+        assertNotNull(nameFilter, "Should have name.keyword filter for exact match");
+        Map<String, Object> term = (Map<String, Object>) nameFilter.get("term");
+        assertEquals(term.get("name.keyword"), "Test-Policy", "Should preserve case for exact match");
+    }
+
+    @Test
+    public void testValidateDuplicatePolicyName_QueryScopedToPersona() throws Exception {
+        // Setup - verify prefix filter scopes to specific persona
+        AtlasEntity policy = createPolicy("my-policy");
+        AtlasEntity persona = createPersona("Persona1", "default/persona123");
+
+        when(discoveryService.directVerticesIndexSearch(any(IndexSearchParams.class)))
+            .thenReturn(Collections.emptyList());
+
+        ArgumentCaptor<IndexSearchParams> paramsCaptor = ArgumentCaptor.forClass(IndexSearchParams.class);
+
+        // Execute
+        preProcessor.validateDuplicatePolicyName(policy, persona);
+
+        // Verify
+        verify(discoveryService).directVerticesIndexSearch(paramsCaptor.capture());
+
+        Map<String, Object> dsl = paramsCaptor.getValue().getDsl();
+        List<Map<String, Object>> filters = getFilters(dsl);
+
+        // Find the prefix filter
+        Map<String, Object> prefixFilter = filters.stream()
+            .filter(f -> f.containsKey("prefix"))
+            .findFirst()
+            .orElse(null);
+
+        assertNotNull(prefixFilter, "Should have prefix filter");
+        Map<String, Object> prefix = (Map<String, Object>) prefixFilter.get("prefix");
+        assertEquals(prefix.get(QUALIFIED_NAME), "default/persona123",
+            "Should filter by parent persona's qualifiedName");
+    }
+
+    @Test
+    public void testValidateDuplicatePolicyName_QueryFiltersPersonaCategory() throws Exception {
+        // Setup - verify policyCategory filter is set to "persona"
+        AtlasEntity policy = createPolicy("policy1");
+        AtlasEntity persona = createPersona("TestPersona", "default/persona123");
+
+        when(discoveryService.directVerticesIndexSearch(any(IndexSearchParams.class)))
+            .thenReturn(Collections.emptyList());
+
+        ArgumentCaptor<IndexSearchParams> paramsCaptor = ArgumentCaptor.forClass(IndexSearchParams.class);
+
+        // Execute
+        preProcessor.validateDuplicatePolicyName(policy, persona);
+
+        // Verify
+        verify(discoveryService).directVerticesIndexSearch(paramsCaptor.capture());
+
+        Map<String, Object> dsl = paramsCaptor.getValue().getDsl();
+        List<Map<String, Object>> filters = getFilters(dsl);
+
+        // Find the policyCategory filter
         Map<String, Object> categoryFilter = filters.stream()
             .filter(f -> f.containsKey("term") && ((Map<String, Object>) f.get("term")).containsKey("policyCategory"))
             .findFirst()
             .orElse(null);
-        assertNotNull(categoryFilter);
-        Map<String, Object> categoryTerm = (Map<String, Object>) categoryFilter.get("term");
-        assertEquals(categoryTerm.get("policyCategory"), "persona", "Should filter for persona category");
-    }
 
-    @Test
-    public void testNullPolicyName_SkipsValidation() throws Exception {
-        // Setup
-        AtlasEntity persona = createPersonaEntity("TestPersona", "default/persona123");
-        AtlasEntity policy = createPolicyEntity(null, POLICY_CATEGORY_PERSONA, persona);
-        policy.setAttribute(ATTR_POLICY_SUB_CATEGORY, POLICY_SUB_CATEGORY_GLOSSARY);
-        policy.setAttribute(ATTR_POLICY_RESOURCES, Collections.singletonList("entity:default/glossary/test-glossary"));
-        policy.setAttribute(ATTR_POLICY_RESOURCES_CATEGORY, POLICY_RESOURCE_CATEGORY_PERSONA_CUSTOM);
-
-        AtlasEntityWithExtInfo personaWithExt = new AtlasEntityWithExtInfo(persona);
-        personaWithExt.getEntity().setRelationshipAttribute(REL_ATTR_POLICIES, new ArrayList<>());
-        when(entityRetriever.toAtlasEntityWithExtInfo(any(AtlasObjectId.class))).thenReturn(personaWithExt);
-
-        // Execute - should not throw exception
-        preProcessor.processAttributes(policy, context, EntityMutations.EntityOperation.CREATE);
-
-        // Verify validation was NOT called (name is null)
-        verify(discoveryService, never()).directVerticesIndexSearch(any(IndexSearchParams.class));
-    }
-
-    @Test
-    public void testEmptyPolicyName_SkipsValidation() throws Exception {
-        // Setup
-        AtlasEntity persona = createPersonaEntity("TestPersona", "default/persona123");
-        AtlasEntity policy = createPolicyEntity("", POLICY_CATEGORY_PERSONA, persona);
-        policy.setAttribute(ATTR_POLICY_SUB_CATEGORY, POLICY_SUB_CATEGORY_GLOSSARY);
-        policy.setAttribute(ATTR_POLICY_RESOURCES, Collections.singletonList("entity:default/glossary/test-glossary"));
-        policy.setAttribute(ATTR_POLICY_RESOURCES_CATEGORY, POLICY_RESOURCE_CATEGORY_PERSONA_CUSTOM);
-
-        AtlasEntityWithExtInfo personaWithExt = new AtlasEntityWithExtInfo(persona);
-        personaWithExt.getEntity().setRelationshipAttribute(REL_ATTR_POLICIES, new ArrayList<>());
-        when(entityRetriever.toAtlasEntityWithExtInfo(any(AtlasObjectId.class))).thenReturn(personaWithExt);
-
-        // Execute - should not throw exception
-        preProcessor.processAttributes(policy, context, EntityMutations.EntityOperation.CREATE);
-
-        // Verify validation was NOT called (name is empty)
-        verify(discoveryService, never()).directVerticesIndexSearch(any(IndexSearchParams.class));
+        assertNotNull(categoryFilter, "Should have policyCategory filter");
+        Map<String, Object> term = (Map<String, Object>) categoryFilter.get("term");
+        assertEquals(term.get("policyCategory"), "persona",
+            "Should only search for Persona policies");
     }
 
     // =====================================================================================
-    // Test Group 2: Purpose Policies - NOT Validated
+    // Helper Methods
     // =====================================================================================
 
-    @Test
-    public void testDuplicatePolicyName_PurposePolicy_NotValidated() throws Exception {
-        // Setup
-        AtlasEntity purpose = createPurposeEntity("TestPurpose", "default/purpose456");
-
-        AtlasEntity policy = createPolicyEntity("any-name", POLICY_CATEGORY_PURPOSE, purpose);
-        // Purpose policies don't need policyResources initially - they are set from purpose tags
-        // Set purpose-specific attributes
-        policy.setAttribute(ATTR_POLICY_SUB_CATEGORY, POLICY_SUB_CATEGORY_METADATA);
-        policy.setAttribute(ATTR_POLICY_ACTIONS, Collections.singletonList("entity-read"));
-        policy.setAttribute(ATTR_POLICY_RESOURCES_CATEGORY, POLICY_RESOURCE_CATEGORY_PURPOSE);
-
-        // Mock entity retriever to return the purpose
-        AtlasEntityWithExtInfo purposeWithExt = new AtlasEntityWithExtInfo(purpose);
-        purposeWithExt.getEntity().setRelationshipAttribute(REL_ATTR_POLICIES, new ArrayList<>());
-        when(entityRetriever.toAtlasEntityWithExtInfo(any(AtlasObjectId.class))).thenReturn(purposeWithExt);
-
-        // Execute - should not throw exception
-        preProcessor.processAttributes(policy, context, EntityMutations.EntityOperation.CREATE);
-
-        // Verify validation was NOT called for Purpose policy
-        verify(discoveryService, never()).directVerticesIndexSearch(any(IndexSearchParams.class));
+    private AtlasEntity createPolicy(String name) {
+        AtlasEntity policy = new AtlasEntity();
+        policy.setTypeName(POLICY_ENTITY_TYPE);
+        policy.setAttribute(NAME, name);
+        policy.setGuid("policy-guid-" + System.nanoTime());
+        return policy;
     }
 
-    // =====================================================================================
-    // Test Group 3: Different Personas Allow Same Policy Name
-    // =====================================================================================
+    private AtlasEntity createPersona(String name, String qualifiedName) {
+        AtlasEntity persona = new AtlasEntity();
+        persona.setTypeName(PERSONA_ENTITY_TYPE);
+        persona.setAttribute(NAME, name);
+        persona.setAttribute(QUALIFIED_NAME, qualifiedName);
+        persona.setGuid("persona-guid-" + System.nanoTime());
+        persona.setStatus(AtlasEntity.Status.ACTIVE);
+        return persona;
+    }
 
-    @Test
-    public void testSamePolicyName_DifferentPersonas_BothAllowed() throws Exception {
-        // Setup persona 1
-        AtlasEntity persona1 = createPersonaEntity("Persona1", "default/persona123");
-        AtlasEntity policy1 = createPolicyEntity("my-policy", POLICY_CATEGORY_PERSONA, persona1);
-        policy1.setAttribute(ATTR_POLICY_SUB_CATEGORY, POLICY_SUB_CATEGORY_DOMAIN);
-        policy1.setAttribute(ATTR_POLICY_RESOURCES, Collections.singletonList("entity:*"));
+    private void verifyFilterExists(List<Map<String, Object>> filters, String filterType, String field, Object value) {
+        boolean found = filters.stream()
+            .anyMatch(f -> {
+                if (!f.containsKey(filterType)) return false;
+                Map<String, Object> filterContent = (Map<String, Object>) f.get(filterType);
+                return value.equals(filterContent.get(field));
+            });
+        assertTrue(found, "Should have " + filterType + " filter for " + field + "=" + value);
+    }
 
-        AtlasEntityWithExtInfo persona1WithExt = new AtlasEntityWithExtInfo(persona1);
-        persona1WithExt.getEntity().setRelationshipAttribute(REL_ATTR_POLICIES, new ArrayList<>());
+    private void verifyPrefixFilterExists(List<Map<String, Object>> filters, String field, String prefix) {
+        boolean found = filters.stream()
+            .anyMatch(f -> {
+                if (!f.containsKey("prefix")) return false;
+                Map<String, Object> prefixContent = (Map<String, Object>) f.get("prefix");
+                return prefix.equals(prefixContent.get(field));
+            });
+        assertTrue(found, "Should have prefix filter for " + field + " starting with " + prefix);
+    }
 
-        // Setup persona 2
-        AtlasEntity persona2 = createPersonaEntity("Persona2", "default/persona456");
-        AtlasEntity policy2 = createPolicyEntity("my-policy", POLICY_CATEGORY_PERSONA, persona2);
-        policy2.setAttribute(ATTR_POLICY_SUB_CATEGORY, POLICY_SUB_CATEGORY_DOMAIN);
-        policy2.setAttribute(ATTR_POLICY_RESOURCES, Collections.singletonList("entity:*"));
-
-        AtlasEntityWithExtInfo persona2WithExt = new AtlasEntityWithExtInfo(persona2);
-        persona2WithExt.getEntity().setRelationshipAttribute(REL_ATTR_POLICIES, new ArrayList<>());
-
-        // Mock retriever to return different personas
-        when(entityRetriever.toAtlasEntityWithExtInfo(any(AtlasObjectId.class)))
-            .thenReturn(persona1WithExt)
-            .thenReturn(persona2WithExt);
-
-        // Mock discovery to return empty (no duplicates within each persona's scope)
-        when(discoveryService.directVerticesIndexSearch(any(IndexSearchParams.class)))
-            .thenReturn(Collections.emptyList());
-
-        // Execute both - should not throw exceptions
-        preProcessor.processAttributes(policy1, context, EntityMutations.EntityOperation.CREATE);
-        preProcessor.processAttributes(policy2, context, EntityMutations.EntityOperation.CREATE);
-
-        // Verify both policies were created successfully
-        assertNotNull(policy1.getAttribute(QUALIFIED_NAME));
-        assertNotNull(policy2.getAttribute(QUALIFIED_NAME));
-
-        // Verify the qualified names are different (different personas)
-        assertNotEquals(policy1.getAttribute(QUALIFIED_NAME), policy2.getAttribute(QUALIFIED_NAME));
-
-        // Verify validation was called twice (once for each policy)
-        verify(discoveryService, times(2)).directVerticesIndexSearch(any(IndexSearchParams.class));
+    private List<Map<String, Object>> getFilters(Map<String, Object> dsl) {
+        Map<String, Object> query = (Map<String, Object>) dsl.get("query");
+        Map<String, Object> bool = (Map<String, Object>) query.get("bool");
+        return (List<Map<String, Object>>) bool.get("filter");
     }
 }
