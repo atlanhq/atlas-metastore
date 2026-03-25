@@ -20,6 +20,11 @@ public class SuperVertexReport {
     // Actual row counts from full table scans (used by edge consistency validation)
     private long edgesOutRowCount;
     private long edgesInRowCount;
+    private long edgesByIdRowCount;
+
+    // Decoded edge breakdown (JanusGraph analyzer only)
+    private long decodedOutEdges;
+    private long decodedInEdges;
 
     // Distribution buckets
     private long verticesOver1kEdges;
@@ -54,6 +59,15 @@ public class SuperVertexReport {
     public long getEdgesInRowCount()           { return edgesInRowCount; }
     public void setEdgesInRowCount(long c)     { this.edgesInRowCount = c; }
 
+    public long getEdgesByIdRowCount()         { return edgesByIdRowCount; }
+    public void setEdgesByIdRowCount(long c)   { this.edgesByIdRowCount = c; }
+
+    public long getDecodedOutEdges()           { return decodedOutEdges; }
+    public void setDecodedOutEdges(long c)     { this.decodedOutEdges = c; }
+
+    public long getDecodedInEdges()            { return decodedInEdges; }
+    public void setDecodedInEdges(long c)      { this.decodedInEdges = c; }
+
     public long getVerticesOver1kEdges()    { return verticesOver1kEdges; }
     public void setVerticesOver1kEdges(long c)  { this.verticesOver1kEdges = c; }
 
@@ -77,6 +91,7 @@ public class SuperVertexReport {
         m.put("scan_duration_ms", scanDurationMs);
         m.put("edges_out_row_count", edgesOutRowCount);
         m.put("edges_in_row_count", edgesInRowCount);
+        m.put("edges_by_id_row_count", edgesByIdRowCount);
         m.put("vertices_over_1k_edges", verticesOver1kEdges);
         m.put("vertices_over_10k_edges", verticesOver10kEdges);
         m.put("vertices_over_100k_edges", verticesOver100kEdges);

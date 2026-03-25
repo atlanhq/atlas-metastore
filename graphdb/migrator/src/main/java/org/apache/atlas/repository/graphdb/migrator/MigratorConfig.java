@@ -67,6 +67,12 @@ public class MigratorConfig {
     // Parallel ES indexing during Phase 1
     private final boolean esParallel;
 
+    // ES edge index
+    private final String targetEsEdgeIndex;
+
+    // Super vertex chunking
+    private final int superVertexEdgeChunkSize;
+
     // Skip flags
     private final boolean skipEsReindex;
     private final boolean skipClassifications;
@@ -86,6 +92,9 @@ public class MigratorConfig {
     // Cassandra consistency levels
     private final String sourceConsistencyLevel;
     private final String targetConsistencyLevel;
+
+    // Analyze mode ("cassandra" for post-migration, "janus" for pre-migration)
+    private final String analyzeMode;
 
     // Validation settings
     private final int     validationVertexSampleSize;
@@ -157,7 +166,13 @@ public class MigratorConfig {
         this.esFieldLimit = getInt("target.elasticsearch.field.limit", 10000);
 
         // Parallel ES indexing during Phase 1 (eliminates Phase 2)
-        this.esParallel = getBoolean("migration.es.parallel", false);
+        this.esParallel = getBoolean("migration.es.parallel", true);
+
+        // ES edge index
+        this.targetEsEdgeIndex = get("target.elasticsearch.edge.index", "atlas_graph_edge_index");
+
+        // Super vertex chunking
+        this.superVertexEdgeChunkSize = getInt("migration.super.vertex.edge.chunk.size", 10000);
 
         // Skip flags
         this.skipEsReindex      = getBoolean("migration.skip.es.reindex", false);
@@ -178,6 +193,9 @@ public class MigratorConfig {
         // Cassandra consistency levels
         this.sourceConsistencyLevel = get("source.cassandra.consistency", "ONE");
         this.targetConsistencyLevel = get("target.cassandra.consistency", "LOCAL_QUORUM");
+
+        // Analyze mode
+        this.analyzeMode = get("analyze.mode", "janus");
 
         // Validation
         this.validationVertexSampleSize  = getInt("validation.vertex.sample.size", 1000);
@@ -247,6 +265,8 @@ public class MigratorConfig {
 
     public int     getEsFieldLimit()      { return esFieldLimit; }
     public boolean isEsParallel()         { return esParallel; }
+    public String  getTargetEsEdgeIndex() { return targetEsEdgeIndex; }
+    public int     getSuperVertexEdgeChunkSize() { return superVertexEdgeChunkSize; }
 
     public boolean isSkipEsReindex()      { return skipEsReindex; }
     public boolean isSkipClassifications() { return skipClassifications; }
@@ -277,4 +297,5 @@ public class MigratorConfig {
     public boolean isSkipSuperVertexDetection()     { return skipSuperVertexDetection; }
     public boolean isSkipEsCountValidation()        { return skipEsCountValidation; }
     public String  getValidationTenantId()          { return validationTenantId; }
+    public String  getAnalyzeMode()                 { return analyzeMode; }
 }

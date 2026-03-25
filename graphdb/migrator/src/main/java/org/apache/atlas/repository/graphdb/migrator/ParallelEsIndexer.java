@@ -42,6 +42,7 @@ public class ParallelEsIndexer implements AutoCloseable {
     private final String esIndex;
     private final int bulkSize;
 
+    private final boolean isEdgeIndexer;
     private final BlockingQueue<EsDoc> queue;
     private final Thread indexerThread;
     private volatile boolean producerDone = false;
@@ -52,28 +53,49 @@ public class ParallelEsIndexer implements AutoCloseable {
 
     /** Lightweight holder for an ES document to be indexed. */
     static class EsDoc {
-        final String vertexId;
+        final String docId;
         final String propsJson;
         final String typeName;
         final String state;
+        final boolean isEdge;
 
-        EsDoc(String vertexId, String propsJson, String typeName, String state) {
-            this.vertexId  = vertexId;
+        EsDoc(String docId, String propsJson, String typeName, String state) {
+            this.docId     = docId;
             this.propsJson = propsJson;
             this.typeName  = typeName;
             this.state     = state;
+            this.isEdge    = false;
+        }
+
+        /** Edge doc constructor — propsJson is already the complete ES doc JSON. */
+        EsDoc(String docId, String propsJson, boolean isEdge) {
+            this.docId     = docId;
+            this.propsJson = propsJson;
+            this.typeName  = null;
+            this.state     = null;
+            this.isEdge    = isEdge;
         }
     }
 
     public ParallelEsIndexer(MigratorConfig config, MigrationMetrics metrics) {
+        this(config, metrics, config.getTargetEsIndex(), "es-parallel-indexer", false);
+    }
+
+    /**
+     * Constructor with custom ES index name and thread name.
+     * Used for the edge ES indexer which targets a different index.
+     */
+    public ParallelEsIndexer(MigratorConfig config, MigrationMetrics metrics,
+                              String esIndexName, String threadName, boolean isEdgeIndexer) {
         this.config   = config;
         this.metrics  = metrics;
         this.esClient = createEsClient();
-        this.esIndex  = config.getTargetEsIndex();
+        this.esIndex  = esIndexName;
         this.bulkSize = config.getEsBulkSize();
+        this.isEdgeIndexer = isEdgeIndexer;
         this.queue    = new LinkedBlockingQueue<>(config.getQueueCapacity());
 
-        this.indexerThread = new Thread(this::indexerLoop, "es-parallel-indexer");
+        this.indexerThread = new Thread(this::indexerLoop, threadName);
         this.indexerThread.setDaemon(true);
     }
 
@@ -122,6 +144,22 @@ public class ParallelEsIndexer implements AutoCloseable {
         }
     }
 
+    /**
+     * Called by writer threads to enqueue an edge for ES edge indexing.
+     * The edgeDocJson is already a complete ES document JSON (built by CassandraTargetWriter).
+     */
+    public void enqueueEdge(String edgeId, String edgeDocJson) {
+        if (edgeDocJson == null || edgeDocJson.isEmpty()) return;
+
+        try {
+            queue.put(new EsDoc(edgeId, edgeDocJson, true));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            totalErrors.incrementAndGet();
+            LOG.warn("Interrupted while enqueuing ES edge doc for edge {}", edgeId);
+        }
+    }
+
     /** Signal that no more documents will be produced. */
     public void signalComplete() {
         this.producerDone = true;
@@ -162,14 +200,20 @@ public class ParallelEsIndexer implements AutoCloseable {
             }
 
             try {
-                String docJson = buildEsDocJson(doc);
+                String docJson;
+                if (doc.isEdge) {
+                    // Edge doc — already has complete JSON
+                    docJson = doc.propsJson;
+                } else {
+                    docJson = buildEsDocJson(doc);
+                }
                 if (docJson == null) {
                     totalSkipped.incrementAndGet();
                     continue;
                 }
 
                 bulkBody.append("{\"index\":{\"_index\":\"").append(esIndex)
-                        .append("\",\"_id\":\"").append(escapeJson(doc.vertexId)).append("\"}}\n");
+                        .append("\",\"_id\":\"").append(escapeJson(doc.docId)).append("\"}}\n");
                 bulkBody.append(docJson).append("\n");
                 batchCount++;
 
@@ -179,7 +223,7 @@ public class ParallelEsIndexer implements AutoCloseable {
                     batchCount = 0;
                 }
             } catch (Exception e) {
-                LOG.warn("Failed to build ES doc for vertex {}", doc.vertexId, e);
+                LOG.warn("Failed to build ES doc for {}", doc.docId, e);
                 totalErrors.incrementAndGet();
             }
         }
@@ -228,7 +272,11 @@ public class ParallelEsIndexer implements AutoCloseable {
             long ms = System.currentTimeMillis() - start;
 
             totalIndexed.addAndGet(docCount);
-            metrics.incrEsDocsIndexed(docCount);
+            if (isEdgeIndexer) {
+                metrics.incrEsEdgeDocsIndexed(docCount);
+            } else {
+                metrics.incrEsDocsIndexed(docCount);
+            }
 
             int statusCode = response.getStatusLine().getStatusCode();
             String body = EntityUtils.toString(response.getEntity());

@@ -99,6 +99,13 @@ VERTEX_COUNT=""
 SIZING_TIER=""
 LOG_FILE=""
 
+# Resolved connection endpoints (populated during preflight from atlas-application.properties)
+RESOLVED_CASS_HOST=""
+RESOLVED_CASS_PORT=""
+RESOLVED_ES_HOST=""
+RESOLVED_ES_PORT=""
+RESOLVED_ES_PROTOCOL=""
+
 # Phase tracking
 PHASE_NAMES=()
 PHASE_RESULTS=()
@@ -148,6 +155,14 @@ kexec_quiet() {
 # Execute command on the Cassandra pod
 cexec() {
     kubectl exec "$CASSANDRA_POD" -n "$NAMESPACE" -- "$@"
+}
+
+# ES base URL helper (uses resolved globals from preflight, falls back to localhost)
+es_url() {
+    local proto="${RESOLVED_ES_PROTOCOL:-http}"
+    local host="${RESOLVED_ES_HOST:-localhost}"
+    local port="${RESOLVED_ES_PORT:-9200}"
+    echo "${proto}://${host}:${port}"
 }
 
 # ============================================================================
@@ -384,27 +399,44 @@ phase_preflight() {
         ok "Cassandra pod $CASSANDRA_POD is Running"
     fi
 
-    # 0.6b Connectivity probes (Cassandra + ES from inside the Atlas pod)
+    # 0.6b Read actual Cassandra/ES hostnames from atlas-application.properties
+    local es_raw
+    RESOLVED_CASS_HOST=$(kexec_quiet grep '^atlas.cassandra.graph.hostname=' /opt/apache-atlas/conf/atlas-application.properties 2>/dev/null | tail -1 | cut -d= -f2 || echo "")
+    if [ -z "$RESOLVED_CASS_HOST" ]; then
+        RESOLVED_CASS_HOST=$(kexec_quiet grep '^atlas.graph.storage.hostname=' /opt/apache-atlas/conf/atlas-application.properties 2>/dev/null | tail -1 | cut -d= -f2 || echo "localhost")
+    fi
+    RESOLVED_CASS_PORT=$(kexec_quiet grep '^atlas.cassandra.graph.port=' /opt/apache-atlas/conf/atlas-application.properties 2>/dev/null | tail -1 | cut -d= -f2 || echo "")
+    if [ -z "$RESOLVED_CASS_PORT" ]; then
+        RESOLVED_CASS_PORT=$(kexec_quiet grep '^atlas.graph.storage.port=' /opt/apache-atlas/conf/atlas-application.properties 2>/dev/null | tail -1 | cut -d= -f2 || echo "9042")
+    fi
+    es_raw=$(kexec_quiet grep '^atlas.graph.index.search.hostname=' /opt/apache-atlas/conf/atlas-application.properties 2>/dev/null | tail -1 | cut -d= -f2- || echo "localhost:9200")
+    RESOLVED_ES_HOST=$(echo "$es_raw" | cut -d':' -f1)
+    RESOLVED_ES_PORT=$(echo "$es_raw" | grep -o ':[0-9]*' | tr -d ':' || echo "9200")
+    RESOLVED_ES_PORT="${RESOLVED_ES_PORT:-9200}"
+    RESOLVED_ES_PROTOCOL=$(kexec_quiet grep '^atlas.graph.index.search.elasticsearch.http.protocol=' /opt/apache-atlas/conf/atlas-application.properties 2>/dev/null | tail -1 | cut -d= -f2 || echo "http")
+    log "  Resolved endpoints: Cassandra=${RESOLVED_CASS_HOST}:${RESOLVED_CASS_PORT}, ES=${RESOLVED_ES_PROTOCOL}://${RESOLVED_ES_HOST}:${RESOLVED_ES_PORT}"
+
+    # 0.6c Connectivity probes (Cassandra + ES from inside the Atlas pod)
     log "Testing Cassandra connectivity from Atlas pod..."
-    if kexec_quiet bash -c "nc -z -w3 localhost 9042" 2>/dev/null; then
-        ok "Cassandra port 9042 reachable from Atlas pod"
+    if kexec_quiet bash -c "nc -z -w3 ${RESOLVED_CASS_HOST} ${RESOLVED_CASS_PORT}" 2>/dev/null; then
+        ok "Cassandra ${RESOLVED_CASS_HOST}:${RESOLVED_CASS_PORT} reachable from Atlas pod"
     else
-        warn "Cannot reach Cassandra port 9042 from Atlas pod (nc test)"
+        warn "Cannot reach Cassandra ${RESOLVED_CASS_HOST}:${RESOLVED_CASS_PORT} from Atlas pod (nc test)"
     fi
 
     log "Testing Elasticsearch connectivity from Atlas pod..."
     local es_probe_status
-    es_probe_status=$(kexec_quiet curl -s -o /dev/null -w "%{http_code}" "localhost:9200/" 2>/dev/null || echo "000")
+    es_probe_status=$(kexec_quiet curl -s -o /dev/null -w "%{http_code}" "${RESOLVED_ES_PROTOCOL}://${RESOLVED_ES_HOST}:${RESOLVED_ES_PORT}/" 2>/dev/null || echo "000")
     if [ "$es_probe_status" = "200" ]; then
-        ok "Elasticsearch reachable from Atlas pod (HTTP 200)"
+        ok "Elasticsearch ${RESOLVED_ES_HOST}:${RESOLVED_ES_PORT} reachable from Atlas pod (HTTP 200)"
     else
-        warn "Elasticsearch not reachable from Atlas pod (HTTP $es_probe_status)"
+        warn "Elasticsearch not reachable from Atlas pod at ${RESOLVED_ES_HOST}:${RESOLVED_ES_PORT} (HTTP $es_probe_status)"
     fi
 
     # 0.7 Adaptive sizing probe
     log "Probing vertex count for sizing recommendation..."
     local es_count_resp
-    es_count_resp=$(kexec_quiet curl -s "localhost:9200/janusgraph_vertex_index/_count" 2>/dev/null || echo "{}")
+    es_count_resp=$(kexec_quiet curl -s "${RESOLVED_ES_PROTOCOL}://${RESOLVED_ES_HOST}:${RESOLVED_ES_PORT}/janusgraph_vertex_index/_count" 2>/dev/null || echo "{}")
     VERTEX_COUNT=$(echo "$es_count_resp" | py_extract "import sys,json; print(json.load(sys.stdin).get('count',0))")
     VERTEX_COUNT="${VERTEX_COUNT:-0}"
     log "  Vertex count (estimate): ${VERTEX_COUNT}"
@@ -434,7 +466,7 @@ phase_preflight() {
 
     # Elasticsearch disk usage
     local es_disk_info
-    es_disk_info=$(kexec_quiet curl -s "localhost:9200/_cat/allocation?format=json" 2>/dev/null || echo "[]")
+    es_disk_info=$(kexec_quiet curl -s "$(es_url)/_cat/allocation?format=json" 2>/dev/null || echo "[]")
     local es_disk_check
     es_disk_check=$(echo "$es_disk_info" | py_extract "
 import sys, json
@@ -720,7 +752,7 @@ EOF
     # Delete ES index
     log "Deleting atlas_graph_vertex_index ES index..."
     local es_resp
-    es_resp=$(kexec_quiet curl -s -X DELETE "localhost:9200/atlas_graph_vertex_index" 2>/dev/null || echo '{"acknowledged":false}')
+    es_resp=$(kexec_quiet curl -s -X DELETE "$(es_url)/atlas_graph_vertex_index" 2>/dev/null || echo '{"acknowledged":false}')
     if echo "$es_resp" | grep -q '"acknowledged":true\|"error".*"index_not_found_exception"'; then
         ok "ES index deleted (or didn't exist)"
     else
@@ -729,7 +761,7 @@ EOF
 
     # Verify ES index gone
     local es_check
-    es_check=$(kexec_quiet curl -s -o /dev/null -w "%{http_code}" "localhost:9200/atlas_graph_vertex_index" 2>/dev/null || echo "000")
+    es_check=$(kexec_quiet curl -s -o /dev/null -w "%{http_code}" "$(es_url)/atlas_graph_vertex_index" 2>/dev/null || echo "000")
     if [ "$es_check" = "404" ] || [ "$es_check" = "000" ]; then
         ok "Cleanup verified: keyspace and ES index removed"
     else
@@ -839,11 +871,16 @@ print('\n'.join(lines))
         kubectl delete pods -n "$NAMESPACE" -l app=atlas-migrator --ignore-not-found 2>/dev/null || true
         sleep 3
 
-        # ES_BULK_SIZE env entry (conditional)
-        local es_bulk_env=""
+        # ES_BULK_SIZE and QUEUE_CAPACITY env entries (conditional)
+        local extra_env=""
         if [ -n "$ES_BULK_SIZE" ]; then
-            es_bulk_env="      - name: ES_BULK_SIZE
-        value: \"${ES_BULK_SIZE}\""
+            extra_env="    - name: ES_BULK_SIZE
+      value: \"${ES_BULK_SIZE}\""
+        fi
+        if [ "${QUEUE_CAPACITY:-10000}" != "10000" ]; then
+            extra_env="${extra_env}
+    - name: QUEUE_CAPACITY
+      value: \"${QUEUE_CAPACITY}\""
         fi
 
         # Generate Pod YAML manifest
@@ -902,6 +939,7 @@ ${tolerations_yaml}
       export SCANNER_THREADS="${SCANNER_THREADS}"
       export WRITER_THREADS="${WRITER_THREADS}"
       export ES_BULK_SIZE="${ES_BULK_SIZE:-1000}"
+      export QUEUE_CAPACITY="${QUEUE_CAPACITY:-10000}"
       export MIGRATOR_JVM_HEAP="${JVM_HEAP}"
       export MIGRATOR_JVM_MIN_HEAP="${JVM_MIN_HEAP}"
       export SOURCE_CONSISTENCY="ONE"
@@ -932,7 +970,7 @@ ${tolerations_yaml}
       valueFrom:
         fieldRef:
           fieldPath: metadata.namespace
-${es_bulk_env}
+${extra_env}
     envFrom:
     - secretRef:
         name: atlas-keycloak-config
@@ -1060,7 +1098,7 @@ phase_alias() {
     # ---- Step 4.1: Verify target index exists ----
     log "Checking target index ${NEW_ES_INDEX} exists..."
     local index_status
-    index_status=$(kexec_quiet curl -s -o /dev/null -w "%{http_code}" "localhost:9200/${NEW_ES_INDEX}" 2>/dev/null || echo "000")
+    index_status=$(kexec_quiet curl -s -o /dev/null -w "%{http_code}" "$(es_url)/${NEW_ES_INDEX}" 2>/dev/null || echo "000")
 
     if [ "$index_status" != "200" ]; then
         warn "Target index ${NEW_ES_INDEX} does not exist (HTTP ${index_status}). Migration may not have completed."
@@ -1072,7 +1110,7 @@ phase_alias() {
     # ---- Step 4.2: Create vertex index alias ----
     log "Creating vertex index alias (${VERTEX_ALIAS} → ${NEW_ES_INDEX})..."
     local alias_resp
-    alias_resp=$(kexec_quiet curl -s -X POST "localhost:9200/_aliases" \
+    alias_resp=$(kexec_quiet curl -s -X POST "$(es_url)/_aliases" \
         -H 'Content-Type: application/json' \
         -d "{
             \"actions\": [
@@ -1092,7 +1130,7 @@ phase_alias() {
 
     # Verify vertex alias
     local verify_resp
-    verify_resp=$(kexec_quiet curl -s "localhost:9200/_alias/${VERTEX_ALIAS}" 2>/dev/null || echo "{}")
+    verify_resp=$(kexec_quiet curl -s "$(es_url)/_alias/${VERTEX_ALIAS}" 2>/dev/null || echo "{}")
     local points_to
     points_to=$(echo "$verify_resp" | py_extract "import sys,json; d=json.load(sys.stdin); print(','.join(d.keys()))")
 
@@ -1107,7 +1145,7 @@ phase_alias() {
 
     # Check old index exists
     local old_index_status
-    old_index_status=$(kexec_quiet curl -s -o /dev/null -w "%{http_code}" "localhost:9200/${OLD_ES_INDEX}" 2>/dev/null || echo "000")
+    old_index_status=$(kexec_quiet curl -s -o /dev/null -w "%{http_code}" "$(es_url)/${OLD_ES_INDEX}" 2>/dev/null || echo "000")
 
     if [ "$old_index_status" != "200" ]; then
         log "Old index ${OLD_ES_INDEX} does not exist — skipping persona alias migration"
@@ -1117,7 +1155,7 @@ phase_alias() {
 
     # Get all aliases from old index
     local old_aliases_json
-    old_aliases_json=$(kexec_quiet curl -s "localhost:9200/${OLD_ES_INDEX}/_alias/*" 2>/dev/null || echo "{}")
+    old_aliases_json=$(kexec_quiet curl -s "$(es_url)/${OLD_ES_INDEX}/_alias/*" 2>/dev/null || echo "{}")
 
     # Parse persona aliases (exclude system aliases)
     local alias_data
@@ -1184,7 +1222,7 @@ for b in batches:
         [ -z "$batch" ] && continue
 
         local batch_resp
-        batch_resp=$(kexec_quiet curl -s -X POST "localhost:9200/_aliases" \
+        batch_resp=$(kexec_quiet curl -s -X POST "$(es_url)/_aliases" \
             -H 'Content-Type: application/json' \
             -d "$batch" 2>/dev/null || echo '{"acknowledged":false}')
 
@@ -1216,7 +1254,7 @@ for i in range(0, len(actions), 2):
                 a_payload=$(echo "$line" | cut -d'|' -f2-)
 
                 local a_resp
-                a_resp=$(kexec_quiet curl -s -X POST "localhost:9200/_aliases" \
+                a_resp=$(kexec_quiet curl -s -X POST "$(es_url)/_aliases" \
                     -H 'Content-Type: application/json' \
                     -d "$a_payload" 2>/dev/null || echo '{"acknowledged":false}')
 
@@ -1235,7 +1273,7 @@ for i in range(0, len(actions), 2):
 
     # Verify alias count on new index
     local new_alias_count
-    new_alias_count=$(kexec_quiet curl -s "localhost:9200/${NEW_ES_INDEX}/_alias/*" 2>/dev/null | py_extract "
+    new_alias_count=$(kexec_quiet curl -s "$(es_url)/${NEW_ES_INDEX}/_alias/*" 2>/dev/null | py_extract "
 import sys, json
 data = json.load(sys.stdin)
 aliases = data.get('${NEW_ES_INDEX}', {}).get('aliases', {})
@@ -1685,7 +1723,7 @@ print(sum(1 for e in entities if e.get('scrubbed', False)))
     # 7.3 AuthPolicy in ES
     log "Checking AuthPolicy in ES..."
     local auth_count
-    auth_count=$(kexec_quiet curl -s "localhost:9200/atlas_graph_vertex_index/_count?q=__typeName.keyword:AuthPolicy" 2>/dev/null | \
+    auth_count=$(kexec_quiet curl -s "$(es_url)/atlas_graph_vertex_index/_count?q=__typeName.keyword:AuthPolicy" 2>/dev/null | \
         py_extract "import sys,json; print(json.load(sys.stdin).get('count',0))" || echo "0")
     if [ "$auth_count" -gt 0 ] 2>/dev/null; then
         verify_check "AuthPolicy ES" "true" "${auth_count} policies in ES"
@@ -1696,7 +1734,7 @@ print(sum(1 for e in entities if e.get('scrubbed', False)))
     # 7.4 AuthService in ES
     log "Checking AuthService in ES..."
     local svc_count
-    svc_count=$(kexec_quiet curl -s "localhost:9200/atlas_graph_vertex_index/_count?q=__typeName.keyword:AuthService" 2>/dev/null | \
+    svc_count=$(kexec_quiet curl -s "$(es_url)/atlas_graph_vertex_index/_count?q=__typeName.keyword:AuthService" 2>/dev/null | \
         py_extract "import sys,json; print(json.load(sys.stdin).get('count',0))" || echo "0")
     if [ "$svc_count" -gt 0 ] 2>/dev/null; then
         verify_check "AuthService ES" "true" "${svc_count} services in ES"
@@ -1707,9 +1745,9 @@ print(sum(1 for e in entities if e.get('scrubbed', False)))
     # 7.4a ES doc count comparison (old vs new index)
     log "Comparing ES doc counts (old vs new index)..."
     local old_es_count new_es_count
-    old_es_count=$(kexec_quiet curl -s "localhost:9200/janusgraph_vertex_index/_count" 2>/dev/null | \
+    old_es_count=$(kexec_quiet curl -s "$(es_url)/janusgraph_vertex_index/_count" 2>/dev/null | \
         py_extract "import sys,json; print(json.load(sys.stdin).get('count',0))" || echo "0")
-    new_es_count=$(kexec_quiet curl -s "localhost:9200/atlas_graph_vertex_index/_count" 2>/dev/null | \
+    new_es_count=$(kexec_quiet curl -s "$(es_url)/atlas_graph_vertex_index/_count" 2>/dev/null | \
         py_extract "import sys,json; print(json.load(sys.stdin).get('count',0))" || echo "0")
 
     if [ "$old_es_count" -gt 0 ] 2>/dev/null && [ "$new_es_count" -gt 0 ] 2>/dev/null; then

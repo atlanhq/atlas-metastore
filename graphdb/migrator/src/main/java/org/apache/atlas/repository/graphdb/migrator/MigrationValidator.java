@@ -219,6 +219,11 @@ public class MigrationValidator {
         // --- Check 12: Edge index table count ---
         runEdgeIndexCheck(ks, report);
 
+        // --- Check 12b: ES edge index doc count ---
+        if (!config.isSkipEsCountValidation()) {
+            runEsEdgeCountCheck(ks, report);
+        }
+
         // --- Check 13: config_store accessibility ---
         runConfigStoreCheck(report);
 
@@ -377,7 +382,16 @@ public class MigrationValidator {
                      "(edges_out={}, edges_in={})", String.format("%,d", edgeOutCount),
                      String.format("%,d", edgeInCount));
         }
-        long edgeByIdCount = countTable(ks + ".edges_by_id"); // always estimated (not scanned by SuperVertexDetector)
+        long edgeByIdCount;
+        if (usingActualCounts) {
+            edgeByIdCount = svReport.getEdgesByIdRowCount();
+            LOG.info("Edge consistency: edges_by_id={} (actual full scan)",
+                     String.format("%,d", edgeByIdCount));
+        } else {
+            edgeByIdCount = countTable(ks + ".edges_by_id");
+            LOG.info("Edge consistency: edges_by_id={} (estimated from size_estimates)",
+                     String.format("%,d", edgeByIdCount));
+        }
 
         report.setEdgeOutCount(edgeOutCount);
         report.setEdgeInCount(edgeInCount);
@@ -385,15 +399,14 @@ public class MigrationValidator {
 
         // Check 2: edges_out vs edges_in
         // With actual counts (full scan): exact match required, FAIL on mismatch (real data issue)
-        // With estimates (size_estimates): 5% tolerance, WARN on mismatch (unreliable after bulk writes)
+        // With estimates (size_estimates): 5% tolerance, FAIL on mismatch (edge consistency is critical)
         double outInTolerance = usingActualCounts ? 0.0 : 0.05;
         boolean outInMatch = isWithinTolerance(edgeOutCount, edgeInCount, outInTolerance);
         String countSource = usingActualCounts ? "actual full scan" : "estimated, 5% tolerance";
         ValidationCheckResult outInCheck = new ValidationCheckResult(
             "edge_out_in_consistency",
             "edges_out count matches edges_in count (" + countSource + ")",
-            outInMatch ? ValidationCheckResult.Severity.PASS :
-                (usingActualCounts ? ValidationCheckResult.Severity.FAIL : ValidationCheckResult.Severity.WARN),
+            outInMatch ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.FAIL,
             String.format("edges_out=%d, edges_in=%d, diff=%d (source: %s)",
                           edgeOutCount, edgeInCount, Math.abs(edgeOutCount - edgeInCount), countSource));
         outInCheck.addDetail("edges_out_count", edgeOutCount);
@@ -401,16 +414,22 @@ public class MigrationValidator {
         outInCheck.addDetail("count_source", usingActualCounts ? "full_scan" : "size_estimates");
         report.addCheck(outInCheck);
 
-        // Check 3: edges_by_id ~= edges_out (5% tolerance, always estimated)
-        boolean byIdMatch = isWithinTolerance(edgeByIdCount, edgeOutCount, 0.05);
+        // Check 3: edges_by_id vs edges_out
+        // With actual counts (full scan): exact match required, FAIL on mismatch
+        // With estimates (size_estimates): 5% tolerance, WARN on mismatch
+        double byIdTolerance = usingActualCounts ? 0.0 : 0.05;
+        boolean byIdMatch = isWithinTolerance(edgeByIdCount, edgeOutCount, byIdTolerance);
+        String byIdSource = usingActualCounts ? "actual full scan" : "estimated, 5% tolerance";
         ValidationCheckResult byIdCheck = new ValidationCheckResult(
             "edge_by_id_consistency",
-            "edges_by_id count matches edges_out count (estimated, 5% tolerance)",
-            byIdMatch ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.WARN,
-            String.format("edges_by_id=%d, edges_out=%d, diff=%d",
-                          edgeByIdCount, edgeOutCount, Math.abs(edgeByIdCount - edgeOutCount)));
+            "edges_by_id count matches edges_out count (" + byIdSource + ")",
+            byIdMatch ? ValidationCheckResult.Severity.PASS :
+                (usingActualCounts ? ValidationCheckResult.Severity.FAIL : ValidationCheckResult.Severity.WARN),
+            String.format("edges_by_id=%d, edges_out=%d, diff=%d (source: %s)",
+                          edgeByIdCount, edgeOutCount, Math.abs(edgeByIdCount - edgeOutCount), byIdSource));
         byIdCheck.addDetail("edges_by_id_count", edgeByIdCount);
         byIdCheck.addDetail("edges_out_count", edgeOutCount);
+        byIdCheck.addDetail("count_source", usingActualCounts ? "full_scan" : "size_estimates");
         report.addCheck(byIdCheck);
     }
 
@@ -1149,6 +1168,77 @@ public class MigrationValidator {
         result.addDetail("edge_index_count", edgeIndexCount);
         result.addDetail("edges_out_count", edgeOutCount);
         report.addCheck(result);
+    }
+
+    // ========================================================================
+    // Check 12b: ES edge index doc count
+    // ========================================================================
+
+    private void runEsEdgeCountCheck(String ks, ValidationReport report) {
+        String esEdgeIndex = config.getTargetEsEdgeIndex();
+        LOG.info("ES edge count check: comparing ES edge index '{}' vs Cassandra edges_by_id...", esEdgeIndex);
+
+        RestClient esClient = null;
+        try {
+            esClient = createEsClient();
+
+            long esEdgeCount = getEsIndexCount(esClient, esEdgeIndex);
+            long edgeByIdCount = report.getEdgeByIdCount();
+            if (edgeByIdCount <= 0) {
+                edgeByIdCount = countTable(ks + ".edges_by_id");
+            }
+
+            LOG.info("ES edge counts: es_edge_index({})={}, edges_by_id={}",
+                     esEdgeIndex, esEdgeCount, edgeByIdCount);
+
+            String message;
+            ValidationCheckResult.Severity severity;
+
+            if (esEdgeCount < 0) {
+                severity = ValidationCheckResult.Severity.WARN;
+                message = String.format("ES edge index '%s' not found or not accessible — " +
+                    "directRelationshipIndexSearch will not work post-cutover", esEdgeIndex);
+            } else if (esEdgeCount == 0 && edgeByIdCount > 0) {
+                severity = ValidationCheckResult.Severity.FAIL;
+                message = String.format("ES edge index '%s' is empty (0 docs) but %d edges exist — " +
+                    "directRelationshipIndexSearch will be broken post-cutover",
+                    esEdgeIndex, edgeByIdCount);
+            } else if (edgeByIdCount > 0) {
+                double ratio = (double) esEdgeCount / edgeByIdCount;
+                // Allow some tolerance since size_estimates for edges_by_id may be inaccurate
+                severity = ratio >= 0.90 ? ValidationCheckResult.Severity.PASS :
+                           ratio >= 0.50 ? ValidationCheckResult.Severity.WARN :
+                                           ValidationCheckResult.Severity.FAIL;
+                message = String.format("es_edge_index(%s)=%d, edges_by_id=%d (estimated), ratio=%.2f%%",
+                    esEdgeIndex, esEdgeCount, edgeByIdCount, ratio * 100);
+            } else {
+                severity = ValidationCheckResult.Severity.PASS;
+                message = String.format("es_edge_index(%s)=%d, edges_by_id=%d (both match: no edges)",
+                    esEdgeIndex, esEdgeCount, edgeByIdCount);
+            }
+
+            ValidationCheckResult result = new ValidationCheckResult(
+                "es_edge_count",
+                "ES edge index populated for directRelationshipIndexSearch",
+                severity, message);
+            result.addDetail("es_edge_index", esEdgeIndex);
+            result.addDetail("es_edge_count", esEdgeCount);
+            result.addDetail("edges_by_id_count", edgeByIdCount);
+            report.addCheck(result);
+
+        } catch (Exception e) {
+            LOG.warn("ES edge count check failed: {}", e.getMessage());
+            ValidationCheckResult result = new ValidationCheckResult(
+                "es_edge_count",
+                "ES edge index populated for directRelationshipIndexSearch",
+                ValidationCheckResult.Severity.WARN,
+                "ES edge count check failed: " + e.getMessage());
+            report.addCheck(result);
+        } finally {
+            if (esClient != null) {
+                try { esClient.close(); } catch (Exception ignored) {}
+            }
+        }
     }
 
     // ========================================================================

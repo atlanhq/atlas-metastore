@@ -58,6 +58,9 @@ public class SuperVertexDetector {
         Map<String, Long> inEdgeCounts = new HashMap<>();
         long edgesInRowCount = scanEdgeCountsOnly(keyspace + ".edges_in", "in_vertex_id", inEdgeCounts);
 
+        LOG.info("  Scanning edges_by_id...");
+        long edgesByIdRowCount = scanRowCount(keyspace + ".edges_by_id", "edge_id");
+
         // Merge and identify super vertices + compute stats
         Set<String> allVertexIds = new HashSet<>(outEdgeCounts.keySet());
         allVertexIds.addAll(inEdgeCounts.keySet());
@@ -126,6 +129,7 @@ public class SuperVertexDetector {
         report.setVerticesOver1mEdges(over1m);
         report.setEdgesOutRowCount(edgesOutRowCount);
         report.setEdgesInRowCount(edgesInRowCount);
+        report.setEdgesByIdRowCount(edgesByIdRowCount);
 
         // Top-N in descending order
         List<SuperVertexReport.SuperVertexEntry> topList = new ArrayList<>(topQueue);
@@ -168,6 +172,31 @@ public class SuperVertexDetector {
 
         LOG.info("Scan complete for {}: {} rows, {} distinct vertices",
                  table, String.format("%,d", rowsRead), edgeCounts.size());
+        return rowsRead;
+    }
+
+    /**
+     * Lightweight row count scan — only counts rows, no grouping.
+     * Used for edges_by_id where we just need the total count.
+     */
+    private long scanRowCount(String table, String partitionKeyColumn) {
+        SimpleStatement stmt = SimpleStatement.builder(
+                "SELECT " + partitionKeyColumn + " FROM " + table)
+            .setPageSize(5000)
+            .build();
+
+        ResultSet rs = session.execute(stmt);
+        long rowsRead = 0;
+
+        for (Row row : rs) {
+            rowsRead++;
+            if (rowsRead % 1_000_000 == 0) {
+                LOG.info("  ... scanned {} rows from {}",
+                         String.format("%,d", rowsRead), table);
+            }
+        }
+
+        LOG.info("Scan complete for {}: {} rows", table, String.format("%,d", rowsRead));
         return rowsRead;
     }
 

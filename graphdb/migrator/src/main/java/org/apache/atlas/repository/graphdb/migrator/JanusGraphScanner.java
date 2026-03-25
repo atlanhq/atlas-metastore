@@ -211,11 +211,11 @@ public class JanusGraphScanner implements AutoCloseable {
     /**
      * Scan all token ranges in parallel, decode vertices, and feed them to the consumer.
      *
-     * @param consumer    receives each decoded vertex
+     * @param consumer    receives each decoded vertex or edge chunk
      * @param stateStore  for resume support (skip completed ranges)
      * @param phase       migration phase name for state tracking
      */
-    public void scanAll(Consumer<DecodedVertex> consumer, MigrationStateStore stateStore, String phase) {
+    public void scanAll(Consumer<QueueItem> consumer, MigrationStateStore stateStore, String phase) {
         List<long[]> tokenRanges = splitTokenRanges(config.getScannerThreads());
         metrics.setTokenRangesTotal(tokenRanges.size());
 
@@ -285,9 +285,11 @@ public class JanusGraphScanner implements AutoCloseable {
     /**
      * Scan a single token range. Groups CQL rows by vertex key,
      * decodes each vertex's full adjacency list, and passes to consumer.
+     *
+     * Super vertices (>chunkSize edges) are split into a DecodedVertex + EdgeChunks.
      */
     private void scanTokenRange(PreparedStatement scanStmt, long rangeStart, long rangeEnd,
-                                 Consumer<DecodedVertex> consumer,
+                                 Consumer<QueueItem> consumer,
                                  MigrationStateStore stateStore, String phase) {
         stateStore.markRangeStarted(phase, rangeStart, rangeEnd);
 
@@ -311,18 +313,10 @@ public class JanusGraphScanner implements AutoCloseable {
             if (currentKey == null || !keyBuf.equals(currentKey)) {
                 // New vertex — flush the previous one
                 if (currentKey != null && !currentEntries.isEmpty()) {
-                    DecodedVertex decoded = decodeVertex(currentVertexId, currentEntries);
-                    if (decoded != null) {
-                        if (shouldSkipVertex(decoded)) {
-                            metrics.incrVerticesSkipped();
-                        } else {
-                            if (baselineCollector != null) {
-                                baselineCollector.recordVertex(decoded);
-                            }
-                            consumer.accept(decoded);
-                            rangeVertices++;
-                            rangeEdges += decoded.getOutEdges().size();
-                        }
+                    long[] counts = emitVertex(currentVertexId, currentEntries, consumer);
+                    if (counts != null) {
+                        rangeVertices += counts[0];
+                        rangeEdges += counts[1];
                     }
                 }
 
@@ -339,15 +333,10 @@ public class JanusGraphScanner implements AutoCloseable {
 
         // Process the last vertex in this range
         if (currentKey != null && !currentEntries.isEmpty()) {
-            DecodedVertex decoded = decodeVertex(currentVertexId, currentEntries);
-            if (decoded != null) {
-                if (shouldSkipVertex(decoded)) {
-                    metrics.incrVerticesSkipped();
-                } else {
-                    consumer.accept(decoded);
-                    rangeVertices++;
-                    rangeEdges += decoded.getOutEdges().size();
-                }
+            long[] counts = emitVertex(currentVertexId, currentEntries, consumer);
+            if (counts != null) {
+                rangeVertices += counts[0];
+                rangeEdges += counts[1];
             }
         }
 
@@ -358,6 +347,38 @@ public class JanusGraphScanner implements AutoCloseable {
         LOG.info("Token range completed: [{}, {}] — {} CQL rows, {} vertices, {} edges (ranges done: {}/{})",
                   rangeStart, rangeEnd, rowCount, rangeVertices, rangeEdges,
                   metrics.getTokenRangesDone(), metrics.getTokenRangesTotal());
+    }
+
+    /**
+     * Decode and emit a vertex (possibly chunked) to the consumer.
+     * Returns [vertexCount, edgeCount] or null if skipped/null.
+     */
+    private long[] emitVertex(long vertexId, List<Entry> entries, Consumer<QueueItem> consumer) {
+        List<QueueItem> items = decodeAndChunkVertex(vertexId, entries);
+        if (items == null || items.isEmpty()) {
+            return null;
+        }
+
+        // First item is always a DecodedVertex
+        DecodedVertex vertex = (DecodedVertex) items.get(0);
+        if (shouldSkipVertex(vertex)) {
+            metrics.incrVerticesSkipped();
+            return null;
+        }
+
+        if (baselineCollector != null) {
+            baselineCollector.recordVertex(vertex);
+        }
+
+        long totalEdges = vertex.getOutEdges().size();
+        for (QueueItem item : items) {
+            consumer.accept(item);
+            if (item instanceof EdgeChunk) {
+                totalEdges += ((EdgeChunk) item).getEdges().size();
+            }
+        }
+
+        return new long[]{1, totalEdges};
     }
 
     private long extractVertexId(ByteBuffer keyBuf) {
@@ -413,6 +434,76 @@ public class JanusGraphScanner implements AutoCloseable {
             return true;
         }
         return false;
+    }
+
+    /**
+     * Decode a vertex and split into chunks if it's a super vertex.
+     * Returns a list where the first item is always a DecodedVertex (properties + first N edges),
+     * followed by EdgeChunks for remaining edges.
+     *
+     * Returns null if the vertex is invisible/internal.
+     */
+    private List<QueueItem> decodeAndChunkVertex(long vertexId, List<Entry> entries) {
+        DecodedVertex vertex = decodeVertex(vertexId, entries);
+        if (vertex == null) {
+            return null;
+        }
+
+        int chunkSize = config.getSuperVertexEdgeChunkSize();
+        List<DecodedEdge> allEdges = vertex.getOutEdges();
+
+        if (allEdges.size() <= chunkSize) {
+            // Normal vertex — no chunking needed
+            return Collections.singletonList(vertex);
+        }
+
+        // Super vertex detected — split edges into chunks
+        int totalEdges = allEdges.size();
+        int extraChunks = (totalEdges - chunkSize + chunkSize - 1) / chunkSize;
+        LOG.info("Super vertex detected: jgId={}, typeName={}, edges={}, chunks={}",
+                 vertexId, vertex.getTypeName(), totalEdges, extraChunks + 1);
+
+        // Pre-compute the resolved vertex ID for edge chunks
+        String resolvedVertexId = resolveVertexIdForChunking(vertex);
+
+        // Snapshot ALL edges before modifying the vertex's list
+        List<DecodedEdge> allEdgesCopy = new ArrayList<>(allEdges);
+
+        // Trim the vertex's edge list to just the first chunk
+        allEdges.clear();
+        allEdges.addAll(allEdgesCopy.subList(0, chunkSize));
+
+        List<QueueItem> items = new ArrayList<>(extraChunks + 1);
+        items.add(vertex);
+
+        // Create EdgeChunks for remaining edges
+        int chunkIndex = 1;
+        for (int i = chunkSize; i < totalEdges; i += chunkSize) {
+            int end = Math.min(i + chunkSize, totalEdges);
+            List<DecodedEdge> chunkEdges = new ArrayList<>(allEdgesCopy.subList(i, end));
+            items.add(new EdgeChunk(vertexId, resolvedVertexId, chunkEdges, chunkIndex));
+            chunkIndex++;
+        }
+
+        metrics.incrSuperVertexChunksEmitted(extraChunks);
+        return items;
+    }
+
+    /**
+     * Pre-compute the resolved vertex ID at scan time for use in EdgeChunks.
+     * This must match the logic in CassandraTargetWriter.resolveVertexId(DecodedVertex).
+     */
+    private String resolveVertexIdForChunking(DecodedVertex vertex) {
+        IdStrategy strategy = config.getIdStrategy();
+        if (strategy == IdStrategy.HASH_IDENTITY) {
+            Object qnObj = vertex.getProperties().get("qualifiedName");
+            if (qnObj == null) qnObj = vertex.getProperties().get("Referenceable.qualifiedName");
+            String identityId = DeterministicIdUtil.vertexIdFromIdentity(
+                vertex.getTypeName(), qnObj != null ? String.valueOf(qnObj) : null);
+            return identityId != null ? identityId
+                : DeterministicIdUtil.vertexIdFromJg(vertex.getJgVertexId(), IdStrategy.HASH_JG);
+        }
+        return DeterministicIdUtil.vertexIdFromJg(vertex.getJgVertexId(), strategy);
     }
 
     /**
