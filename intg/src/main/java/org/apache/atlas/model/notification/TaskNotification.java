@@ -54,6 +54,8 @@ public class TaskNotification implements Serializable {
     private long                startTime;
     private long                endTime;
     private String              errorMessage;
+    private Boolean             restrictPropagationThroughLineage;
+    private Boolean             restrictPropagationThroughHierarchy;
     private Map<String, Object> parameters;
 
     public TaskNotification() {
@@ -137,6 +139,22 @@ public class TaskNotification implements Serializable {
         this.errorMessage = errorMessage;
     }
 
+    public Boolean getRestrictPropagationThroughLineage() {
+        return restrictPropagationThroughLineage;
+    }
+
+    public void setRestrictPropagationThroughLineage(Boolean restrictPropagationThroughLineage) {
+        this.restrictPropagationThroughLineage = restrictPropagationThroughLineage;
+    }
+
+    public Boolean getRestrictPropagationThroughHierarchy() {
+        return restrictPropagationThroughHierarchy;
+    }
+
+    public void setRestrictPropagationThroughHierarchy(Boolean restrictPropagationThroughHierarchy) {
+        this.restrictPropagationThroughHierarchy = restrictPropagationThroughHierarchy;
+    }
+
     public Map<String, Object> getParameters() {
         return parameters;
     }
@@ -166,6 +184,8 @@ public class TaskNotification implements Serializable {
                 ", startTime=" + startTime +
                 ", endTime=" + endTime +
                 ", errorMessage='" + errorMessage + '\'' +
+                ", restrictPropagationThroughLineage=" + restrictPropagationThroughLineage +
+                ", restrictPropagationThroughHierarchy=" + restrictPropagationThroughHierarchy +
                 '}';
     }
 }
