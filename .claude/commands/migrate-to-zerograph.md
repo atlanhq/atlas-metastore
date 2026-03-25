@@ -101,6 +101,28 @@ kubectl exec -n $NS $POD -c $CONTAINER -- bash -c \
 If neither the script nor JAR is found, STOP:
 > The migration tools are not present in this build. The build must include the `graphdb/migrator` module. Re-deploy with a build that has Zero Graph support.
 
+### 0.7 Verify recent backups exist
+
+Run the backup verification script to confirm both Cassandra and Elasticsearch backups completed recently.
+
+```bash
+# Run backup verification (requires GRAFANA_API_KEY env var)
+kubectl exec -n $NS $POD -c $CONTAINER -- bash -c \
+  "GRAFANA_API_KEY='${GRAFANA_API_KEY}' /opt/apache-atlas/bin/verify_backup.sh --tenant ${VCLUSTER_NAME}"
+```
+
+If the backup check fails:
+1. **Preferred**: Trigger a backup via Temporal and wait for completion, then re-run the check.
+2. **If backup ran recently but outside the 24h window**: Re-run with `--recency 48` to widen the window.
+3. **Dev/test only**: Pass `--skip-backup-check` to bypass (requires explicit acknowledgement from the user via AskUserQuestion).
+
+If the script is not found on the pod (older build), run the check locally:
+```bash
+GRAFANA_API_KEY="${GRAFANA_API_KEY}" ./tools/verify_backup.sh --tenant ${VCLUSTER_NAME}
+```
+
+**Migration MUST NOT proceed without verified backups** (unless user explicitly acknowledges the risk for dev/test).
+
 ---
 
 ## Phase 1: Set Up Migration Environment
