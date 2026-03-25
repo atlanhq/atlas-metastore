@@ -33,7 +33,7 @@ on:
       - ms-664-fix-audit-search
       - hotfix-reindex-refresh
       - nb-switchable-graph-provider
-      - ms-821-phase-0
+      - ms-692-per-type-edge-labels
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
