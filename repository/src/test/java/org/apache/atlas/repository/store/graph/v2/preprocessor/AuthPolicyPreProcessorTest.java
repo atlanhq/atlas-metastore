@@ -127,7 +127,7 @@ public class AuthPolicyPreProcessorTest {
 
         // Mock discovery service to return existing policy (simulating duplicate)
         when(discoveryService.directVerticesIndexSearch(any(IndexSearchParams.class)))
-            .thenReturn(Collections.singletonList(mockVertex));
+                .thenReturn(Collections.singletonList(mockVertex));
 
         // Execute & Verify
         try {
@@ -152,7 +152,7 @@ public class AuthPolicyPreProcessorTest {
 
         // Mock discovery service to return empty list (no duplicates)
         when(discoveryService.directVerticesIndexSearch(any(IndexSearchParams.class)))
-            .thenReturn(Collections.emptyList());
+                .thenReturn(Collections.emptyList());
 
         // Execute - should not throw exception
         preProcessor.validateDuplicatePolicyName(policy, persona);
@@ -218,7 +218,7 @@ public class AuthPolicyPreProcessorTest {
         AtlasEntity persona = createPersona("TestPersona", personaQN);
 
         when(discoveryService.directVerticesIndexSearch(any(IndexSearchParams.class)))
-            .thenReturn(Collections.emptyList());
+                .thenReturn(Collections.emptyList());
 
         ArgumentCaptor<IndexSearchParams> paramsCaptor = ArgumentCaptor.forClass(IndexSearchParams.class);
 
@@ -259,7 +259,7 @@ public class AuthPolicyPreProcessorTest {
         AtlasEntity persona = createPersona("TestPersona", "default/persona123");
 
         when(discoveryService.directVerticesIndexSearch(any(IndexSearchParams.class)))
-            .thenReturn(Collections.emptyList());
+                .thenReturn(Collections.emptyList());
 
         ArgumentCaptor<IndexSearchParams> paramsCaptor = ArgumentCaptor.forClass(IndexSearchParams.class);
 
@@ -274,9 +274,9 @@ public class AuthPolicyPreProcessorTest {
 
         // Find the name filter and verify it uses .keyword
         Map<String, Object> nameFilter = filters.stream()
-            .filter(f -> f.containsKey("term") && ((Map<String, Object>) f.get("term")).containsKey("name.keyword"))
-            .findFirst()
-            .orElse(null);
+                .filter(f -> f.containsKey("term") && ((Map<String, Object>) f.get("term")).containsKey("name.keyword"))
+                .findFirst()
+                .orElse(null);
 
         assertNotNull(nameFilter, "Should have name.keyword filter for exact match");
         Map<String, Object> term = (Map<String, Object>) nameFilter.get("term");
@@ -290,7 +290,7 @@ public class AuthPolicyPreProcessorTest {
         AtlasEntity persona = createPersona("Persona1", "default/persona123");
 
         when(discoveryService.directVerticesIndexSearch(any(IndexSearchParams.class)))
-            .thenReturn(Collections.emptyList());
+                .thenReturn(Collections.emptyList());
 
         ArgumentCaptor<IndexSearchParams> paramsCaptor = ArgumentCaptor.forClass(IndexSearchParams.class);
 
@@ -305,14 +305,14 @@ public class AuthPolicyPreProcessorTest {
 
         // Find the prefix filter
         Map<String, Object> prefixFilter = filters.stream()
-            .filter(f -> f.containsKey("prefix"))
-            .findFirst()
-            .orElse(null);
+                .filter(f -> f.containsKey("prefix"))
+                .findFirst()
+                .orElse(null);
 
         assertNotNull(prefixFilter, "Should have prefix filter");
         Map<String, Object> prefix = (Map<String, Object>) prefixFilter.get("prefix");
         assertEquals(prefix.get(QUALIFIED_NAME), "default/persona123",
-            "Should filter by parent persona's qualifiedName");
+                "Should filter by parent persona's qualifiedName");
     }
 
     @Test
@@ -322,7 +322,7 @@ public class AuthPolicyPreProcessorTest {
         AtlasEntity persona = createPersona("TestPersona", "default/persona123");
 
         when(discoveryService.directVerticesIndexSearch(any(IndexSearchParams.class)))
-            .thenReturn(Collections.emptyList());
+                .thenReturn(Collections.emptyList());
 
         ArgumentCaptor<IndexSearchParams> paramsCaptor = ArgumentCaptor.forClass(IndexSearchParams.class);
 
@@ -337,14 +337,14 @@ public class AuthPolicyPreProcessorTest {
 
         // Find the policyCategory filter
         Map<String, Object> categoryFilter = filters.stream()
-            .filter(f -> f.containsKey("term") && ((Map<String, Object>) f.get("term")).containsKey("policyCategory"))
-            .findFirst()
-            .orElse(null);
+                .filter(f -> f.containsKey("term") && ((Map<String, Object>) f.get("term")).containsKey("policyCategory"))
+                .findFirst()
+                .orElse(null);
 
         assertNotNull(categoryFilter, "Should have policyCategory filter");
         Map<String, Object> term = (Map<String, Object>) categoryFilter.get("term");
         assertEquals(term.get("policyCategory"), "persona",
-            "Should only search for Persona policies");
+                "Should only search for Persona policies");
     }
 
     // =====================================================================================
@@ -371,21 +371,21 @@ public class AuthPolicyPreProcessorTest {
 
     private void verifyFilterExists(List<Map<String, Object>> filters, String filterType, String field, Object value) {
         boolean found = filters.stream()
-            .anyMatch(f -> {
-                if (!f.containsKey(filterType)) return false;
-                Map<String, Object> filterContent = (Map<String, Object>) f.get(filterType);
-                return value.equals(filterContent.get(field));
-            });
+                .anyMatch(f -> {
+                    if (!f.containsKey(filterType)) return false;
+                    Map<String, Object> filterContent = (Map<String, Object>) f.get(filterType);
+                    return value.equals(filterContent.get(field));
+                });
         assertTrue(found, "Should have " + filterType + " filter for " + field + "=" + value);
     }
 
     private void verifyPrefixFilterExists(List<Map<String, Object>> filters, String field, String prefix) {
         boolean found = filters.stream()
-            .anyMatch(f -> {
-                if (!f.containsKey("prefix")) return false;
-                Map<String, Object> prefixContent = (Map<String, Object>) f.get("prefix");
-                return prefix.equals(prefixContent.get(field));
-            });
+                .anyMatch(f -> {
+                    if (!f.containsKey("prefix")) return false;
+                    Map<String, Object> prefixContent = (Map<String, Object>) f.get("prefix");
+                    return prefix.equals(prefixContent.get(field));
+                });
         assertTrue(found, "Should have prefix filter for " + field + " starting with " + prefix);
     }
 
