@@ -93,6 +93,9 @@ public class MigratorConfig {
     private final String sourceConsistencyLevel;
     private final String targetConsistencyLevel;
 
+    // Analyze mode ("cassandra" for post-migration, "janus" for pre-migration)
+    private final String analyzeMode;
+
     // Validation settings
     private final int     validationVertexSampleSize;
     private final int     validationEdgeSampleSize;
@@ -190,6 +193,9 @@ public class MigratorConfig {
         // Cassandra consistency levels
         this.sourceConsistencyLevel = get("source.cassandra.consistency", "ONE");
         this.targetConsistencyLevel = get("target.cassandra.consistency", "LOCAL_QUORUM");
+
+        // Analyze mode
+        this.analyzeMode = get("analyze.mode", "janus");
 
         // Validation
         this.validationVertexSampleSize  = getInt("validation.vertex.sample.size", 1000);
@@ -291,4 +297,5 @@ public class MigratorConfig {
     public boolean isSkipSuperVertexDetection()     { return skipSuperVertexDetection; }
     public boolean isSkipEsCountValidation()        { return skipEsCountValidation; }
     public String  getValidationTenantId()          { return validationTenantId; }
+    public String  getAnalyzeMode()                 { return analyzeMode; }
 }

@@ -22,6 +22,10 @@ public class SuperVertexReport {
     private long edgesInRowCount;
     private long edgesByIdRowCount;
 
+    // Decoded edge breakdown (JanusGraph analyzer only)
+    private long decodedOutEdges;
+    private long decodedInEdges;
+
     // Distribution buckets
     private long verticesOver1kEdges;
     private long verticesOver10kEdges;
@@ -57,6 +61,12 @@ public class SuperVertexReport {
 
     public long getEdgesByIdRowCount()         { return edgesByIdRowCount; }
     public void setEdgesByIdRowCount(long c)   { this.edgesByIdRowCount = c; }
+
+    public long getDecodedOutEdges()           { return decodedOutEdges; }
+    public void setDecodedOutEdges(long c)     { this.decodedOutEdges = c; }
+
+    public long getDecodedInEdges()            { return decodedInEdges; }
+    public void setDecodedInEdges(long c)      { this.decodedInEdges = c; }
 
     public long getVerticesOver1kEdges()    { return verticesOver1kEdges; }
     public void setVerticesOver1kEdges(long c)  { this.verticesOver1kEdges = c; }
