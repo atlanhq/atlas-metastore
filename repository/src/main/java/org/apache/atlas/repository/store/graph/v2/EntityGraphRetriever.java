@@ -1158,6 +1158,7 @@ public class EntityGraphRetriever {
         return vertexProperties;
     }
 
+
     private Set<String> collectEdgeLabelsToProcess(VertexEdgePropertiesCache cache,
                                                    Set<String> vertexIds,
                                                    Set<String> attributes) {
