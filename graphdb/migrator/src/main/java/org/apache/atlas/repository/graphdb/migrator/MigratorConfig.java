@@ -70,6 +70,9 @@ public class MigratorConfig {
     // ES edge index
     private final String targetEsEdgeIndex;
 
+    // Source ES edge index (for field limit discovery during migration)
+    private final String sourceEsEdgeIndex;
+
     // Super vertex chunking
     private final int superVertexEdgeChunkSize;
 
@@ -170,6 +173,7 @@ public class MigratorConfig {
 
         // ES edge index
         this.targetEsEdgeIndex = get("target.elasticsearch.edge.index", "atlas_graph_edge_index");
+        this.sourceEsEdgeIndex = get("source.elasticsearch.edge.index", "");
 
         // Super vertex chunking
         this.superVertexEdgeChunkSize = getInt("migration.super.vertex.edge.chunk.size", 10000);
@@ -266,6 +270,7 @@ public class MigratorConfig {
     public int     getEsFieldLimit()      { return esFieldLimit; }
     public boolean isEsParallel()         { return esParallel; }
     public String  getTargetEsEdgeIndex() { return targetEsEdgeIndex; }
+    public String  getSourceEsEdgeIndex() { return sourceEsEdgeIndex; }
     public int     getSuperVertexEdgeChunkSize() { return superVertexEdgeChunkSize; }
 
     public boolean isSkipEsReindex()      { return skipEsReindex; }
