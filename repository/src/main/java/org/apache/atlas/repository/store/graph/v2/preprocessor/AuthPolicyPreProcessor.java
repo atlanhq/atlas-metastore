@@ -282,7 +282,7 @@ public class AuthPolicyPreProcessor implements PreProcessor {
         RequestContext.get().endMetricRecord(metricRecorder);
     }
 
-    private void validateDuplicatePolicyName(AtlasEntity policy, AtlasEntity parentEntity) throws AtlasBaseException {
+    void validateDuplicatePolicyName(AtlasEntity policy, AtlasEntity parentEntity) throws AtlasBaseException {
         String policyName = getEntityName(policy);
 
         if (StringUtils.isEmpty(policyName)) {
