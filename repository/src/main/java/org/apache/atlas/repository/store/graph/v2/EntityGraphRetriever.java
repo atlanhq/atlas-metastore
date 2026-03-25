@@ -1158,7 +1158,6 @@ public class EntityGraphRetriever {
         return vertexProperties;
     }
 
-
     private Set<String> collectEdgeLabelsToProcess(VertexEdgePropertiesCache cache,
                                                    Set<String> vertexIds,
                                                    Set<String> attributes) {
@@ -1379,6 +1378,7 @@ public class EntityGraphRetriever {
                 return getEdgeInfoMapsViaAtlasApiBatched(vertexIds, edgeLabelDirections, relationAttrsSize);
             }
 
+            Set<String> edgeLabels = edgeLabelDirections.keySet();
             List<Map<String, Object>> allResults = new ArrayList<>();
             List<String> vertexIdList = new ArrayList<>(vertexIds);
             int vertexBatchSize = AtlasConfiguration.ATLAS_INDEXSEARCH_EDGE_BULK_FETCH_BATCH_SIZE.getInt(); // Process 100 vertices at a time
