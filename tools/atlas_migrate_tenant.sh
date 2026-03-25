@@ -65,11 +65,20 @@ CASSANDRA_POD="atlas-cassandra-0"
 ID_STRATEGY="legacy"
 CLAIM_ENABLED="false"
 SCANNER_THREADS="16"
-WRITER_THREADS="8"
+WRITER_THREADS="16"
 ES_BULK_SIZE=""
 ES_FIELD_LIMIT="10000"
 JVM_HEAP="4g"
 JVM_MIN_HEAP="2g"
+
+# Auto-sizing: track which params are user-specified (not to be overridden)
+USER_SET_SCANNER=false
+USER_SET_WRITER=false
+USER_SET_CPU=false
+USER_SET_MEMORY=false
+USER_SET_HEAP=false
+USER_SET_HEAP_MIN=false
+USER_SET_BULK=false
 MIGRATION_MODE=""          # "", "--fresh", "--es-only", "--validate-only"
 MIGRATOR_CPU="4"
 MIGRATOR_MEMORY="8Gi"
@@ -177,7 +186,7 @@ Orchestrates a full JanusGraph -> Cassandra migration for an Atlas tenant.
 Runs from your workstation via kubectl. Non-interactive and schedulable.
 
 Phases:
-  0  Pre-flight checks + adaptive sizing probe
+  0  Pre-flight checks + auto-sizing (CPU, memory, threads based on vertex count)
   1  Maintenance mode ON (if --maintenance-mode)
   2  Cleanup (for remigration, skipped with --skip-cleanup)
   3  Migration with retry (--max-retries)
@@ -267,17 +276,17 @@ parse_args() {
             --cassandra-pod)  CASSANDRA_POD="$2"; shift 2 ;;
             --id-strategy)    ID_STRATEGY="$2"; shift 2 ;;
             --claim-enabled)  CLAIM_ENABLED="true"; shift ;;
-            --scanner-threads) SCANNER_THREADS="$2"; shift 2 ;;
-            --writer-threads) WRITER_THREADS="$2"; shift 2 ;;
-            --es-bulk-size)   ES_BULK_SIZE="$2"; shift 2 ;;
+            --scanner-threads) SCANNER_THREADS="$2"; USER_SET_SCANNER=true; shift 2 ;;
+            --writer-threads) WRITER_THREADS="$2"; USER_SET_WRITER=true; shift 2 ;;
+            --es-bulk-size)   ES_BULK_SIZE="$2"; USER_SET_BULK=true; shift 2 ;;
             --es-field-limit) ES_FIELD_LIMIT="$2"; shift 2 ;;
-            --jvm-heap)       JVM_HEAP="$2"; shift 2 ;;
-            --jvm-min-heap)   JVM_MIN_HEAP="$2"; shift 2 ;;
+            --jvm-heap)       JVM_HEAP="$2"; USER_SET_HEAP=true; shift 2 ;;
+            --jvm-min-heap)   JVM_MIN_HEAP="$2"; USER_SET_HEAP_MIN=true; shift 2 ;;
             --fresh)          MIGRATION_MODE="--fresh"; shift ;;
             --es-only)        MIGRATION_MODE="--es-only"; shift ;;
             --validate-only)  MIGRATION_MODE="--validate-only"; shift ;;
-            --migrator-cpu)   MIGRATOR_CPU="$2"; shift 2 ;;
-            --migrator-memory) MIGRATOR_MEMORY="$2"; shift 2 ;;
+            --migrator-cpu)   MIGRATOR_CPU="$2"; USER_SET_CPU=true; shift 2 ;;
+            --migrator-memory) MIGRATOR_MEMORY="$2"; USER_SET_MEMORY=true; shift 2 ;;
             --skip-switch)    SKIP_SWITCH="true"; shift ;;
             --switch-only)    SWITCH_ONLY="true"; shift ;;
             --skip-cleanup)   SKIP_CLEANUP="true"; shift ;;
@@ -441,25 +450,48 @@ phase_preflight() {
     VERTEX_COUNT="${VERTEX_COUNT:-0}"
     log "  Vertex count (estimate): ${VERTEX_COUNT}"
 
-    # Compute sizing recommendation
-    if [ "$VERTEX_COUNT" -gt 10000000 ] 2>/dev/null; then
-        SIZING_TIER="large (>10M vertices)"
-        log "  Sizing recommendation: 32C/64Gi, scanner=32, writer=16, JVM heap=48g"
-        if [ "$JVM_HEAP" = "4g" ] && [ "$SCANNER_THREADS" = "16" ]; then
-            warn "Default sizing may be insufficient for ${VERTEX_COUNT} vertices."
-            warn "Consider: --jvm-heap 48g --jvm-min-heap 16g --scanner-threads 32 --writer-threads 16"
-        fi
-    elif [ "$VERTEX_COUNT" -gt 1000000 ] 2>/dev/null; then
-        SIZING_TIER="medium (1M-10M vertices)"
-        log "  Sizing recommendation: 16C/32Gi, scanner=16, writer=8, JVM heap=24g"
-        if [ "$JVM_HEAP" = "4g" ]; then
-            warn "Default JVM heap may be insufficient for ${VERTEX_COUNT} vertices."
-            warn "Consider: --jvm-heap 24g --jvm-min-heap 8g"
-        fi
+    # Auto-apply sizing based on vertex count (only overrides params the user didn't set)
+    if [ "$VERTEX_COUNT" -gt 20000000 ] 2>/dev/null; then
+        SIZING_TIER="XLARGE (>20M vertices)"
+        [ "$USER_SET_CPU" = "false" ]      && MIGRATOR_CPU="16"
+        [ "$USER_SET_MEMORY" = "false" ]   && MIGRATOR_MEMORY="64Gi"
+        [ "$USER_SET_HEAP" = "false" ]     && JVM_HEAP="48g"
+        [ "$USER_SET_HEAP_MIN" = "false" ] && JVM_MIN_HEAP="16g"
+        [ "$USER_SET_SCANNER" = "false" ]  && SCANNER_THREADS="32"
+        [ "$USER_SET_WRITER" = "false" ]   && WRITER_THREADS="32"
+        [ "$USER_SET_BULK" = "false" ]     && ES_BULK_SIZE="10000"
+    elif [ "$VERTEX_COUNT" -gt 5000000 ] 2>/dev/null; then
+        SIZING_TIER="LARGE (5M-20M vertices)"
+        [ "$USER_SET_CPU" = "false" ]      && MIGRATOR_CPU="8"
+        [ "$USER_SET_MEMORY" = "false" ]   && MIGRATOR_MEMORY="16Gi"
+        [ "$USER_SET_HEAP" = "false" ]     && JVM_HEAP="10g"
+        [ "$USER_SET_HEAP_MIN" = "false" ] && JVM_MIN_HEAP="4g"
+        [ "$USER_SET_SCANNER" = "false" ]  && SCANNER_THREADS="16"
+        [ "$USER_SET_WRITER" = "false" ]   && WRITER_THREADS="16"
+        [ "$USER_SET_BULK" = "false" ]     && ES_BULK_SIZE="10000"
+    elif [ "$VERTEX_COUNT" -gt 500000 ] 2>/dev/null; then
+        SIZING_TIER="MEDIUM (500K-5M vertices)"
+        [ "$USER_SET_CPU" = "false" ]      && MIGRATOR_CPU="4"
+        [ "$USER_SET_MEMORY" = "false" ]   && MIGRATOR_MEMORY="8Gi"
+        [ "$USER_SET_HEAP" = "false" ]     && JVM_HEAP="4g"
+        [ "$USER_SET_HEAP_MIN" = "false" ] && JVM_MIN_HEAP="2g"
+        [ "$USER_SET_SCANNER" = "false" ]  && SCANNER_THREADS="8"
+        [ "$USER_SET_WRITER" = "false" ]   && WRITER_THREADS="8"
+        [ "$USER_SET_BULK" = "false" ]     && ES_BULK_SIZE="5000"
     else
-        SIZING_TIER="small (<1M vertices)"
-        log "  Sizing recommendation: 4C/8Gi, scanner=8, writer=4, JVM heap=4g (default)"
+        SIZING_TIER="SMALL (<500K vertices)"
+        [ "$USER_SET_CPU" = "false" ]      && MIGRATOR_CPU="2"
+        [ "$USER_SET_MEMORY" = "false" ]   && MIGRATOR_MEMORY="4Gi"
+        [ "$USER_SET_HEAP" = "false" ]     && JVM_HEAP="2g"
+        [ "$USER_SET_HEAP_MIN" = "false" ] && JVM_MIN_HEAP="1g"
+        [ "$USER_SET_SCANNER" = "false" ]  && SCANNER_THREADS="4"
+        [ "$USER_SET_WRITER" = "false" ]   && WRITER_THREADS="4"
+        [ "$USER_SET_BULK" = "false" ]     && ES_BULK_SIZE="5000"
     fi
+
+    log "  Auto-sizing applied: tier=${SIZING_TIER}"
+    log "    CPU: ${MIGRATOR_CPU}, Memory: ${MIGRATOR_MEMORY}, Heap: ${JVM_HEAP} (min: ${JVM_MIN_HEAP})"
+    log "    Scanner: ${SCANNER_THREADS}, Writer: ${WRITER_THREADS}, ES Bulk: ${ES_BULK_SIZE}"
 
     # 0.8 Disk space check — advisory only, does not block migration
     log "Checking disk space (advisory — migration roughly doubles storage usage)..."

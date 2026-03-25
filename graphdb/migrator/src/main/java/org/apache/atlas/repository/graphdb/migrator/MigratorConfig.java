@@ -99,6 +99,14 @@ public class MigratorConfig {
     // Analyze mode ("cassandra" for post-migration, "janus" for pre-migration)
     private final String analyzeMode;
 
+    // Auto-sizing: effective values (may be overridden by MigrationSizer)
+    private int effectiveScannerThreads;
+    private int effectiveWriterThreads;
+    private int effectiveEsBulkSize;
+    private int effectiveQueueCapacity;
+    private int effectiveMaxInflightPerThread;
+    private boolean autoSized = false;
+
     // Validation settings
     private final int     validationVertexSampleSize;
     private final int     validationEdgeSampleSize;
@@ -152,12 +160,12 @@ public class MigratorConfig {
         this.targetReplicationFactor   = getInt("target.cassandra.replication.factor", 3);
 
         // Tuning
-        this.scannerThreads  = getInt("migration.scanner.threads", 32);
-        this.writerThreads   = getInt("migration.writer.threads", 8);
+        this.scannerThreads  = getInt("migration.scanner.threads", 16);
+        this.writerThreads   = getInt("migration.writer.threads", 16);
         this.writerBatchSize = getInt("migration.writer.batch.size", 500);
-        this.esBulkSize      = getInt("migration.es.bulk.size", 1000);
+        this.esBulkSize      = getInt("migration.es.bulk.size", 5000);
         this.scanFetchSize   = getInt("migration.scan.fetch.size", 5000);
-        this.queueCapacity   = getInt("migration.queue.capacity", 10000);
+        this.queueCapacity   = getInt("migration.queue.capacity", 20000);
         this.resume          = getBoolean("migration.resume", true);
 
         // Write optimizations
@@ -211,6 +219,13 @@ public class MigratorConfig {
         this.skipSuperVertexDetection    = getBoolean("validation.skip.super.vertex.detection", false);
         this.skipEsCountValidation       = getBoolean("validation.skip.es.count", false);
         this.validationTenantId          = get("validation.tenant.id", "unknown");
+
+        // Initialize effective values to config defaults (may be overridden by MigrationSizer)
+        this.effectiveScannerThreads      = this.scannerThreads;
+        this.effectiveWriterThreads       = this.writerThreads;
+        this.effectiveEsBulkSize          = this.esBulkSize;
+        this.effectiveQueueCapacity       = this.queueCapacity;
+        this.effectiveMaxInflightPerThread = this.maxInflightPerThread;
     }
 
     private String get(String key, String defaultValue) {
@@ -226,6 +241,42 @@ public class MigratorConfig {
         String val = props.getProperty(key);
         return val != null ? Boolean.parseBoolean(val.trim()) : defaultValue;
     }
+
+    /**
+     * Check if a property was explicitly set in the config file.
+     * Returns false if the property was absent (meaning the default was used).
+     */
+    public boolean isExplicitlySet(String key) {
+        return props.getProperty(key) != null;
+    }
+
+    /**
+     * Apply auto-sized values for parameters not explicitly set by the user.
+     * Called by MigrationSizer after querying estate size from ES.
+     * Only overrides values that the user did NOT explicitly set in the config file.
+     */
+    public void applyAutoSizing(int scannerThreads, int writerThreads,
+                                 int esBulkSize, int queueCapacity,
+                                 int maxInflightPerThread) {
+        if (!isExplicitlySet("migration.scanner.threads")) {
+            this.effectiveScannerThreads = scannerThreads;
+        }
+        if (!isExplicitlySet("migration.writer.threads")) {
+            this.effectiveWriterThreads = writerThreads;
+        }
+        if (!isExplicitlySet("migration.es.bulk.size")) {
+            this.effectiveEsBulkSize = esBulkSize;
+        }
+        if (!isExplicitlySet("migration.queue.capacity")) {
+            this.effectiveQueueCapacity = queueCapacity;
+        }
+        if (!isExplicitlySet("migration.writer.max.inflight.per.thread")) {
+            this.effectiveMaxInflightPerThread = maxInflightPerThread;
+        }
+        this.autoSized = true;
+    }
+
+    public boolean isAutoSized() { return autoSized; }
 
     // Getters
     public String getSourceJanusGraphConfig()    { return sourceJanusGraphConfig; }
@@ -255,15 +306,22 @@ public class MigratorConfig {
     public String  getTargetReplicationStrategy() { return targetReplicationStrategy; }
     public int     getTargetReplicationFactor()  { return targetReplicationFactor; }
 
-    public int     getScannerThreads()   { return scannerThreads; }
-    public int     getWriterThreads()    { return writerThreads; }
+    public int     getScannerThreads()   { return effectiveScannerThreads; }
+    public int     getWriterThreads()    { return effectiveWriterThreads; }
     public int     getWriterBatchSize()  { return writerBatchSize; }
-    public int     getEsBulkSize()       { return esBulkSize; }
+    public int     getEsBulkSize()       { return effectiveEsBulkSize; }
     public int     getScanFetchSize()    { return scanFetchSize; }
-    public int     getQueueCapacity()    { return queueCapacity; }
+    public int     getQueueCapacity()    { return effectiveQueueCapacity; }
     public boolean isResume()            { return resume; }
 
-    public int     getMaxInflightPerThread() { return maxInflightPerThread; }
+    public int     getMaxInflightPerThread() { return effectiveMaxInflightPerThread; }
+
+    // Raw (config-specified) getters for logging
+    public int     getRawScannerThreads()       { return scannerThreads; }
+    public int     getRawWriterThreads()        { return writerThreads; }
+    public int     getRawEsBulkSize()           { return esBulkSize; }
+    public int     getRawQueueCapacity()        { return queueCapacity; }
+    public int     getRawMaxInflightPerThread() { return maxInflightPerThread; }
     public boolean isEdgesOutOnly()          { return edgesOutOnly; }
     public int     getMaxEdgesPerBatch()     { return maxEdgesPerBatch; }
 

@@ -40,11 +40,14 @@ public class AuxiliaryKeyspaceMigrator {
     private final CqlSession sourceSession;
     private final CqlSession targetSession;
     private final MigratorConfig config;
+    private final MigrationStateStore stateStore;
 
-    public AuxiliaryKeyspaceMigrator(CqlSession sourceSession, CqlSession targetSession, MigratorConfig config) {
+    public AuxiliaryKeyspaceMigrator(CqlSession sourceSession, CqlSession targetSession,
+                                      MigratorConfig config, MigrationStateStore stateStore) {
         this.sourceSession = sourceSession;
         this.targetSession = targetSession;
         this.config        = config;
+        this.stateStore    = stateStore;
     }
 
     /**
@@ -165,91 +168,10 @@ public class AuxiliaryKeyspaceMigrator {
             "  PRIMARY KEY ((source_id, tag_type_name), propagated_asset_id)" +
             ") WITH compaction = {'class': 'SizeTieredCompactionStrategy'}");
 
-        long tagsByIdCount = migrateTagsByIdTable();
-        long propagatedCount = migratePropagatedTagsTable();
-
-        LOG.info("tags keyspace migration complete: tags_by_id={}, propagated_tags_by_source={}",
-                 tagsByIdCount, propagatedCount);
-    }
-
-    private long migrateTagsByIdTable() {
-        PreparedStatement insertStmt = targetSession.prepare(
-            "INSERT INTO " + TAGS_KEYSPACE + "." + TAGS_BY_ID_TABLE +
-            " (id, bucket, is_propagated, source_id, tag_type_name, tag_meta_json, asset_metadata, updated_at, is_deleted)" +
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-
-        ResultSet rs = sourceSession.execute(
-            SimpleStatement.builder("SELECT * FROM " + TAGS_KEYSPACE + "." + TAGS_BY_ID_TABLE)
-                .setPageSize(5000)
-                .build());
-
-        long count = 0;
-        List<BatchableStatement<?>> batch = new ArrayList<>();
-        for (Row row : rs) {
-            batch.add(insertStmt.bind(
-                row.getString("id"),
-                row.getInt("bucket"),
-                row.getBoolean("is_propagated"),
-                row.getString("source_id"),
-                row.getString("tag_type_name"),
-                row.getString("tag_meta_json"),
-                row.getString("asset_metadata"),
-                row.getInstant("updated_at"),
-                row.getBoolean("is_deleted")));
-
-            if (batch.size() >= BATCH_SIZE) {
-                targetSession.execute(BatchStatement.newInstance(BatchType.UNLOGGED, batch));
-                count += batch.size();
-                batch.clear();
-            }
-
-            if (count % 10_000 == 0 && count > 0) {
-                LOG.info("  tags_by_id: migrated {} rows...", count);
-            }
-        }
-        if (!batch.isEmpty()) {
-            targetSession.execute(BatchStatement.newInstance(BatchType.UNLOGGED, batch));
-            count += batch.size();
-        }
-        return count;
-    }
-
-    private long migratePropagatedTagsTable() {
-        PreparedStatement insertStmt = targetSession.prepare(
-            "INSERT INTO " + TAGS_KEYSPACE + "." + PROPAGATED_TAGS_TABLE +
-            " (source_id, tag_type_name, propagated_asset_id, asset_metadata, updated_at)" +
-            " VALUES (?, ?, ?, ?, ?)");
-
-        ResultSet rs = sourceSession.execute(
-            SimpleStatement.builder("SELECT * FROM " + TAGS_KEYSPACE + "." + PROPAGATED_TAGS_TABLE)
-                .setPageSize(5000)
-                .build());
-
-        long count = 0;
-        List<BatchableStatement<?>> batch = new ArrayList<>();
-        for (Row row : rs) {
-            batch.add(insertStmt.bind(
-                row.getString("source_id"),
-                row.getString("tag_type_name"),
-                row.getString("propagated_asset_id"),
-                row.getString("asset_metadata"),
-                row.getInstant("updated_at")));
-
-            if (batch.size() >= BATCH_SIZE) {
-                targetSession.execute(BatchStatement.newInstance(BatchType.UNLOGGED, batch));
-                count += batch.size();
-                batch.clear();
-            }
-
-            if (count % 10_000 == 0 && count > 0) {
-                LOG.info("  propagated_tags_by_source: migrated {} rows...", count);
-            }
-        }
-        if (!batch.isEmpty()) {
-            targetSession.execute(BatchStatement.newInstance(BatchType.UNLOGGED, batch));
-            count += batch.size();
-        }
-        return count;
+        // Delegate to parallel migrator for the actual data copy
+        ParallelTagsMigrator parallelMigrator =
+            new ParallelTagsMigrator(sourceSession, targetSession, config, stateStore);
+        parallelMigrator.migrateAll();
     }
 
     private String buildReplication() {

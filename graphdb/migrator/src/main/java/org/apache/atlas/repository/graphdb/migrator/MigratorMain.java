@@ -65,6 +65,11 @@ public class MigratorMain {
 
         MigratorConfig config = new MigratorConfig(configPath);
 
+        // Auto-size thread pools based on estate size (skip for analyze/validate modes)
+        if (!analyze && !validateOnly) {
+            MigrationSizer.autoSize(config);
+        }
+
         // --analyze mode: read-only graph analysis
         if (analyze) {
             String mode = config.getAnalyzeMode();
@@ -162,6 +167,8 @@ public class MigratorMain {
             // 1. Clear migration state (resume tracking)
             stateStore.clearState(PHASE_SCAN);
             stateStore.clearState(PHASE_ES);
+            stateStore.clearState(ParallelTagsMigrator.PHASE_TAGS_BY_ID);
+            stateStore.clearState(ParallelTagsMigrator.PHASE_TAGS_PROPAGATED);
 
             // 2. Truncate all target Cassandra data tables
             writer.truncateAll();
@@ -298,7 +305,7 @@ public class MigratorMain {
             LOG.info("========================================");
 
             // ========== Phase 1.5: Auxiliary Keyspace Migration ==========
-            AuxiliaryKeyspaceMigrator auxMigrator = new AuxiliaryKeyspaceMigrator(sourceSession, targetSession, config);
+            AuxiliaryKeyspaceMigrator auxMigrator = new AuxiliaryKeyspaceMigrator(sourceSession, targetSession, config, stateStore);
             auxMigrator.migrate();
 
             // ========== Phase 2: ES Re-index ==========

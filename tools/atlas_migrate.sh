@@ -51,9 +51,9 @@ TARGET_ES_INDEX="${TARGET_ES_INDEX:-atlas_graph_vertex_index}"
 
 # Tuning (in-cluster = fast, can be aggressive)
 SCANNER_THREADS="${SCANNER_THREADS:-16}"
-WRITER_THREADS="${WRITER_THREADS:-8}"
-ES_BULK_SIZE="${ES_BULK_SIZE:-1000}"
-QUEUE_CAPACITY="${QUEUE_CAPACITY:-10000}"
+WRITER_THREADS="${WRITER_THREADS:-16}"
+ES_BULK_SIZE="${ES_BULK_SIZE:-5000}"
+QUEUE_CAPACITY="${QUEUE_CAPACITY:-20000}"
 ES_FIELD_LIMIT="${ES_FIELD_LIMIT:-10000}"
 MAX_RETRIES="${MAX_RETRIES:-3}"
 
@@ -351,8 +351,8 @@ show_help() {
     echo "  TARGET_KEYSPACE          Target keyspace (default: atlas_graph)"
     echo "  SOURCE_ES_INDEX          Source ES index to copy mappings from (default: janusgraph_vertex_index)"
     echo "  TARGET_ES_INDEX          Target ES index to write docs to (default: atlas_graph_vertex_index)"
-    echo "  SCANNER_THREADS          Scanner parallelism (default: 16)"
-    echo "  WRITER_THREADS           Writer parallelism (default: 8)"
+    echo "  SCANNER_THREADS          Scanner parallelism (default: 16, auto-sized by Java)"
+    echo "  WRITER_THREADS           Writer parallelism (default: 16, auto-sized by Java)"
     echo "  ID_STRATEGY              ID generation: legacy, hash-jg, or deterministic (default: legacy)"
     echo "  CLAIM_ENABLED            LWT dedup claims during migration: true/false (default: false)"
     echo "  SKIP_ES_REINDEX          Skip ES reindexing phase: true/false (default: false)"
