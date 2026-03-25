@@ -7,9 +7,15 @@ import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.datastax.oss.driver.api.core.cql.ResultSet;
+import com.datastax.oss.driver.api.core.cql.Row;
+import com.datastax.oss.driver.api.core.cql.SimpleStatement;
+
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.time.Duration;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.*;
 
@@ -47,6 +53,7 @@ public class MigratorMain {
             System.err.println("       java -jar atlas-graphdb-migrator.jar <config-file> --validate-only");
             System.err.println("       java -jar atlas-graphdb-migrator.jar <config-file> --es-only");
             System.err.println("       java -jar atlas-graphdb-migrator.jar <config-file> --fresh (clears state, starts over)");
+            System.err.println("       java -jar atlas-graphdb-migrator.jar <config-file> --analyze (read-only graph analysis)");
             System.exit(1);
         }
 
@@ -54,8 +61,53 @@ public class MigratorMain {
         boolean validateOnly = args.length > 1 && "--validate-only".equals(args[1]);
         boolean esOnly = args.length > 1 && "--es-only".equals(args[1]);
         boolean fresh = args.length > 1 && "--fresh".equals(args[1]);
+        boolean analyze = args.length > 1 && "--analyze".equals(args[1]);
 
         MigratorConfig config = new MigratorConfig(configPath);
+
+        // --analyze mode: read-only graph analysis
+        if (analyze) {
+            String mode = config.getAnalyzeMode();
+            if ("janus".equalsIgnoreCase(mode)) {
+                // JanusGraph pre-migration analysis: source Cassandra + ES
+                LOG.info("=== Graph Analysis Mode (JanusGraph — pre-migration) ===");
+                LOG.info("Source Cassandra: {}:{}/{}", config.getSourceCassandraHostname(),
+                         config.getSourceCassandraPort(), config.getSourceCassandraKeyspace());
+                LOG.info("Edgestore table: {}", config.getSourceEdgestoreTable());
+                LOG.info("Source ES index: {}", config.getSourceEsIndex());
+
+                CqlSession sourceSession = buildCqlSession(
+                    config.getSourceCassandraHostname(), config.getSourceCassandraPort(),
+                    config.getSourceCassandraDatacenter(), config.getSourceCassandraKeyspace(),
+                    config.getSourceCassandraUsername(), config.getSourceCassandraPassword(),
+                    false, Duration.ofSeconds(120), config.getSourceConsistencyLevel());
+
+                try {
+                    runJanusGraphAnalysis(config, sourceSession);
+                } finally {
+                    sourceSession.close();
+                }
+            } else {
+                // CassandraGraph post-migration analysis
+                LOG.info("=== Graph Analysis Mode (CassandraGraph — post-migration) ===");
+                LOG.info("Target Cassandra: {}:{}/{}", config.getTargetCassandraHostname(),
+                         config.getTargetCassandraPort(), config.getTargetCassandraKeyspace());
+
+                CqlSession targetSession = buildCqlSession(
+                    config.getTargetCassandraHostname(), config.getTargetCassandraPort(),
+                    config.getTargetCassandraDatacenter(), config.getTargetCassandraKeyspace(),
+                    config.getTargetCassandraUsername(), config.getTargetCassandraPassword(),
+                    false, Duration.ofSeconds(120), config.getTargetConsistencyLevel());
+
+                try {
+                    runAnalysis(config, targetSession);
+                } finally {
+                    targetSession.close();
+                }
+            }
+            return;
+        }
+
         MigrationMetrics metrics = new MigrationMetrics();
 
         LOG.info("=== JanusGraph → Cassandra Migrator ===");
@@ -407,6 +459,137 @@ public class MigratorMain {
     }
 
     /**
+     * Read-only graph analysis: detect super vertices, count vertex types,
+     * and print a structured report suitable for Mixpanel ingestion.
+     */
+    private static void runAnalysis(MigratorConfig config, CqlSession targetSession) {
+        LOG.info("Target: {}:{}/{}", config.getTargetCassandraHostname(),
+                 config.getTargetCassandraPort(), config.getTargetCassandraKeyspace());
+        LOG.info("Super vertex threshold: {}, Top-N: {}",
+                 config.getSuperVertexThreshold(), config.getSuperVertexTopN());
+
+        String domainName = System.getenv("DOMAIN_NAME");
+        if (domainName == null || domainName.isEmpty()) {
+            domainName = config.getValidationTenantId();
+        }
+
+        // 1. Super vertex detection (reuses existing SuperVertexDetector)
+        LOG.info("Step 1/2: Running super vertex detection...");
+        SuperVertexDetector detector = new SuperVertexDetector(
+            targetSession, config.getTargetCassandraKeyspace(),
+            config.getSuperVertexThreshold(), config.getSuperVertexTopN());
+        SuperVertexReport svReport = detector.detect();
+
+        // 2. Lightweight vertex type count scan
+        LOG.info("Step 2/2: Scanning vertex types...");
+        Map<String, Long> typeCounts = countVertexTypes(
+            targetSession, config.getTargetCassandraKeyspace());
+
+        // 3. Build report
+        AnalysisReport report = new AnalysisReport();
+        report.populate(domainName, config, svReport, typeCounts);
+
+        // 4. Print formatted report to console
+        LOG.info(report.toPrettyString());
+
+        // 5. Print Mixpanel payload preview
+        LOG.info("========================================");
+        LOG.info("=== Mixpanel Payload Preview (engage $set) ===");
+        LOG.info("========================================");
+        LOG.info("\n{}", report.toJson());
+
+        // 6. Push to Mixpanel (if configured via MIXPANEL_TOKEN env var)
+        MixpanelReporter mixpanel = MixpanelReporter.fromEnv();
+        if (mixpanel != null) {
+            mixpanel.send(report);
+        } else {
+            LOG.info("Mixpanel not configured — set MIXPANEL_TOKEN env var to enable push");
+        }
+    }
+
+    /**
+     * Read-only JanusGraph pre-migration analysis: uses ES for vertex type distribution
+     * and edgestore CQL scan for super vertex detection.
+     */
+    private static void runJanusGraphAnalysis(MigratorConfig config, CqlSession sourceSession) {
+        LOG.info("Super vertex threshold: {}, Top-N: {}",
+                 config.getSuperVertexThreshold(), config.getSuperVertexTopN());
+
+        String domainName = System.getenv("DOMAIN_NAME");
+        if (domainName == null || domainName.isEmpty()) {
+            domainName = config.getValidationTenantId();
+        }
+
+        try (JanusGraphAnalyzer analyzer = new JanusGraphAnalyzer(sourceSession, config)) {
+            // 1. Vertex + edge counts from ES
+            LOG.info("Step 1/3: Querying ES for vertex/edge counts and type distribution...");
+            long totalVertices = analyzer.getTotalVertexCount();
+            long totalEdges = analyzer.getTotalEdgeCount();
+            Map<String, Long> typeCounts = analyzer.getVertexTypeCounts();
+
+            // 2. Super vertex detection from edgestore
+            LOG.info("Step 2/3: Scanning edgestore for super vertices...");
+            SuperVertexReport svReport = analyzer.detectSuperVertices();
+
+            // 3. Build report
+            LOG.info("Step 3/3: Building report...");
+            AnalysisReport report = new AnalysisReport();
+            report.populateFromJanusGraph(domainName, config, svReport, typeCounts, totalVertices, totalEdges);
+
+            // 4. Print formatted report to console
+            LOG.info(report.toPrettyString());
+
+            // 5. Print Mixpanel payload preview
+            LOG.info("========================================");
+            LOG.info("=== Mixpanel Payload Preview (engage $set) ===");
+            LOG.info("========================================");
+            LOG.info("\n{}", report.toJson());
+
+            // 6. Push to Mixpanel (if configured via MIXPANEL_TOKEN env var)
+            MixpanelReporter mixpanel = MixpanelReporter.fromEnv();
+            if (mixpanel != null) {
+                mixpanel.send(report);
+            } else {
+                LOG.info("Mixpanel not configured — set MIXPANEL_TOKEN env var to enable push");
+            }
+        } catch (Exception e) {
+            LOG.error("JanusGraph analysis failed: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Scan the vertices table to count vertices per type_name.
+     * Uses the same streaming approach as SuperVertexDetector — pages through
+     * results, aggregates counts in memory.
+     */
+    private static Map<String, Long> countVertexTypes(CqlSession session, String keyspace) {
+        SimpleStatement stmt = SimpleStatement.builder(
+                "SELECT type_name FROM " + keyspace + ".vertices")
+            .setPageSize(5000)
+            .build();
+
+        Map<String, Long> typeCounts = new HashMap<>();
+        ResultSet rs = session.execute(stmt);
+        long rowsRead = 0;
+
+        for (Row row : rs) {
+            String typeName = row.getString("type_name");
+            if (typeName != null) {
+                typeCounts.merge(typeName, 1L, Long::sum);
+            }
+            rowsRead++;
+            if (rowsRead % 1_000_000 == 0) {
+                LOG.info("  ... scanned {} vertex rows for type counts, {} distinct types",
+                         String.format("%,d", rowsRead), typeCounts.size());
+            }
+        }
+
+        LOG.info("Vertex type scan complete: {} rows, {} distinct types",
+                 String.format("%,d", rowsRead), typeCounts.size());
+        return typeCounts;
+    }
+
+    /**
      * Build a CqlSession. Does NOT specify keyspace at session level so we can
      * create keyspaces and query across them.
      *
@@ -478,7 +661,17 @@ public class MigratorMain {
                     setLevel.invoke(logger, warnLevel);
                 }
             }
-            LOG.info("Cassandra driver log level set to WARN");
+
+            // Set JanusGraph and Gremlin loggers to INFO (suppress verbose DEBUG)
+            Object infoLevel = levelClass.getField("INFO").get(null);
+            for (String name : new String[]{"org.janusgraph", "org.apache.tinkerpop"}) {
+                Object logger = LoggerFactory.getLogger(name);
+                if (loggerClass.isInstance(logger)) {
+                    setLevel.invoke(logger, infoLevel);
+                }
+            }
+
+            LOG.info("Log levels set: Cassandra driver=WARN, JanusGraph/Gremlin=INFO");
         } catch (Exception e) {
             LOG.debug("Could not set Cassandra driver log level (non-fatal): {}", e.getMessage());
         }
