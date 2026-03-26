@@ -186,11 +186,11 @@ public class BackupVerifier {
             WorkflowServiceStubsOptions.Builder builder = WorkflowServiceStubsOptions.newBuilder()
                     .setTarget(temporalAddress);
 
-            // Enable TLS for port-443 endpoints
+            // Enable TLS for port-443 endpoints (GrpcSslContexts adds ALPN/HTTP2 negotiation)
             if (temporalAddress.endsWith(":443")) {
                 try {
                     builder.setSslContext(
-                            io.grpc.netty.shaded.io.netty.handler.ssl.SslContextBuilder.forClient().build());
+                            io.grpc.netty.shaded.io.grpc.netty.GrpcSslContexts.forClient().build());
                 } catch (SSLException e) {
                     throw new RuntimeException("Failed to create TLS context for Temporal", e);
                 }
