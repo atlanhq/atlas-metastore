@@ -1172,6 +1172,33 @@
         "entity-classification:*"
       ],
       "actions": ["entity-create", "entity-update"]
+    },
+    {
+      "policyResourceCategory": "ENTITY",
+      "policyType": "ACCESS",
+      "description": "Create/update AIModelVersion when creating AIModel",
+      "resources": [
+        "entity:*",
+        "entity-type:AIModelVersion",
+        "entity-classification:*"
+      ],
+      "actions": ["entity-create", "entity-update"]
+    },
+    {
+      "policyResourceCategory": "RELATIONSHIP",
+      "policyType": "ACCESS",
+      "description": "Link AIModelVersion to AIModel during creation",
+      "resources": [
+        "relationship-type:*",
+        "end-one-entity-type:AIModel",
+        "end-one-entity-classification:*",
+        "end-one-entity:*",
+
+        "end-two-entity-type:AIModelVersion",
+        "end-two-entity-classification:*",
+        "end-two-entity:*"
+      ],
+      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
     }
   ],
   "persona-ai-model-update": [
@@ -1217,6 +1244,33 @@
         "end-two-entity:*"
       ],
       "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+    },
+    {
+      "policyResourceCategory": "RELATIONSHIP",
+      "policyType": "ACCESS",
+      "description": "Link/unlink AIModelVersion to this AIModel",
+      "resources": [
+        "relationship-type:*",
+        "end-one-entity-type:AIModel",
+        "end-one-entity-classification:*",
+        "end-one-entity:*",
+
+        "end-two-entity-type:AIModelVersion",
+        "end-two-entity-classification:*",
+        "end-two-entity:*"
+      ],
+      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+    },
+    {
+      "policyResourceCategory": "ENTITY",
+      "policyType": "ACCESS",
+      "description": "Create/update AIModelVersion when updating AIModel",
+      "resources": [
+        "entity:*",
+        "entity-type:AIModelVersion",
+        "entity-classification:*"
+      ],
+      "actions": ["entity-create", "entity-update"]
     },
     {
       "policyType": "ACCESS",
