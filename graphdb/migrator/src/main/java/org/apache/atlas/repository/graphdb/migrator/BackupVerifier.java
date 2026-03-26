@@ -1,8 +1,13 @@
 package org.apache.atlas.repository.graphdb.migrator;
 
+import io.temporal.api.common.v1.WorkflowExecution;
+import io.temporal.api.enums.v1.EventType;
 import io.temporal.api.enums.v1.WorkflowExecutionStatus;
+import io.temporal.api.history.v1.HistoryEvent;
 import io.temporal.api.workflowservice.v1.DescribeWorkflowExecutionRequest;
 import io.temporal.api.workflowservice.v1.DescribeWorkflowExecutionResponse;
+import io.temporal.api.workflowservice.v1.GetWorkflowExecutionHistoryRequest;
+import io.temporal.api.workflowservice.v1.GetWorkflowExecutionHistoryResponse;
 import io.temporal.client.schedules.ScheduleActionExecution;
 import io.temporal.client.schedules.ScheduleActionExecutionStartWorkflow;
 import io.temporal.client.schedules.ScheduleActionResult;
@@ -18,14 +23,18 @@ import org.slf4j.LoggerFactory;
 import javax.net.ssl.SSLException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
- * Verifies that a recent successful backup exists for a tenant by querying
- * the Temporal schedule {@code daily-backup-schedule-<tenant>}.
+ * Verifies that recent successful Cassandra and Elasticsearch backups exist
+ * for a tenant by querying the Temporal schedule {@code daily-backup-schedule-<tenant>}.
  *
- * <p>Used as a pre-flight check before Zero Graph migration to ensure
- * both Cassandra and Elasticsearch backups are available for rollback.</p>
+ * <p>The schedule triggers a {@code TenantBackup} parent workflow with child workflows:
+ * ArgoBackup, CassandraBackup, ElasticsearchBackup, PostgresBackup, RedisBackup.
+ * This verifier specifically checks that CassandraBackup and ElasticsearchBackup
+ * completed successfully — other children are ignored.</p>
  */
 public class BackupVerifier {
     private static final Logger LOG = LoggerFactory.getLogger(BackupVerifier.class);
@@ -35,15 +44,19 @@ public class BackupVerifier {
     static final String DEFAULT_NAMESPACE        = "default";
     static final int    DEFAULT_RECENCY_HOURS    = 24;
 
-    private final String             tenant;
-    private final int                recencyHours;
+    static final String CASSANDRA_BACKUP     = "CassandraBackup";
+    static final String ELASTICSEARCH_BACKUP = "ElasticsearchBackup";
+
+    private final String              tenant;
+    private final int                 recencyHours;
     private final ScheduleInfoFetcher fetcher;
 
     // ---- Abstraction for Temporal operations (mockable in tests) ----
 
     interface ScheduleInfoFetcher extends AutoCloseable {
         /**
-         * Fetch the most recent backup run from the given schedule.
+         * Fetch the most recent backup run from the given schedule,
+         * including per-child workflow statuses for CassandraBackup and ElasticsearchBackup.
          * @return null if no recent actions exist
          */
         BackupRunInfo fetchLastBackupRun(String scheduleId) throws Exception;
@@ -53,16 +66,19 @@ public class BackupVerifier {
     }
 
     static class BackupRunInfo {
-        final Instant  startedAt;
-        final String   workflowId;
-        final String   runId;
-        final String   status; // COMPLETED, FAILED, RUNNING, TIMED_OUT, CANCELED, TERMINATED
+        final Instant             startedAt;
+        final String              workflowId;
+        final String              runId;
+        final String              parentStatus;
+        final Map<String, String> childStatuses; // e.g. {"CassandraBackup": "COMPLETED", "ElasticsearchBackup": "FAILED"}
 
-        BackupRunInfo(Instant startedAt, String workflowId, String runId, String status) {
-            this.startedAt  = startedAt;
-            this.workflowId = workflowId;
-            this.runId      = runId;
-            this.status     = status;
+        BackupRunInfo(Instant startedAt, String workflowId, String runId,
+                      String parentStatus, Map<String, String> childStatuses) {
+            this.startedAt     = startedAt;
+            this.workflowId    = workflowId;
+            this.runId         = runId;
+            this.parentStatus  = parentStatus;
+            this.childStatuses = childStatuses != null ? childStatuses : new HashMap<>();
         }
     }
 
@@ -138,8 +154,8 @@ public class BackupVerifier {
                 return Result.fail("No recent backup runs found for schedule: " + scheduleId);
             }
 
-            LOG.info("Last backup: workflow={}, run={}, started={}, status={}",
-                     lastRun.workflowId, lastRun.runId, lastRun.startedAt, lastRun.status);
+            LOG.info("Last backup: workflow={}, run={}, started={}, parent={}",
+                     lastRun.workflowId, lastRun.runId, lastRun.startedAt, lastRun.parentStatus);
 
             // Check recency
             Instant cutoff = Instant.now().minus(Duration.ofHours(recencyHours));
@@ -149,24 +165,37 @@ public class BackupVerifier {
                         lastRun.startedAt, "STALE");
             }
 
-            // Check status
-            switch (lastRun.status) {
-                case "COMPLETED":
-                    String msg = String.format("Backup verified: schedule=%s, lastRun=%s, status=COMPLETED",
-                                               scheduleId, lastRun.startedAt);
-                    return Result.pass(msg, lastRun.startedAt);
-
-                case "RUNNING":
-                    return Result.fail(
-                            String.format("Backup is currently running (started %s) — re-check after it completes",
-                                          lastRun.startedAt),
-                            lastRun.startedAt, "RUNNING");
-
-                default:
-                    return Result.fail(
-                            String.format("Last backup %s at %s", lastRun.status.toLowerCase(), lastRun.startedAt),
-                            lastRun.startedAt, lastRun.status);
+            // If parent is still running, we can't verify children yet
+            if ("RUNNING".equals(lastRun.parentStatus)) {
+                return Result.fail(
+                        String.format("Backup is currently running (started %s) — re-check after it completes",
+                                      lastRun.startedAt),
+                        lastRun.startedAt, "RUNNING");
             }
+
+            // Check CassandraBackup and ElasticsearchBackup child statuses
+            String cassandraStatus = lastRun.childStatuses.getOrDefault(CASSANDRA_BACKUP, "NOT_FOUND");
+            String esStatus        = lastRun.childStatuses.getOrDefault(ELASTICSEARCH_BACKUP, "NOT_FOUND");
+
+            LOG.info("Child statuses: {}={}, {}={}", CASSANDRA_BACKUP, cassandraStatus, ELASTICSEARCH_BACKUP, esStatus);
+
+            boolean cassandraOk = "COMPLETED".equals(cassandraStatus);
+            boolean esOk        = "COMPLETED".equals(esStatus);
+
+            if (cassandraOk && esOk) {
+                String msg = String.format(
+                        "Backup verified: schedule=%s, lastRun=%s, CassandraBackup=COMPLETED, ElasticsearchBackup=COMPLETED",
+                        scheduleId, lastRun.startedAt);
+                return Result.pass(msg, lastRun.startedAt);
+            }
+
+            // Build failure message with per-component detail
+            StringBuilder sb = new StringBuilder();
+            sb.append("Backup verification failed for schedule: ").append(scheduleId).append('\n');
+            sb.append("  CassandraBackup:     ").append(cassandraStatus).append(cassandraOk ? " ✓" : " ✗").append('\n');
+            sb.append("  ElasticsearchBackup: ").append(esStatus).append(esOk ? " ✓" : " ✗");
+
+            return Result.fail(sb.toString(), lastRun.startedAt, lastRun.parentStatus);
 
         } catch (Exception e) {
             LOG.error("Failed to verify backup schedule: {}", scheduleId, e);
@@ -201,6 +230,7 @@ public class BackupVerifier {
 
         @Override
         public BackupRunInfo fetchLastBackupRun(String scheduleId) throws Exception {
+            // 1. Describe the schedule to get the latest action
             ScheduleClient scheduleClient = ScheduleClient.newInstance(stubs,
                     ScheduleClientOptions.newBuilder().setNamespace(namespace).build());
 
@@ -212,7 +242,6 @@ public class BackupVerifier {
                 return null;
             }
 
-            // Most recent action is last in the list
             ScheduleActionResult lastAction = recentActions.get(recentActions.size() - 1);
             Instant startedAt = lastAction.getStartedAt();
 
@@ -225,20 +254,140 @@ public class BackupVerifier {
             String workflowId = wfAction.getWorkflowId();
             String runId      = wfAction.getFirstExecutionRunId();
 
-            // Describe workflow to get its completion status
-            DescribeWorkflowExecutionResponse wfResp = stubs.blockingStub()
-                    .describeWorkflowExecution(DescribeWorkflowExecutionRequest.newBuilder()
-                            .setNamespace(namespace)
-                            .setExecution(io.temporal.api.common.v1.WorkflowExecution.newBuilder()
-                                    .setWorkflowId(workflowId)
-                                    .setRunId(runId)
-                                    .build())
-                            .build());
+            // 2. Follow retry chain to the terminal run (max 5 hops)
+            String currentRunId = runId;
+            String parentStatus = null;
+            for (int i = 0; i < 5; i++) {
+                DescribeWorkflowExecutionResponse wfResp = stubs.blockingStub()
+                        .describeWorkflowExecution(DescribeWorkflowExecutionRequest.newBuilder()
+                                .setNamespace(namespace)
+                                .setExecution(WorkflowExecution.newBuilder()
+                                        .setWorkflowId(workflowId)
+                                        .setRunId(currentRunId)
+                                        .build())
+                                .build());
 
-            WorkflowExecutionStatus wfStatus = wfResp.getWorkflowExecutionInfo().getStatus();
-            String statusName = wfStatus.name().replace("WORKFLOW_EXECUTION_STATUS_", "");
+                WorkflowExecutionStatus wfStatus = wfResp.getWorkflowExecutionInfo().getStatus();
+                parentStatus = wfStatus.name().replace("WORKFLOW_EXECUTION_STATUS_", "");
 
-            return new BackupRunInfo(startedAt, workflowId, runId, statusName);
+                if (!"FAILED".equals(parentStatus)) {
+                    break; // COMPLETED, RUNNING, etc. — no retry to follow
+                }
+
+                // Check history for retry (newExecutionRunId in the FAILED event)
+                String retryRunId = findRetryRunId(workflowId, currentRunId);
+                if (retryRunId == null) {
+                    break; // No retry — this is the terminal run
+                }
+
+                LOG.info("Following retry: {} -> {}", currentRunId, retryRunId);
+                currentRunId = retryRunId;
+            }
+
+            // 3. Fetch workflow history and parse child workflow statuses
+            Map<String, String> childStatuses = parseChildWorkflowStatuses(workflowId, currentRunId);
+
+            return new BackupRunInfo(startedAt, workflowId, currentRunId, parentStatus, childStatuses);
+        }
+
+        /**
+         * Check the workflow history for a retry run ID (from WorkflowExecutionFailed event).
+         */
+        private String findRetryRunId(String workflowId, String runId) {
+            try {
+                GetWorkflowExecutionHistoryResponse historyResp = stubs.blockingStub()
+                        .getWorkflowExecutionHistory(GetWorkflowExecutionHistoryRequest.newBuilder()
+                                .setNamespace(namespace)
+                                .setExecution(WorkflowExecution.newBuilder()
+                                        .setWorkflowId(workflowId)
+                                        .setRunId(runId)
+                                        .build())
+                                .build());
+
+                for (HistoryEvent event : historyResp.getHistory().getEventsList()) {
+                    if (event.getEventType() == EventType.EVENT_TYPE_WORKFLOW_EXECUTION_FAILED) {
+                        String newRunId = event.getWorkflowExecutionFailedEventAttributes().getNewExecutionRunId();
+                        if (newRunId != null && !newRunId.isEmpty()) {
+                            return newRunId;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                LOG.warn("Failed to check retry for workflow {}/{}: {}", workflowId, runId, e.getMessage());
+            }
+            return null;
+        }
+
+        /**
+         * Parse workflow history events to extract child workflow statuses.
+         * Tracks: CassandraBackup and ElasticsearchBackup.
+         */
+        private Map<String, String> parseChildWorkflowStatuses(String workflowId, String runId) {
+            Map<String, String> childStatuses = new HashMap<>();
+            Map<Long, String> initiatedEventIdToType = new HashMap<>(); // eventId -> workflow type name
+
+            try {
+                GetWorkflowExecutionHistoryResponse historyResp = stubs.blockingStub()
+                        .getWorkflowExecutionHistory(GetWorkflowExecutionHistoryRequest.newBuilder()
+                                .setNamespace(namespace)
+                                .setExecution(WorkflowExecution.newBuilder()
+                                        .setWorkflowId(workflowId)
+                                        .setRunId(runId)
+                                        .build())
+                                .build());
+
+                for (HistoryEvent event : historyResp.getHistory().getEventsList()) {
+                    switch (event.getEventType()) {
+                        case EVENT_TYPE_START_CHILD_WORKFLOW_EXECUTION_INITIATED: {
+                            String typeName = event.getStartChildWorkflowExecutionInitiatedEventAttributes()
+                                    .getWorkflowType().getName();
+                            if (CASSANDRA_BACKUP.equals(typeName) || ELASTICSEARCH_BACKUP.equals(typeName)) {
+                                initiatedEventIdToType.put(event.getEventId(), typeName);
+                                childStatuses.put(typeName, "RUNNING"); // default until we see completion/failure
+                            }
+                            break;
+                        }
+                        case EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_COMPLETED: {
+                            long initId = event.getChildWorkflowExecutionCompletedEventAttributes().getInitiatedEventId();
+                            String typeName = initiatedEventIdToType.get(initId);
+                            if (typeName != null) {
+                                childStatuses.put(typeName, "COMPLETED");
+                            }
+                            break;
+                        }
+                        case EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_FAILED: {
+                            long initId = event.getChildWorkflowExecutionFailedEventAttributes().getInitiatedEventId();
+                            String typeName = initiatedEventIdToType.get(initId);
+                            if (typeName != null) {
+                                childStatuses.put(typeName, "FAILED");
+                            }
+                            break;
+                        }
+                        case EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_TIMED_OUT: {
+                            long initId = event.getChildWorkflowExecutionTimedOutEventAttributes().getInitiatedEventId();
+                            String typeName = initiatedEventIdToType.get(initId);
+                            if (typeName != null) {
+                                childStatuses.put(typeName, "TIMED_OUT");
+                            }
+                            break;
+                        }
+                        case EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_CANCELED: {
+                            long initId = event.getChildWorkflowExecutionCanceledEventAttributes().getInitiatedEventId();
+                            String typeName = initiatedEventIdToType.get(initId);
+                            if (typeName != null) {
+                                childStatuses.put(typeName, "CANCELED");
+                            }
+                            break;
+                        }
+                        default:
+                            break;
+                    }
+                }
+            } catch (Exception e) {
+                LOG.warn("Failed to parse child workflow statuses for {}/{}: {}", workflowId, runId, e.getMessage());
+            }
+
+            return childStatuses;
         }
 
         @Override
@@ -312,7 +461,8 @@ public class BackupVerifier {
     private static void printUsage() {
         System.out.println("Usage: BackupVerifier --tenant <name> [options]");
         System.out.println();
-        System.out.println("Verifies recent successful backup exists via Temporal schedule API.");
+        System.out.println("Verifies recent successful Cassandra and Elasticsearch backups");
+        System.out.println("via Temporal schedule API (daily-backup-schedule-<tenant>).");
         System.out.println();
         System.out.println("Options:");
         System.out.println("  --tenant <name>            Tenant/cluster name (required)");
@@ -322,7 +472,7 @@ public class BackupVerifier {
         System.out.println("  --skip-backup-check        Skip verification (dev/test only)");
         System.out.println();
         System.out.println("Exit codes:");
-        System.out.println("  0  Backup verification passed");
+        System.out.println("  0  Backup verification passed (both CassandraBackup and ElasticsearchBackup completed)");
         System.out.println("  1  Backup verification failed");
         System.out.println("  2  Configuration error");
     }
