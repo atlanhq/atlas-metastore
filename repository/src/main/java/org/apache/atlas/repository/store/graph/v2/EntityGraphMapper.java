@@ -3767,11 +3767,25 @@ public class EntityGraphMapper {
 
 
     private AtlasEntityHeader constructHeader(AtlasEntity entity, AtlasVertex vertex, AtlasEntityType entityType) throws AtlasBaseException {
-        Set<String> writtenAttrs = getWrittenAttributeNames(entity, entityType);
+        // MS-710: Read ALL persisted attributes from the vertex (not just writtenAttrs).
+        // This ensures the entity cached in RequestContext is complete, so that downstream
+        // consumers (notification builder, full-text mapper) see all attributes like
+        // connectorName — even if they weren't in the update request payload.
+        Set<String> allAttrs = entityType.getAllAttributes().keySet();
+        AtlasEntityHeader header = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex, allAttrs);
 
-        AtlasEntityHeader header = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex, writtenAttrs);
         if (entity.getClassifications() == null) {
             entity.setClassifications(header.getClassifications());
+        }
+
+        // Merge persisted vertex attrs into entity so reqContext.cache(entity) is complete.
+        // Payload attrs take precedence — they are freshly written.
+        if (MapUtils.isNotEmpty(header.getAttributes())) {
+            Map<String, Object> merged = new HashMap<>(header.getAttributes());
+            if (MapUtils.isNotEmpty(entity.getAttributes())) {
+                merged.putAll(entity.getAttributes());
+            }
+            entity.setAttributes(merged);
         }
 
         return header;
