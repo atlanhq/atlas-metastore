@@ -118,6 +118,20 @@
             <artifactId>atlas-intg</artifactId>
         </dependency>
 
+        <!-- Temporal SDK for backup schedule verification -->
+        <dependency>
+            <groupId>io.temporal</groupId>
+            <artifactId>temporal-sdk</artifactId>
+            <version>1.22.3</version>
+            <exclusions>
+                <!-- Exclude protobuf-java to avoid conflicts with JanusGraph's transitive protobuf -->
+                <exclusion>
+                    <groupId>com.google.protobuf</groupId>
+                    <artifactId>protobuf-java</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
         <!-- Logging -->
         <dependency>
             <groupId>org.slf4j</groupId>

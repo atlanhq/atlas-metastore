@@ -103,12 +103,12 @@ If neither the script nor JAR is found, STOP:
 
 ### 0.7 Verify recent backups exist
 
-Run the backup verification script to confirm both Cassandra and Elasticsearch backups completed recently.
+Run the backup verification script to confirm a recent successful backup exists via Temporal schedule API.
 
 ```bash
-# Run backup verification (requires GRAFANA_API_KEY env var)
-kubectl exec -n $NS $POD -c $CONTAINER -- bash -c \
-  "GRAFANA_API_KEY='${GRAFANA_API_KEY}' /opt/apache-atlas/bin/verify_backup.sh --tenant ${VCLUSTER_NAME}"
+# Run backup verification (queries Temporal at temporal-server.atlan.com:443)
+kubectl exec -n $NS $POD -c $CONTAINER -- \
+  /opt/apache-atlas/bin/verify_backup.sh --tenant ${VCLUSTER_NAME}
 ```
 
 If the backup check fails:
@@ -116,9 +116,12 @@ If the backup check fails:
 2. **If backup ran recently but outside the 24h window**: Re-run with `--recency 48` to widen the window.
 3. **Dev/test only**: Pass `--skip-backup-check` to bypass (requires explicit acknowledgement from the user via AskUserQuestion).
 
-If the script is not found on the pod (older build), run the check locally:
+You can also verify manually via Temporal CLI:
 ```bash
-GRAFANA_API_KEY="${GRAFANA_API_KEY}" ./tools/verify_backup.sh --tenant ${VCLUSTER_NAME}
+temporal schedule describe \
+  --schedule-id "daily-backup-schedule-${VCLUSTER_NAME}" \
+  --address temporal-server.atlan.com --tls \
+  --namespace default -o json
 ```
 
 **Migration MUST NOT proceed without verified backups** (unless user explicitly acknowledges the risk for dev/test).
