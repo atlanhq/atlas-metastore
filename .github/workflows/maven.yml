@@ -26,6 +26,7 @@ on:
       - staging
       - ms-635
       - lg-async-producer
+      - ms-885-undertow-migration
 
     paths-ignore:
       - '.claude/**'
