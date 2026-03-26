@@ -1246,6 +1246,17 @@ public class MigrationValidator {
     // ========================================================================
 
     private void runConfigStoreCheck(ValidationReport report) {
+        if (config.isSameCassandraCluster() || !config.isMigrateConfigStore()) {
+            LOG.info("config_store check: skipped (sameCluster={}, migrateConfigStore={})",
+                     config.isSameCassandraCluster(), config.isMigrateConfigStore());
+            report.addCheck(new ValidationCheckResult(
+                "config_store_accessible",
+                "config_store.configs is readable on target Cassandra",
+                ValidationCheckResult.Severity.PASS,
+                "skipped (config_store migration not applicable)"));
+            return;
+        }
+
         LOG.info("config_store check: verifying accessibility on target...");
 
         long count = -1;
@@ -1285,6 +1296,17 @@ public class MigrationValidator {
     // ========================================================================
 
     private void runTagsTablesCheck(ValidationReport report) {
+        if (config.isSameCassandraCluster() || !config.isMigrateTags()) {
+            LOG.info("tags tables check: skipped (sameCluster={}, migrateTags={})",
+                     config.isSameCassandraCluster(), config.isMigrateTags());
+            report.addCheck(new ValidationCheckResult(
+                "tags_tables_accessible",
+                "tags keyspace tables are readable on target Cassandra",
+                ValidationCheckResult.Severity.PASS,
+                "skipped (tags migration not applicable)"));
+            return;
+        }
+
         LOG.info("tags tables check: verifying accessibility on target...");
 
         long tagsCount = -1;
