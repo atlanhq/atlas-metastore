@@ -24,6 +24,9 @@ import io.undertow.server.HttpHandler;
 import io.undertow.servlet.Servlets;
 import io.undertow.servlet.api.DeploymentInfo;
 import io.undertow.servlet.api.DeploymentManager;
+import io.undertow.servlet.api.FilterInfo;
+import io.undertow.servlet.api.ListenerInfo;
+import io.undertow.servlet.api.ServletInfo;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -32,6 +35,7 @@ import org.slf4j.LoggerFactory;
 import org.xnio.Options;
 import org.xnio.XnioWorker;
 
+import javax.servlet.DispatcherType;
 import javax.servlet.ServletException;
 import java.io.File;
 import java.io.IOException;
@@ -114,8 +118,10 @@ public class EmbeddedServer {
 
     /**
      * Deploy the webapp from the expanded WAR directory using Undertow's DeploymentManager.
-     * This is equivalent to Jetty's WebAppContext — it loads web.xml, initializes Spring context,
-     * registers all servlets, filters, and listeners.
+     *
+     * Unlike Jetty's WebAppContext which auto-parses web.xml, Undertow's DeploymentInfo
+     * requires explicit registration of servlets, filters, and listeners. This method
+     * programmatically mirrors the declarations in WEB-INF/web.xml.
      */
     protected HttpHandler deployWebapp(String path) throws ServletException {
         File webappDir = new File(path);
@@ -130,6 +136,73 @@ public class EmbeddedServer {
                 .setResourceManager(new io.undertow.server.handlers.resource.FileResourceManager(webappDir, 0))
                 .setDefaultEncoding("UTF-8")
                 .setDefaultSessionTimeout(3600); // 60 minutes, matching web.xml
+
+        // === Listeners (from web.xml) ===
+        // KerberosAwareListener extends ContextLoaderListener — initializes Spring context
+        deploymentInfo.addListener(new ListenerInfo(org.apache.atlas.web.setup.KerberosAwareListener.class));
+        deploymentInfo.addListener(new ListenerInfo(org.springframework.web.context.request.RequestContextListener.class));
+        deploymentInfo.addListener(new ListenerInfo(org.springframework.security.web.session.HttpSessionEventPublisher.class));
+
+        // Spring context config location (normally from web.xml context-param)
+        deploymentInfo.addInitParameter("contextConfigLocation", "classpath*:META-INF/spring/*.xml,/WEB-INF/applicationContext.xml");
+
+        // === Servlets (from web.xml) ===
+        ServletInfo jerseyServlet = new ServletInfo("jersey-servlet",
+                com.sun.jersey.spi.spring.container.servlet.SpringServlet.class)
+                .addInitParam("com.sun.jersey.api.json.POJOMappingFeature", "true")
+                .addMapping("/api/atlas/*")
+                .addMapping("/api/atlas/v2/*")
+                .addMapping("/api/meta/*")
+                .setLoadOnStartup(1);
+        deploymentInfo.addServlet(jerseyServlet);
+
+        ServletInfo loginServlet = new ServletInfo("LoginServlet",
+                org.apache.atlas.web.servlets.AtlasLoginServlet.class)
+                .addMapping("/login.jsp");
+        deploymentInfo.addServlet(loginServlet);
+
+        ServletInfo errorServlet = new ServletInfo("ErrorServlet",
+                org.apache.atlas.web.servlets.AtlasErrorServlet.class)
+                .addMapping("/error.jsp");
+        deploymentInfo.addServlet(errorServlet);
+
+        // === Filters (from web.xml, order matters) ===
+        deploymentInfo.addFilter(new FilterInfo("springSecurityFilterChain",
+                org.springframework.web.filter.DelegatingFilterProxy.class));
+        deploymentInfo.addFilterUrlMapping("springSecurityFilterChain", "/*", DispatcherType.REQUEST);
+
+        deploymentInfo.addFilter(new FilterInfo("MetricsFilter",
+                org.apache.atlas.web.filters.MetricsFilter.class));
+        deploymentInfo.addFilterUrlMapping("MetricsFilter", "/*", DispatcherType.REQUEST);
+
+        deploymentInfo.addFilter(new FilterInfo("AuditFilter",
+                org.apache.atlas.web.filters.AuditFilter.class));
+        deploymentInfo.addFilterUrlMapping("AuditFilter", "/*", DispatcherType.REQUEST);
+
+        deploymentInfo.addFilter(new FilterInfo("HeaderFilter",
+                org.apache.atlas.web.filters.AtlasHeaderFilter.class));
+        deploymentInfo.addFilterUrlMapping("HeaderFilter", "/api/atlas/admin/metrics", DispatcherType.REQUEST);
+        deploymentInfo.addFilterUrlMapping("HeaderFilter", "/api/atlas/admin/metrics/prometheus", DispatcherType.REQUEST);
+        deploymentInfo.addFilterUrlMapping("HeaderFilter", "/api/atlas/admin/status", DispatcherType.REQUEST);
+
+        deploymentInfo.addFilter(new FilterInfo("brotliFilter",
+                org.apache.atlas.web.filters.BrotliCompressionFilter.class));
+        deploymentInfo.addFilterUrlMapping("brotliFilter", "/*", DispatcherType.REQUEST);
+
+        // === Session config (from web.xml) ===
+        deploymentInfo.setDefaultSessionTimeout(3600); // 60 minutes
+        deploymentInfo.setServletSessionConfig(new io.undertow.servlet.api.ServletSessionConfig()
+                .setName("ATLASSESSIONID")
+                .setHttpOnly(true)
+                .setSecure(true));
+
+        // === Error pages (from web.xml) ===
+        deploymentInfo.addErrorPage(new io.undertow.servlet.api.ErrorPage("/error.jsp", 404));
+        deploymentInfo.addErrorPage(new io.undertow.servlet.api.ErrorPage("/error.jsp", 500));
+        deploymentInfo.addErrorPage(new io.undertow.servlet.api.ErrorPage("/error.jsp", Throwable.class));
+
+        LOG.info("Deploying webapp from {} with {} servlets, {} filters, {} listeners",
+                path, 3, 5, 3);
 
         deploymentManager = Servlets.defaultContainer().addDeployment(deploymentInfo);
         deploymentManager.deploy();
