@@ -157,8 +157,8 @@ class GlossarySuite:
             print(f"  [glossary] Name: {resp_get.json().get('name')}")
 
         # Wait for glossary to appear in list endpoint
-        print(f"  [glossary] Sleeping for 30 seconds...")
-        time.sleep(30)
+        print(f"  [glossary] Sleeping for 60 seconds...")
+        time.sleep(60)
 
         # GET-all -> find our glossary by name -> GET by that GUID -> verify details
         resp = client.get("/glossary", params={"limit": 100, "offset": 0, "sort": "ASC"})

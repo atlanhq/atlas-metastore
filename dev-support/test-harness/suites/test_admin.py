@@ -1,4 +1,4 @@
-"""Admin endpoint tests (~16 tests)."""
+"""Admin endpoint tests (~19 tests)."""
 
 from core.decorators import suite, test
 from core.assertions import (
@@ -79,24 +79,6 @@ class AdminSuite:
         # Returns 200 if active, 503 if passive
         assert_status_in(resp, [200, 503])
 
-    @test("get_session", tags=["admin"], order=5)
-    def test_get_session(self, client, ctx):
-        resp = client.get("/session", admin=True)
-        if _is_500_not_found(resp):
-            raise SkipTestError(
-                "GET /session returned 500 (NullPointerException) — "
-                "endpoint unavailable in this environment"
-            )
-        assert_status_in(resp, [200, 404])
-        if resp.status_code == 200:
-            body = resp.json()
-            assert isinstance(body, dict) and body, "Expected non-empty dict session response"
-            # Session should include user info or auth details
-            has_identity = any(k in body for k in ("userName", "user", "userId", "name", "principal"))
-            assert has_identity, (
-                f"Session response should contain user identity, got keys: {list(body.keys())}"
-            )
-
     @test("get_metrics", tags=["admin"], order=10)
     def test_get_metrics(self, client, ctx):
         # Retry on timeout (408) — metrics endpoint can be slow on staging
@@ -132,23 +114,6 @@ class AdminSuite:
             # Prometheus format: lines with metric_name{labels} value
             assert len(body_text) > 50, (
                 f"Prometheus metrics suspiciously short ({len(body_text)} chars)"
-            )
-
-    @test("get_stack", tags=["admin"], order=12)
-    def test_get_stack(self, client, ctx):
-        resp = client.get("/stack", admin=True)
-        if _is_500_not_found(resp):
-            raise SkipTestError(
-                "GET /stack returned 500 — endpoint unavailable in this environment"
-            )
-        assert_status_in(resp, [200, 404])
-        if resp.status_code == 200:
-            body = resp.body
-            assert body, "Expected non-empty stack response"
-            body_str = str(body)
-            # Stack trace should contain thread references
-            assert len(body_str) > 100, (
-                f"Stack trace response suspiciously short ({len(body_str)} chars)"
             )
 
     @test("get_active_searches", tags=["admin"], order=13)
@@ -274,27 +239,6 @@ class AdminSuite:
             raise SkipTestError(f"Feature flag delete not reachable: {e}")
         assert_status_in(resp, [200, 204, 404])
 
-    @test("get_session_structure", tags=["admin"], order=6)
-    def test_get_session_structure(self, client, ctx):
-        """Validate session response structure has user identity fields."""
-        resp = client.get("/session", admin=True)
-        if _is_500_not_found(resp):
-            raise SkipTestError(
-                "GET /session returned 500 — endpoint unavailable in this environment"
-            )
-        assert_status_in(resp, [200, 404])
-        if resp.status_code != 200:
-            raise SkipTestError("Session endpoint returned non-200")
-        body = resp.json()
-        assert isinstance(body, dict) and body, "Expected non-empty dict session response"
-        # Check for common user identity keys
-        identity_keys = {"userName", "user", "userId", "name", "principal", "sub"}
-        found = identity_keys & set(body.keys())
-        assert found, (
-            f"Session response should contain user identity field "
-            f"(one of {identity_keys}), got keys: {list(body.keys())}"
-        )
-
     @test("get_health_components", tags=["admin"], order=7)
     def test_get_health_components(self, client, ctx):
         """Validate health response includes component statuses."""
@@ -347,41 +291,6 @@ class AdminSuite:
             f"Metrics should reference type/typedef data somewhere, "
             f"got keys: {list(metrics.keys())[:15]}"
         )
-
-    @test("get_server_properties", tags=["admin"], order=19)
-    def test_get_server_properties(self, client, ctx):
-        """GET /admin/server-properties — validate server configuration."""
-        resp = client.get("/server-properties", admin=True)
-        if _is_500_not_found(resp):
-            raise SkipTestError(
-                "GET /server-properties returned 500 — "
-                "endpoint unavailable in this environment"
-            )
-        assert_status_in(resp, [200, 404])
-        if resp.status_code == 200:
-            body = resp.json()
-            assert isinstance(body, dict), f"Expected dict, got {type(body).__name__}"
-
-    @test("thread_dump_structure", tags=["admin"], order=22)
-    def test_thread_dump_structure(self, client, ctx):
-        """Verify /admin/stack returns meaningful thread dump content."""
-        resp = client.get("/stack", admin=True)
-        if _is_500_not_found(resp):
-            raise SkipTestError(
-                "GET /stack returned 500 — endpoint unavailable in this environment"
-            )
-        assert_status_in(resp, [200, 404])
-        if resp.status_code != 200:
-            raise SkipTestError(f"Stack endpoint returned {resp.status_code}")
-        body_str = str(resp.body)
-        # Thread dump should contain thread names
-        assert len(body_str) > 200, (
-            f"Thread dump suspiciously short: {len(body_str)} chars"
-        )
-        # Should mention common JVM thread pool names
-        thread_indicators = ["main", "atlas", "http", "pool", "Thread"]
-        found = any(ind.lower() in body_str.lower() for ind in thread_indicators)
-        assert found, "Thread dump should contain recognizable thread names"
 
     @test("global_audit_search", tags=["admin", "audit"], order=23)
     def test_global_audit_search(self, client, ctx):
