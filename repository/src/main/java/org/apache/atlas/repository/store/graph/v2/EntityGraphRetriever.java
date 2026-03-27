@@ -1158,11 +1158,31 @@ public class EntityGraphRetriever {
         return vertexProperties;
     }
 
+
     private Set<String> collectEdgeLabelsToProcess(VertexEdgePropertiesCache cache,
                                                    Set<String> vertexIds,
                                                    Set<String> attributes) {
+        Map<String, Set<String>> perTypeLabels = collectEdgeLabelsPerType(cache, vertexIds, attributes);
+        // Flatten to single set for backward compatibility with callers that don't use per-type grouping
+        Set<String> edgeLabels = new HashSet<>();
+        for (Set<String> labels : perTypeLabels.values()) {
+            edgeLabels.addAll(labels);
+        }
+        return edgeLabels;
+    }
+
+    /**
+     * Collects edge labels grouped by entity typeName. Each type only gets labels for
+     * relationship attributes that actually exist on that type, avoiding the CQL amplification
+     * caused by querying irrelevant labels across all vertices.
+     *
+     * @return Map of typeName → set of edge labels relevant to that type
+     */
+    private Map<String, Set<String>> collectEdgeLabelsPerType(VertexEdgePropertiesCache cache,
+                                                              Set<String> vertexIds,
+                                                              Set<String> attributes) {
         if (attributes == null || attributes.isEmpty()) {
-            return Collections.emptySet();
+            return Collections.emptyMap();
         }
 
         Set<String> typeNames = vertexIds.stream()
@@ -1170,8 +1190,7 @@ public class EntityGraphRetriever {
                 .filter(StringUtils::isNotEmpty)
                 .collect(Collectors.toSet());
 
-        // Collect edge labels from relationship attributes
-        Set<String> edgeLabels = new HashSet<>();
+        Map<String, Set<String>> perTypeLabels = new HashMap<>();
 
         for (String typeName : typeNames) {
             AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
@@ -1179,12 +1198,17 @@ public class EntityGraphRetriever {
                 continue;
             }
 
+            Set<String> labelsForType = new HashSet<>();
             for (String attribute : attributes) {
-                processRelationshipAttribute(entityType, attribute, edgeLabels);
+                processRelationshipAttribute(entityType, attribute, labelsForType);
+            }
+
+            if (!labelsForType.isEmpty()) {
+                perTypeLabels.put(typeName, labelsForType);
             }
         }
 
-        return edgeLabels;
+        return perTypeLabels;
     }
 
     private void processRelationshipAttribute(AtlasEntityType entityType,
@@ -1472,15 +1496,43 @@ public class EntityGraphRetriever {
            }
            vertexEdgePropertyCache.addVertices(vertexCache.getValue1());
 
-           Set<String> edgeLabelsToProcess = collectEdgeLabelsToProcess(vertexEdgePropertyCache, vertexIds, attributes);
+           Map<String, Set<String>> perTypeEdgeLabels = collectEdgeLabelsPerType(vertexEdgePropertyCache, vertexIds, attributes);
 
            Set<String> vertexIdsToProcess = new HashSet<>();
-           if (!CollectionUtils.isEmpty(edgeLabelsToProcess)) {
-               List<Map<String, Object>> relationEdges;
-               if (AtlasConfiguration.ATLAS_INDEXSEARCH_EDGE_BULK_FETCH_ENABLE.getBoolean()) {
-                   relationEdges = getConnectedRelationEdgesVertexBatching(vertexIds, edgeLabelsToProcess, relationAttrsSize);
-               } else {
-                   relationEdges = getConnectedRelationEdges(vertexIds, edgeLabelsToProcess, relationAttrsSize);
+           if (!perTypeEdgeLabels.isEmpty()) {
+               // Group vertex IDs by their typeName so each group only queries its own edge labels
+               Map<String, Set<String>> typeToVertexIds = new HashMap<>();
+               for (String vertexId : vertexIds) {
+                   String typeName = vertexEdgePropertyCache.getTypeName(vertexId);
+                   if (StringUtils.isNotEmpty(typeName) && perTypeEdgeLabels.containsKey(typeName)) {
+                       typeToVertexIds.computeIfAbsent(typeName, k -> new LinkedHashSet<>()).add(vertexId);
+                   }
+               }
+
+               // Fetch edges per type-group, each with only its relevant labels
+               List<Map<String, Object>> relationEdges = new ArrayList<>();
+               for (Map.Entry<String, Set<String>> entry : typeToVertexIds.entrySet()) {
+                   String typeName = entry.getKey();
+                   Set<String> typeVertexIds = entry.getValue();
+                   Set<String> typeEdgeLabels = perTypeEdgeLabels.get(typeName);
+
+                   if (CollectionUtils.isEmpty(typeEdgeLabels)) {
+                       continue;
+                   }
+
+                   List<Map<String, Object>> typeEdges;
+                   if (AtlasConfiguration.ATLAS_INDEXSEARCH_EDGE_BULK_FETCH_ENABLE.getBoolean()) {
+                       typeEdges = getConnectedRelationEdgesVertexBatching(typeVertexIds, typeEdgeLabels, relationAttrsSize);
+                   } else {
+                       typeEdges = getConnectedRelationEdges(typeVertexIds, typeEdgeLabels, relationAttrsSize);
+                   }
+                   relationEdges.addAll(typeEdges);
+               }
+
+               // Compute the union of all edge labels for the filter check below
+               Set<String> edgeLabelsToProcess = new HashSet<>();
+               for (Set<String> labels : perTypeEdgeLabels.values()) {
+                   edgeLabelsToProcess.addAll(labels);
                }
 
 
