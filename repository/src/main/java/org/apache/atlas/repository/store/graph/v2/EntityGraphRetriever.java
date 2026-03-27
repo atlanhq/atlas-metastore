@@ -57,7 +57,6 @@ import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
 import org.apache.atlas.repository.store.graph.v2.utils.TagAttributeMapper;
 import org.apache.atlas.repository.util.AccessControlUtils;
-import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.type.AtlasArrayType;
 import org.apache.atlas.type.AtlasBuiltInTypes.AtlasObjectIdType;
 import org.apache.atlas.type.AtlasBusinessMetadataType.AtlasBusinessAttribute;
@@ -1498,14 +1497,12 @@ public class EntityGraphRetriever {
                 }
             }
 
-            if(!RequestContext.get().isSkipAuthorizationCheck() && DynamicConfigStore.isTagV2Enabled()) {
+            if (!RequestContext.get().isSkipAuthorizationCheck()) {
                 // Classification resolution: check batch-prefetched cache first, fall back to
                 // individual Cassandra fetch on cache miss (e.g., async batch failure for this vertex)
                 String vertexId = entityVertex.getIdForDisplay();
                 List<AtlasClassification> cached = (classificationCache != null) ? classificationCache.get(vertexId) : null;
                 entity.setClassifications(cached != null ? new ArrayList<>(cached) : tagDAO.getAllClassificationsForVertex(vertexId));
-            } else {
-                mapClassifications(entityVertex, entity);
             }
         }
 
@@ -2204,26 +2201,15 @@ public class EntityGraphRetriever {
     }
 
     /**
-     * Returns classification names for a vertex. When TagV2 is enabled, queries Cassandra
-     * for just the type names (lightweight, no JSON deserialization). Otherwise falls back
-     * to reading denormalized vertex properties.
+     * Returns classification names for a vertex. Queries Cassandra for just the type names
+     * (lightweight, no JSON deserialization).
      */
     public List<String> getClassificationNames(AtlasVertex entityVertex) throws AtlasBaseException {
-        if (DynamicConfigStore.isTagV2Enabled()) {
-            return tagDAO.getClassificationNamesForVertex(entityVertex.getIdForDisplay(), null);
-        } else {
-            List<String> names = getClassificationNamesFromVertex(entityVertex);
-            names.addAll(getPropagatedClassificationNamesFromVertex(entityVertex));
-            return names;
-        }
+        return tagDAO.getClassificationNamesForVertex(entityVertex.getIdForDisplay(), null);
     }
 
     public List<AtlasClassification> handleGetAllClassifications(AtlasVertex entityVertex) throws AtlasBaseException {
-        if(DynamicConfigStore.isTagV2Enabled()) {
-            return getAllClassifications_V2(entityVertex);
-        } else {
-            return getAllClassifications_V1(entityVertex);
-        }
+        return getAllClassifications_V2(entityVertex);
     }
 
     public List<AtlasClassification> getAllClassifications_V2(AtlasVertex entityVertex) throws AtlasBaseException {
@@ -2256,81 +2242,6 @@ public class EntityGraphRetriever {
         }
     }
 
-
-    public List<AtlasClassification> getAllClassifications_V1(AtlasVertex entityVertex) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("getAllClassifications");
-        try {
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Performing getAllClassifications");
-            }
-
-            // use optimised path only for indexsearch and when flag is enabled!
-            if (ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_FOR_CLASSIFICATIONS.getBoolean() && RequestContext.get().isInvokedByIndexSearch()) {
-                // Fetch classification vertices directly
-                List<Map<String, Object>> classificationProperties = new ArrayList<>();
-                List<AtlasClassification> ret = new ArrayList<>();
-                ((AtlasJanusGraph) graph).getGraph().traversal()
-                        .V(entityVertex.getId())  // Start from the entity vertex
-                        .outE(CLASSIFICATION_LABEL) // Get outgoing classification edges
-                        .inV() // Move to classification vertex
-                        .project(TYPE_NAME_PROPERTY_KEY, CLASSIFICATION_ENTITY_GUID, CLASSIFICATION_ENTITY_STATUS,
-                                CLASSIFICATION_VERTEX_PROPAGATE_KEY, CLASSIFICATION_VERTEX_REMOVE_PROPAGATIONS_KEY, CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_LINEAGE,
-                                CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_HIERARCHY) // Fetch only needed properties
-                        .by(__.values(TYPE_NAME_PROPERTY_KEY))
-                        .by(__.values(CLASSIFICATION_ENTITY_GUID))
-                        .by(__.values(CLASSIFICATION_ENTITY_STATUS))
-                        .by(__.values(CLASSIFICATION_VERTEX_PROPAGATE_KEY))
-                        .by(__.values(CLASSIFICATION_VERTEX_REMOVE_PROPAGATIONS_KEY))
-                        .by(__.values(CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_LINEAGE))
-                        .by(__.values(CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_HIERARCHY))
-                        .toList()
-                        .forEach(obj -> {
-                            if (obj instanceof Map) {
-                                classificationProperties.add((Map<String, Object>) obj);
-                            }
-                        });
-                classificationProperties.forEach(classificationProperty -> {
-                    if (classificationProperty != null) {
-                        AtlasClassification atlasClassification = new AtlasClassification();
-                        atlasClassification.setTypeName(classificationProperty.get(TYPE_NAME_PROPERTY_KEY) != null ? (String) classificationProperty.get(TYPE_NAME_PROPERTY_KEY) : "");
-                        atlasClassification.setEntityGuid(classificationProperty.get(CLASSIFICATION_ENTITY_GUID) != null ? (String) classificationProperty.get(CLASSIFICATION_ENTITY_GUID) : "");
-                        atlasClassification.setEntityStatus(classificationProperty.get(CLASSIFICATION_ENTITY_STATUS) != null ? AtlasEntity.Status.valueOf((String) classificationProperty.get(CLASSIFICATION_ENTITY_STATUS)) : null);
-                        atlasClassification.setPropagate(classificationProperty.get(CLASSIFICATION_VERTEX_PROPAGATE_KEY) != null ? (Boolean) classificationProperty.get(CLASSIFICATION_VERTEX_PROPAGATE_KEY) : null);
-                        atlasClassification.setRemovePropagationsOnEntityDelete(classificationProperty.get(CLASSIFICATION_VERTEX_REMOVE_PROPAGATIONS_KEY) != null ? (Boolean) classificationProperty.get(CLASSIFICATION_VERTEX_REMOVE_PROPAGATIONS_KEY) : true);
-                        atlasClassification.setRestrictPropagationThroughLineage(classificationProperty.get(CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_LINEAGE) != null ? (Boolean) classificationProperty.get(CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_LINEAGE) : false);
-                        atlasClassification.setRestrictPropagationThroughHierarchy(classificationProperty.get(CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_HIERARCHY) != null ? (Boolean) classificationProperty.get(CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_HIERARCHY) : false);
-                        ret.add(atlasClassification);
-                    }
-                });
-                return ret;
-            } else {
-                List<AtlasClassification> ret = new ArrayList<>();
-                Iterable edges = entityVertex.query().direction(AtlasEdgeDirection.OUT).label(CLASSIFICATION_LABEL).edges();
-
-                if (edges != null) {
-                    Iterator<AtlasEdge> iterator = edges.iterator();
-
-                    while (iterator.hasNext()) {
-                        AtlasEdge classificationEdge = iterator.next();
-                        AtlasVertex classificationVertex = classificationEdge != null ? classificationEdge.getInVertex() : null;
-                        AtlasClassification classification = toAtlasClassification(classificationVertex);
-
-                        if (classification != null) {
-                            ret.add(classification);
-                        }
-                    }
-                }
-
-                RequestContext.get().endMetricRecord(metricRecorder);
-                return ret;
-            }
-        } catch (Exception e) {
-            LOG.error("Error while getting all classifications", e);
-            throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
-        } finally {
-            RequestContext.get().endMetricRecord(metricRecorder);
-        }
-    }
     public List<AtlasClassification> getDirectClassifications(AtlasVertex entityVertex) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("getDirectClassifications");
         try {
@@ -2358,10 +2269,10 @@ public class EntityGraphRetriever {
      * to individual sync fetch for missing entries via {@code tagDAO.getAllClassificationsForVertex()}.
      *
      * @return map of vertexId to classifications, or {@code null} if prefetch is not applicable
-     *         (TagV2 disabled or auth check skipped)
+     *         (auth check skipped)
      */
     public Map<String, List<AtlasClassification>> prefetchClassifications(List<AtlasVertex> vertices) throws AtlasBaseException {
-        if (!DynamicConfigStore.isTagV2Enabled() || RequestContext.get().isSkipAuthorizationCheck()) {
+        if (RequestContext.get().isSkipAuthorizationCheck()) {
             return null;
         }
 
@@ -3469,37 +3380,13 @@ public class EntityGraphRetriever {
         Set<AtlasClassification> propagatedClassifications = new HashSet<>();
         Set<AtlasClassification> blockedClassifications = new HashSet<>();
 
-        if (DynamicConfigStore.isTagV2Enabled()) {
-            List<AtlasClassification> classifications = getPropagatableClassificationsV2(edge);
+        List<AtlasClassification> classifications = getPropagatableClassificationsV2(edge);
 
-            for (AtlasClassification classification : classifications) {
-                propagatedClassifications.add(classification);
+        for (AtlasClassification classification : classifications) {
+            propagatedClassifications.add(classification);
 
-                if (extendedInfo) {
-                    addToReferredEntities(relationshipWithExtInfo, classification.getEntityGuid());
-                }
-            }
-        } else {
-            List<AtlasVertex> classificationVertices = getPropagatableClassifications(edge);
-            List<String> blockedClassificationIds = getBlockedClassificationIds(edge);
-
-            for (AtlasVertex classificationVertex : classificationVertices) {
-                String classificationId = classificationVertex.getIdForDisplay();
-                AtlasClassification classification = toAtlasClassification(classificationVertex);
-
-                if (classification == null) {
-                    continue;
-                }
-                if (blockedClassificationIds.contains(classificationId)) {
-                    blockedClassifications.add(classification);
-                } else {
-                    propagatedClassifications.add(classification);
-                }
-
-                // add entity headers to referred entities
-                if (extendedInfo) {
-                    addToReferredEntities(relationshipWithExtInfo, classification.getEntityGuid());
-                }
+            if (extendedInfo) {
+                addToReferredEntities(relationshipWithExtInfo, classification.getEntityGuid());
             }
         }
 
