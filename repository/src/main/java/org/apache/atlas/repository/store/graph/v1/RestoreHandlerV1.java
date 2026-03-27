@@ -128,7 +128,7 @@ public class RestoreHandlerV1 {
 
             // Restore traits and vertices.
             for (AtlasVertex restoreCandidateVertex : restoreCandidateVertices) {
-                restoreAllClassifications(restoreCandidateVertex);
+                restoreAllClassifications(restoreCandidateVertex); // restoreAllClassifications() can be removed
                 restoreTypeVertex(restoreCandidateVertex);
             }
         } finally {
