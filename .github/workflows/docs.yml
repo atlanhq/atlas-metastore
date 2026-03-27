@@ -61,7 +61,7 @@ jobs:
 
           chmod +x ./argodocs
           ./argodocs generate $(pwd) --output-prefix=$(pwd)/docs-out --branch-name ${{ steps.get_branch.outputs.branch }}
-          cd docs-out/atlas-metastore
+          cd docs-out/marketplace-packages
           mkdocs build
 
       - name: Generate Docs (pull_request)
@@ -82,7 +82,7 @@ jobs:
 
           chmod +x ./argodocs
           ./argodocs generate $(pwd) --output-prefix=$(pwd)/docs-out --branch-name ${{ github.head_ref }}
-          cd docs-out/atlas-metastore
+          cd docs-out/marketplace-packages
           mkdocs build
 
       - name: Setup AWS Credentials
@@ -94,13 +94,13 @@ jobs:
       - name: Upload Docs to Kryptonite (push)
         if: ${{ github.event_name == 'push' }}
         run: |
-          aws s3 sync ./docs-out/atlas-metastore/site \
+          aws s3 sync ./docs-out/marketplace-packages/site \
             s3://kryptonite-store/metastore/${{ steps.get_branch.outputs.branch }} --delete
 
       - name: Upload Docs to Kryptonite (pull_request)
         if: ${{ github.event_name == 'pull_request' }}
         run: |
-          aws s3 sync ./docs-out/atlas-metastore/site \
+          aws s3 sync ./docs-out/marketplace-packages/site \
             s3://kryptonite-store/metastore/${{ github.head_ref }} --delete
 
       - name: Comment Kryptonite URL on PR
