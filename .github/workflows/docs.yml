@@ -1,19 +1,23 @@
 name: Build Docs and Push to Kryptonite
 
 on:
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - master
+      - beta
+      - staging
   push:
     branches:
       - master
       - beta
       - staging
-    paths:
-      - 'docs/**'
-      - 'mkdocs.yml'
-  workflow_dispatch:
 
 permissions:
   id-token: write
   contents: read
+  issues: write
+  pull-requests: write
 
 jobs:
   docs:
@@ -26,19 +30,60 @@ jobs:
           fetch-depth: 0
 
       - name: Get branch name
-        run: echo "branch=$(echo ${GITHUB_REF#refs/heads/})" >> $GITHUB_OUTPUT
         id: get_branch
+        run: echo "branch=$(echo ${GITHUB_REF#refs/heads/})" >> $GITHUB_OUTPUT
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.10'
 
-      - name: Install dependencies
-        run: pip install mkdocs-material
+      - name: Install Dependencies
+        run: |
+          pip install mkdocs
+          pip install mkdocs-material
 
-      - name: Build docs
-        run: mkdocs build
+      - name: Generate Docs (push)
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          function gh_curl() {
+            curl --location --request GET 'https://api.github.com/repos/atlanhq/argodocs/releases/latest' \
+              --header "Authorization: token ${{ secrets.AMIT_GH_PAT_TOKEN }}"
+          }
+
+          parser=".assets[2].id" # argodocs-linux-amd64
+          asset_id=$(gh_curl | jq $parser)
+          echo $asset_id
+
+          wget -q --auth-no-challenge --header='Accept:application/octet-stream' \
+            https://${{ secrets.AMIT_GH_PAT_TOKEN }}:@api.github.com/repos/atlanhq/argodocs/releases/assets/$asset_id \
+            -O argodocs
+
+          chmod +x ./argodocs
+          ./argodocs generate $(pwd) --output-prefix=$(pwd)/docs-out --branch-name ${{ steps.get_branch.outputs.branch }}
+          cd docs-out/atlas-metastore
+          mkdocs build
+
+      - name: Generate Docs (pull_request)
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          function gh_curl() {
+            curl --location --request GET 'https://api.github.com/repos/atlanhq/argodocs/releases/latest' \
+              --header "Authorization: token ${{ secrets.AMIT_GH_PAT_TOKEN }}"
+          }
+
+          parser=".assets[2].id" # argodocs-linux-amd64
+          asset_id=$(gh_curl | jq $parser)
+          echo $asset_id
+
+          wget -q --auth-no-challenge --header='Accept:application/octet-stream' \
+            https://${{ secrets.AMIT_GH_PAT_TOKEN }}:@api.github.com/repos/atlanhq/argodocs/releases/assets/$asset_id \
+            -O argodocs
+
+          chmod +x ./argodocs
+          ./argodocs generate $(pwd) --output-prefix=$(pwd)/docs-out --branch-name ${{ github.head_ref }}
+          cd docs-out/atlas-metastore
+          mkdocs build
 
       - name: Setup AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -46,6 +91,21 @@ jobs:
           aws-region: ap-south-1
           role-to-assume: arn:aws:iam::733936409301:role/kryptonite-store_FullAccess
 
-      - name: Upload Docs to Kryptonite
+      - name: Upload Docs to Kryptonite (push)
+        if: ${{ github.event_name == 'push' }}
         run: |
-          aws s3 sync ./site s3://kryptonite-store/atlas-metastore/${{ steps.get_branch.outputs.branch }} --delete
+          aws s3 sync ./docs-out/atlas-metastore/site \
+            s3://kryptonite-store/metastore/${{ steps.get_branch.outputs.branch }} --delete
+
+      - name: Upload Docs to Kryptonite (pull_request)
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          aws s3 sync ./docs-out/atlas-metastore/site \
+            s3://kryptonite-store/metastore/${{ github.head_ref }} --delete
+
+      - name: Comment Kryptonite URL on PR
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: mshick/add-pr-comment@v2
+        with:
+          message: |
+            📝 Docs preview available at https://k.atlan.dev/metastore/${{ github.head_ref }}
