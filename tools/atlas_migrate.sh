@@ -58,6 +58,11 @@ ES_BULK_SIZE="${ES_BULK_SIZE:-1000}"
 ID_STRATEGY="${ID_STRATEGY:-legacy}"          # "legacy" (UUID), "hash-jg" (SHA-256 of JG ID), or "deterministic" (identity-based SHA-256)
 CLAIM_ENABLED="${CLAIM_ENABLED:-false}"       # LWT dedup claims during migration
 
+# Backup verification
+SKIP_BACKUP_CHECK="${SKIP_BACKUP_CHECK:-false}"
+BACKUP_RECENCY_HOURS="${BACKUP_RECENCY_HOURS:-24}"
+TENANT_NAME="${TENANT_NAME:-}"               # Tenant/cluster name for backup verification
+
 # ---- Helpers ----
 
 log()  { echo "[migrator] $*"; }
@@ -253,6 +258,45 @@ preflight() {
     log "Preflight complete"
 }
 
+# ---- Backup verification ----
+
+verify_backup() {
+    local SCRIPT_DIR
+    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+    local VERIFY_SCRIPT="${SCRIPT_DIR}/verify_backup.sh"
+
+    if [ "$SKIP_BACKUP_CHECK" = "true" ]; then
+        warn "Backup verification SKIPPED (SKIP_BACKUP_CHECK=true)"
+        return 0
+    fi
+
+    # Auto-detect tenant name from atlas-application.properties if not set
+    if [ -z "$TENANT_NAME" ]; then
+        TENANT_NAME=$(read_prop "atlas.cluster.name" "")
+    fi
+    if [ -z "$TENANT_NAME" ]; then
+        TENANT_NAME=$(read_prop "atlas.tenant.name" "")
+    fi
+    if [ -z "$TENANT_NAME" ]; then
+        err "Cannot determine tenant name. Set TENANT_NAME env var or add atlas.cluster.name to atlas-application.properties.
+  To skip: set SKIP_BACKUP_CHECK=true (dev/test only)"
+    fi
+
+    if [ ! -f "$VERIFY_SCRIPT" ]; then
+        err "Backup verification script not found at ${VERIFY_SCRIPT}"
+    fi
+
+    log "Running backup verification for tenant: ${TENANT_NAME}"
+
+    local verify_args=(--tenant "$TENANT_NAME" --recency "$BACKUP_RECENCY_HOURS")
+    if ! "$VERIFY_SCRIPT" "${verify_args[@]}"; then
+        err "Backup verification FAILED. Migration cannot proceed.
+  To override for dev/test: set SKIP_BACKUP_CHECK=true"
+    fi
+
+    log "Backup verification passed."
+}
+
 # ---- Run migrator ----
 
 run() {
@@ -296,6 +340,7 @@ show_help() {
     echo "  --validate-only    Validate migration completeness"
     echo "  --fresh            Clear resume state, start from scratch"
     echo "  --dry-run          Generate properties and show config without running"
+    echo "  --skip-backup-check  Skip backup verification (dev/test only)"
     echo "  --help             Show this help"
     echo ""
     echo "Environment overrides:"
@@ -308,6 +353,11 @@ show_help() {
     echo "  WRITER_THREADS         Writer parallelism (default: 8)"
     echo "  ID_STRATEGY            ID generation: legacy, hash-jg, or deterministic (identity-based SHA-256) (default: legacy)"
     echo "  CLAIM_ENABLED          LWT dedup claims during migration: true/false (default: false)"
+    echo "  TENANT_NAME            Tenant/cluster name for backup check (auto-detected from config)"
+    echo "  SKIP_BACKUP_CHECK      Skip backup verification: true/false (default: false)"
+    echo "  BACKUP_RECENCY_HOURS   Max backup age in hours (default: 24)"
+    echo "  TEMPORAL_ADDRESS       Temporal server address (default: temporal-server.atlan.com:443)"
+    echo "  TEMPORAL_NAMESPACE     Temporal namespace (default: default)"
     echo ""
     echo "Quick start (from kubectl):"
     echo "  kubectl exec -it atlas-0 -n atlas -c atlas-main -- /opt/apache-atlas/bin/atlas_migrate.sh --dry-run"
@@ -321,11 +371,23 @@ case "${1:-}" in
         show_help
         exit 0
         ;;
+    --skip-backup-check)
+        SKIP_BACKUP_CHECK=true
+        shift
+        # Fall through to run with remaining args
+        find_migrator_jar
+        read_atlas_config
+        generate_properties
+        preflight
+        verify_backup
+        run "${1:-}"
+        ;;
     --dry-run)
         find_migrator_jar
         read_atlas_config
         generate_properties
         preflight
+        verify_backup
         log ""
         log "Dry run complete. Properties at $PROPERTIES_FILE"
         log "To run: java -Xmx4g -jar $MIGRATOR_JAR $PROPERTIES_FILE"
@@ -335,6 +397,7 @@ case "${1:-}" in
         read_atlas_config
         generate_properties
         preflight
+        verify_backup
         run "${1:-}"
         ;;
     *)
