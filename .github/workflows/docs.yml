@@ -7,6 +7,9 @@ on:
       - master
       - beta
       - staging
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
   push:
     branches:
       - master
@@ -28,8 +31,6 @@ jobs:
     steps:
       - name: Git Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Get branch name
         id: get_branch
@@ -43,47 +44,8 @@ jobs:
       - name: Install Dependencies
         run: pip install mkdocs mkdocs-material
 
-      - name: Generate Docs (push)
-        if: ${{ github.event_name == 'push' }}
-        run: |
-          function gh_curl() {
-            curl --location --request GET 'https://api.github.com/repos/atlanhq/argodocs/releases/latest' \
-              --header "Authorization: token ${{ secrets.ORG_PAT_GITHUB }}"
-          }
-
-          parser=".assets[2].id" # argodocs-linux-amd64
-          asset_id=$(gh_curl | jq $parser)
-          echo $asset_id
-
-          wget -q --auth-no-challenge --header='Accept:application/octet-stream' \
-            https://${{ secrets.ORG_PAT_GITHUB }}:@api.github.com/repos/atlanhq/argodocs/releases/assets/$asset_id \
-            -O argodocs
-
-          chmod +x ./argodocs
-          ./argodocs generate $(pwd) --output-prefix=$(pwd)/docs-out --branch-name ${{ steps.get_branch.outputs.branch }}
-          cd docs-out/marketplace-packages
-          mkdocs build
-
-      - name: Generate Docs (pull_request)
-        if: ${{ github.event_name == 'pull_request' }}
-        run: |
-          function gh_curl() {
-            curl --location --request GET 'https://api.github.com/repos/atlanhq/argodocs/releases/latest' \
-              --header "Authorization: token ${{ secrets.ORG_PAT_GITHUB }}"
-          }
-
-          parser=".assets[2].id" # argodocs-linux-amd64
-          asset_id=$(gh_curl | jq $parser)
-          echo $asset_id
-
-          wget -q --auth-no-challenge --header='Accept:application/octet-stream' \
-            https://${{ secrets.ORG_PAT_GITHUB }}:@api.github.com/repos/atlanhq/argodocs/releases/assets/$asset_id \
-            -O argodocs
-
-          chmod +x ./argodocs
-          ./argodocs generate $(pwd) --output-prefix=$(pwd)/docs-out --branch-name ${{ github.head_ref }}
-          cd docs-out/marketplace-packages
-          mkdocs build
+      - name: Build Docs
+        run: mkdocs build
 
       - name: Setup AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -91,21 +53,19 @@ jobs:
           aws-region: ap-south-1
           role-to-assume: arn:aws:iam::733936409301:role/kryptonite-store_FullAccess
 
-      - name: Upload Docs to Kryptonite (push)
-        if: ${{ github.event_name == 'push' }}
+      - name: Upload Docs to Kryptonite
         run: |
-          aws s3 sync ./docs-out/marketplace-packages/site \
-            s3://kryptonite-store/metastore/${{ steps.get_branch.outputs.branch }} --delete
-
-      - name: Upload Docs to Kryptonite (pull_request)
-        if: ${{ github.event_name == 'pull_request' }}
-        run: |
-          aws s3 sync ./docs-out/marketplace-packages/site \
-            s3://kryptonite-store/metastore/${{ github.head_ref }} --delete
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            BRANCH="${{ github.head_ref }}"
+          else
+            BRANCH="${{ steps.get_branch.outputs.branch }}"
+          fi
+          aws s3 sync ./site s3://kryptonite-store/metastore/${BRANCH} --delete
 
       - name: Comment Kryptonite URL on PR
-        if: ${{ github.event_name == 'pull_request' }}
+        if: github.event_name == 'pull_request'
         uses: mshick/add-pr-comment@v2
         with:
+          message-id: 'docs'
           message: |
             📝 Docs preview available at https://k.atlan.dev/metastore/${{ github.head_ref }}
