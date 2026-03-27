@@ -42,7 +42,7 @@ The ONE path that worked correctly was `repairClassificationMappingsV2` — it r
 
 6. **Observable.** Track cassandraCount vs esCount per task. Mismatches are logged and emit metrics, enabling alerting.
 
-7. **Self-healing.** ES write failures emit failed vertex IDs + GUIDs to a DLQ Kafka topic. A dedicated consumer re-reads Cassandra truth and repairs ES. No manual intervention needed.
+7. **Self-healing.** ES write failures emit failed vertex IDs + GUIDs to a DLQ Kafka topic (`ATLAS_TAG_DENORM_DLQ`). A dedicated consumer (follow-up PR) will re-read Cassandra truth and repair ES.
 
 ## Architecture
 
@@ -102,7 +102,7 @@ Direct Tag Mutation (5 paths)
 | File | Changes |
 |------|---------|
 | `repository/.../TagDenormDLQProducer.java` | **New.** Kafka producer that emits `{ type: TAG_DENORM_SYNC, vertices: { vertexId: guid, ... } }` to `ATLAS_TAG_DENORM_DLQ` topic. Lazy initialization, best-effort (never fails the caller). |
-| `webapp/.../TagDenormDLQReplayService.java` | **New.** Kafka consumer that subscribes to `ATLAS_TAG_DENORM_DLQ`. For each message: reads Cassandra truth, computes full denorm, writes to ES. Configurable via `atlas.kafka.tag.denorm.dlq.*` properties. |
+| ~~`webapp/.../TagDenormDLQReplayService.java`~~ | **Deferred to a separate PR.** Kafka consumer for DLQ replay will be added after thorough testing of the producer side. |
 
 ### Dead Code Removed (propagation-only methods)
 
@@ -180,17 +180,13 @@ ES bulk API returns HTTP 200 even when some documents fail. The previous code tr
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `atlas.kafka.tag.denorm.dlq.topic` | `ATLAS_TAG_DENORM_DLQ` | Kafka topic for tag denorm DLQ messages |
-| `atlas.kafka.tag.denorm.dlq.consumerGroupId` | `atlas_tag_denorm_dlq_replay_group` | Consumer group for DLQ replay |
-| `atlas.kafka.tag.denorm.dlq.enabled` | `true` | Enable/disable DLQ replay service |
-| `atlas.kafka.tag.denorm.dlq.maxRetries` | `3` | Max retries per DLQ message |
-| `atlas.kafka.tag.denorm.dlq.pollTimeoutSeconds` | `15` | Kafka poll timeout |
+| `atlas.kafka.tag.denorm.dlq.topic` | `ATLAS_TAG_DENORM_DLQ` | Kafka topic for tag denorm DLQ messages (producer side) |
 
 ## Failure Scenarios
 
 | Scenario | Behavior |
 |----------|----------|
-| **ES fully down** | `writeTagPropertiesWithResult` retries with exponential backoff, then returns all-failed result. All vertex IDs emitted to DLQ. Task records mismatch. DLQ consumer retries when ES recovers. |
+| **ES fully down** | `writeTagPropertiesWithResult` retries with exponential backoff, then returns all-failed result. All vertex IDs emitted to DLQ. Task records mismatch. DLQ consumer (follow-up PR) will retry when ES recovers. |
 | **ES partial failure** | Bulk response parsed for per-doc failures. Only failed docs emitted to DLQ. Success count reflects actual successes. |
 | **Cassandra read failure** | `getAllClassificationsForVertex` throws. For deferred paths: caught in `executeESPostProcessing`, logged. For propagation paths: exception propagates, task fails and can be retried. |
 | **DLQ emit failure** | Best-effort: logged but does not fail the caller. The failed vertex IDs are logged in the warn message for manual investigation. |
@@ -211,13 +207,4 @@ MDC context includes: `sync_mismatch=true`, `cassandra_count=1000`, `es_success_
 `RequestContext` accumulates `tagDenormEsSuccessCount` and `tagDenormEsFailureCount` across all flushes in a request/task.
 
 ### DLQ monitoring
-`TagDenormDLQReplayService.getStatus()` returns:
-```json
-{
-  "enabled": true,
-  "running": true,
-  "topic": "ATLAS_TAG_DENORM_DLQ",
-  "processedCount": 42,
-  "errorCount": 1
-}
-```
+DLQ consumer (`TagDenormDLQReplayService`) will be added in a follow-up PR. Until then, monitor the `ATLAS_TAG_DENORM_DLQ` topic lag directly via Kafka tooling.
