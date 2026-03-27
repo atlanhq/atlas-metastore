@@ -48,7 +48,7 @@ jobs:
         run: |
           function gh_curl() {
             curl --location --request GET 'https://api.github.com/repos/atlanhq/argodocs/releases/latest' \
-              --header "Authorization: token ${{ secrets.AMIT_GH_PAT_TOKEN }}"
+              --header "Authorization: token ${{ secrets.ORG_PAT_GITHUB }}"
           }
 
           parser=".assets[2].id" # argodocs-linux-amd64
@@ -56,7 +56,7 @@ jobs:
           echo $asset_id
 
           wget -q --auth-no-challenge --header='Accept:application/octet-stream' \
-            https://${{ secrets.AMIT_GH_PAT_TOKEN }}:@api.github.com/repos/atlanhq/argodocs/releases/assets/$asset_id \
+            https://${{ secrets.ORG_PAT_GITHUB }}:@api.github.com/repos/atlanhq/argodocs/releases/assets/$asset_id \
             -O argodocs
 
           chmod +x ./argodocs
@@ -69,7 +69,7 @@ jobs:
         run: |
           function gh_curl() {
             curl --location --request GET 'https://api.github.com/repos/atlanhq/argodocs/releases/latest' \
-              --header "Authorization: token ${{ secrets.AMIT_GH_PAT_TOKEN }}"
+              --header "Authorization: token ${{ secrets.ORG_PAT_GITHUB }}"
           }
 
           parser=".assets[2].id" # argodocs-linux-amd64
@@ -77,7 +77,7 @@ jobs:
           echo $asset_id
 
           wget -q --auth-no-challenge --header='Accept:application/octet-stream' \
-            https://${{ secrets.AMIT_GH_PAT_TOKEN }}:@api.github.com/repos/atlanhq/argodocs/releases/assets/$asset_id \
+            https://${{ secrets.ORG_PAT_GITHUB }}:@api.github.com/repos/atlanhq/argodocs/releases/assets/$asset_id \
             -O argodocs
 
           chmod +x ./argodocs
