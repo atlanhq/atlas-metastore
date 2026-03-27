@@ -426,3 +426,4 @@ public class AtlasSecurityConfig extends WebSecurityConfigurerAdapter {
         return filter;
     }
 }
+

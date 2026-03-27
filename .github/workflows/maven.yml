@@ -32,9 +32,7 @@ on:
       - switchable_graph_bug_fixes
       - ms-664-fix-audit-search
       - hotfix-reindex-refresh
-      - ms-664-fix-audit-search
-      - hotfix-reindex-refresh
-
+      - ms-864-keycloak-jwks-internal-url
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
