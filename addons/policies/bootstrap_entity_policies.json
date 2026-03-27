@@ -3600,6 +3600,46 @@
             "typeName": "AuthPolicy",
             "attributes":
             {
+                "name": "CLASSIFICATION_AI_ASSETS",
+                "qualifiedName": "CLASSIFICATION_AI_ASSETS",
+                "description": "Allows user to add/update/remove classifications on AI assets.",
+                "policyCategory": "bootstrap",
+                "policySubCategory": "default",
+                "policyServiceName": "atlas",
+                "policyType": "allow",
+                "policyPriority": 0,
+                "policyUsers":
+                [],
+                "policyGroups":
+                [],
+                "policyRoles":
+                [
+                    "$admin",
+                    "$api-token-default-access"
+                ],
+                "policyResourceCategory": "ENTITY",
+                "isPolicyEnabled": true,
+                "policyResources":
+                [
+                    "entity-type:AIApplication",
+                    "entity-type:AIModel",
+                    "entity-type:AIModelVersion",
+                    "entity-classification:*",
+                    "classification:*",
+                    "entity:*"
+                ],
+                "policyActions":
+                [
+                    "entity-add-classification",
+                    "entity-update-classification",
+                    "entity-remove-classification"
+                ]
+            }
+        },
+        {
+            "typeName": "AuthPolicy",
+            "attributes":
+            {
                 "name": "READ_STAKEHOLDER_ENTITIES",
                 "qualifiedName": "READ_STAKEHOLDER_ENTITIES",
                 "policyCategory": "bootstrap",
