@@ -38,6 +38,7 @@ markdown_extensions:
       permalink: true
 
 exclude_docs: |
+  README.md
   target/
   cohort-release/
   ms-546/

@@ -6,9 +6,8 @@ All endpoints are under the base path `/api/meta`. Requires an active admin sess
 
 ## Table of Contents
 
-- [Classification / Tag Repair](#classification--tag-repair)
+- [Classification / Tag Repair](#classification-tag-repair)
 - [Entity Index Repair](#entity-index-repair)
-- [JanusGraph Mixed Index Repair](#janusgraph-mixed-index-repair)
 - [Lineage Repair](#lineage-repair)
 - [Access Control Repair](#access-control-repair)
 - [Migration Repair](#migration-repair)
