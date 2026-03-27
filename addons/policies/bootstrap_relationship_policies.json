@@ -957,6 +957,48 @@
             "typeName": "AuthPolicy",
             "attributes":
             {
+                "name": "LINK_TERMS_TO_AI_ASSETS",
+                "qualifiedName": "LINK_TERMS_TO_AI_ASSETS",
+                "description": "Allows user to add/remove glossary terms on AI assets.",
+                "policyCategory": "bootstrap",
+                "policySubCategory": "default",
+                "policyServiceName": "atlas",
+                "policyType": "allow",
+                "policyPriority": 0,
+                "policyUsers":
+                [],
+                "policyGroups":
+                [],
+                "policyRoles":
+                [
+                    "$admin",
+                    "$api-token-default-access"
+                ],
+                "policyResourceCategory": "RELATIONSHIP",
+                "policyResources":
+                [
+                    "end-one-entity-classification:*",
+                    "end-two-entity-classification:*",
+                    "end-one-entity:*",
+                    "end-two-entity:*",
+                    "end-one-entity-type:AIApplication",
+                    "end-one-entity-type:AIModel",
+                    "end-one-entity-type:AIModelVersion",
+                    "end-two-entity-type:AtlasGlossaryTerm",
+                    "relationship-type:*"
+                ],
+                "policyActions":
+                [
+                    "add-relationship",
+                    "update-relationship",
+                    "remove-relationship"
+                ]
+            }
+        },
+        {
+            "typeName": "AuthPolicy",
+            "attributes":
+            {
                 "name": "LINK_AI_MODEL_TO_AI_APPLICATION",
                 "qualifiedName": "LINK_AI_MODEL_TO_AI_APPLICATION",
                 "policyCategory": "bootstrap",
