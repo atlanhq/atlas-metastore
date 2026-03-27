@@ -1327,6 +1327,40 @@
         "entity-classification:*"
       ],
       "actions": ["entity-create", "entity-update", "entity-delete"]
+    },
+    {
+      "policyType": "ACCESS",
+      "policyResourceCategory": "RELATIONSHIP",
+      "description": "Allow Process to link to Catalog assets (inputs/outputs) for AI datasets",
+      "resources": [
+        "relationship-type:*",
+        "end-one-entity-type:Process",
+        "end-one-entity-classification:*",
+        "end-one-entity:*",
+
+        "end-two-entity-type:Catalog",
+        "end-two-entity-type:Connection",
+        "end-two-entity-classification:*",
+        "end-two-entity:*"
+      ],
+      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+    },
+    {
+      "policyType": "ACCESS",
+      "policyResourceCategory": "RELATIONSHIP",
+      "description": "Allow Catalog assets to link to Process (inputs/outputs) for AI datasets",
+      "resources": [
+        "relationship-type:*",
+        "end-one-entity-type:Catalog",
+        "end-one-entity-type:Connection",
+        "end-one-entity-classification:*",
+        "end-one-entity:*",
+
+        "end-two-entity-type:Process",
+        "end-two-entity-classification:*",
+        "end-two-entity:*"
+      ],
+      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
     }
   ],
   "persona-ai-model-delete": [
