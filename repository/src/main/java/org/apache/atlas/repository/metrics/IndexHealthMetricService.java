@@ -21,6 +21,7 @@ import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import org.apache.atlas.model.TypeCategory;
+import org.apache.atlas.repository.graphdb.AtlasGraphIndex;
 import org.apache.atlas.repository.graphdb.AtlasGraphManagement;
 import org.apache.atlas.repository.graphdb.AtlasPropertyKey;
 import org.apache.atlas.type.AtlasEntityType;
@@ -79,8 +80,11 @@ public class IndexHealthMetricService {
     private final AtomicInteger bmMissing = new AtomicInteger(0);
     private final AtomicInteger coreMissingTotal = new AtomicInteger(0);
     private final AtomicInteger healthStatus = new AtomicInteger(1);
+    // Bounded cardinality: one entry per entity type (~100-500 per tenant, not user-generated)
     private final Map<String, AtomicInteger> perTypeMissing = new HashMap<>();
     private boolean gaugesRegistered = false;
+    private volatile long lastAuditTimeMs = 0;
+    private static final long MIN_AUDIT_INTERVAL_MS = 60_000; // 1 minute throttle
 
     @Inject
     public IndexHealthMetricService(AtlasTypeRegistry typeRegistry) {
@@ -150,6 +154,20 @@ public class IndexHealthMetricService {
     }
 
     public void auditIndexHealth(AtlasGraphManagement managementSystem) {
+        if (managementSystem == null) {
+            LOG.warn("Cannot audit index health: managementSystem is null");
+            return;
+        }
+
+        // Throttle: skip if last audit was less than 1 minute ago (avoid overhead on rapid typedef changes)
+        long now = System.currentTimeMillis();
+        if (lastAuditTimeMs > 0 && (now - lastAuditTimeMs) < MIN_AUDIT_INTERVAL_MS) {
+            LOG.debug("Skipping index health audit — last audit was {}ms ago (throttle: {}ms)",
+                    now - lastAuditTimeMs, MIN_AUDIT_INTERVAL_MS);
+            return;
+        }
+        lastAuditTimeMs = now;
+
         LOG.info("Starting index health audit...");
 
         // Register gauges on first call — same AtomicInteger references used forever
@@ -159,6 +177,12 @@ public class IndexHealthMetricService {
         int totalCoreMissing = 0, totalCustomMissing = 0;
         int totalBmExpected = 0, totalBmIndexed = 0, totalBmMissing = 0;
         List<String> missingAttributes = new ArrayList<>();
+
+        // Get the mixed index field keys — this is what determines if an attribute is searchable in ES
+        AtlasGraphIndex vertexIndex = managementSystem.getGraphIndex("vertex_index");
+        Set<AtlasPropertyKey> indexedFieldKeys = (vertexIndex != null)
+                ? new HashSet<>(vertexIndex.getFieldKeys())
+                : Collections.emptySet();
 
         // Audit entity types
         for (AtlasEntityType entityType : typeRegistry.getAllEntityDefs()
@@ -181,8 +205,10 @@ public class IndexHealthMetricService {
 
                 totalExpected++;
 
+                // Check mixed index registration — not just property key existence.
+                // A property key can exist in the schema but NOT be in the vertex_index.
                 AtlasPropertyKey propertyKey = managementSystem.getPropertyKey(attribute.getVertexPropertyName());
-                if (propertyKey != null) {
+                if (propertyKey != null && indexedFieldKeys.contains(propertyKey)) {
                     totalIndexed++;
                 } else {
                     totalMissing++;
@@ -196,9 +222,8 @@ public class IndexHealthMetricService {
                 }
             }
 
-            if (typeMissingCount > 0) {
-                getOrCreatePerTypeGauge(typeName).set(typeMissingCount);
-            }
+            // Always update per-type gauge — reset to 0 if type is now fully indexed
+            getOrCreatePerTypeGauge(typeName).set(typeMissingCount);
         }
 
         // Audit business metadata types
@@ -219,7 +244,7 @@ public class IndexHealthMetricService {
                 totalBmExpected++;
 
                 AtlasPropertyKey propertyKey = managementSystem.getPropertyKey(attribute.getVertexPropertyName());
-                if (propertyKey != null) {
+                if (propertyKey != null && indexedFieldKeys.contains(propertyKey)) {
                     totalBmIndexed++;
                 } else {
                     totalBmMissing++;
@@ -240,6 +265,14 @@ public class IndexHealthMetricService {
         coreMissingTotal.set(totalCoreMissing);
 
         boolean isHealthy = (totalMissing + totalBmMissing) == 0;
+
+        // Guard against false positive: if type registry is empty/incomplete,
+        // expected=0 would make it look healthy when it's actually broken
+        if (totalExpected == 0) {
+            LOG.warn("INDEX HEALTH AUDIT: 0 entity attributes found — type registry may be empty. Reporting UNHEALTHY.");
+            isHealthy = false;
+        }
+
         healthStatus.set(isHealthy ? 1 : 0);
 
         if (isHealthy) {
