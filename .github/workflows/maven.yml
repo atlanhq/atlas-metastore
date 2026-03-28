@@ -24,11 +24,7 @@ on:
       - beta
       - master
       - staging
-      - ring-*
-      - ms-635
-      - ms-664-fix-audit-search
-      - hotfix-reindex-refresh
-      - ms-864-keycloak-jwks-internal-url
+      - ttd-105
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
