@@ -156,6 +156,7 @@ public class EntityGraphRetriever {
     private final ExecutorService executorService = Executors.newFixedThreadPool(AtlasConfiguration.GRAPH_TRAVERSAL_PARALLELISM.getInt(), threadFactory);;
 
     private static final TypeReference<List<TimeBoundary>> TIME_BOUNDARIES_LIST_TYPE = new TypeReference<List<TimeBoundary>>() {};
+
     private final GraphHelper graphHelper;
 
     private final AtlasTypeRegistry typeRegistry;
@@ -1455,11 +1456,8 @@ public class EntityGraphRetriever {
                return null;
            }
 
-          /*
-            Returns a pair containing:
-            1. A map of vertex IDs to their properties, where each property is a map of attribute names to lists of values.
-            2. A map of vertex IDs to their corresponding AtlasVertex objects.
-          */
+           // Phase 1: Fetch result vertex properties
+           AtlasPerfMetrics.MetricRecorder phase1Metric = RequestContext.get().startMetricRecord("enrichVertexProperties.phase1.vertexFetch");
            Pair<Map<String, Map<String, List<?>>>, Map<String, AtlasVertex>> vertexCache = getVertexPropertiesValueMap(vertexIds, 100);
 
            for (Map.Entry<String, Map<String, List<?>>> entry : vertexCache.getValue0().entrySet()) {
@@ -1471,73 +1469,94 @@ public class EntityGraphRetriever {
                }
            }
            vertexEdgePropertyCache.addVertices(vertexCache.getValue1());
+           RequestContext.get().endMetricRecord(phase1Metric);
 
            Set<String> edgeLabelsToProcess = collectEdgeLabelsToProcess(vertexEdgePropertyCache, vertexIds, attributes);
 
+           // Phase 2: Fetch relationship edges
            Set<String> vertexIdsToProcess = new HashSet<>();
            if (!CollectionUtils.isEmpty(edgeLabelsToProcess)) {
+               AtlasPerfMetrics.MetricRecorder phase2Metric = RequestContext.get().startMetricRecord("enrichVertexProperties.phase2.edgeFetch");
                List<Map<String, Object>> relationEdges;
                if (AtlasConfiguration.ATLAS_INDEXSEARCH_EDGE_BULK_FETCH_ENABLE.getBoolean()) {
                    relationEdges = getConnectedRelationEdgesVertexBatching(vertexIds, edgeLabelsToProcess, relationAttrsSize);
                } else {
                    relationEdges = getConnectedRelationEdges(vertexIds, edgeLabelsToProcess, relationAttrsSize);
                }
+               RequestContext.get().endMetricRecord(phase2Metric);
 
+               // Pre-index edges by outVertexId and inVertexId for O(N+E) association instead of O(N*E)
+               Map<String, List<Map<String, Object>>> edgesByOutVertex = new HashMap<>();
+               Map<String, List<Map<String, Object>>> edgesByInVertex = new HashMap<>();
+               for (Map<String, Object> relationEdge : relationEdges) {
+                   if (!(relationEdge.containsKey("id") && relationEdge.containsKey("valueMap"))) {
+                       continue;
+                   }
+                   String edgeLabel = relationEdge.get("label").toString();
+                   if (!edgeLabelsToProcess.contains(edgeLabel)) {
+                       continue;
+                   }
+                   String outVertexId = relationEdge.get("outVertexId").toString();
+                   String inVertexId = relationEdge.get("inVertexId").toString();
+                   edgesByOutVertex.computeIfAbsent(outVertexId, k -> new ArrayList<>()).add(relationEdge);
+                   if (!outVertexId.equals(inVertexId)) {
+                       edgesByInVertex.computeIfAbsent(inVertexId, k -> new ArrayList<>()).add(relationEdge);
+                   }
+               }
 
-               for(String vertexId : vertexIds) {
-                   for (Map<String, Object> relationEdge : relationEdges) {
-                       if (!(relationEdge.containsKey("id") && relationEdge.containsKey("valueMap"))) {
-                           continue;
-                       }
+               for (String vertexId : vertexIds) {
+                   // Process edges where this vertex is the outVertex (or self-loop)
+                   List<Map<String, Object>> outEdges = edgesByOutVertex.getOrDefault(vertexId, Collections.emptyList());
+                   for (Map<String, Object> relationEdge : outEdges) {
                        LinkedHashMap<Object, Object> valueMap = (LinkedHashMap<Object, Object>) relationEdge.get("valueMap");
-
                        String edgeId = relationEdge.get("id").toString();
                        String edgeLabel = relationEdge.get("label").toString();
                        String outVertexId = relationEdge.get("outVertexId").toString();
                        String inVertexId = relationEdge.get("inVertexId").toString();
 
-                       if (!edgeLabelsToProcess.contains(edgeLabel)) {
-                           continue;
-                       }
-
-                       // Check how this vertex relates to the edge
                        boolean isSelfLoop = vertexId.equals(outVertexId) && vertexId.equals(inVertexId);
-                       boolean isSourceVertex = vertexId.equals(outVertexId);
-                       boolean isTargetVertex = vertexId.equals(inVertexId);
-
-                        // Only process if this vertex is part of the edge
-                       if (!isSelfLoop && !isSourceVertex && !isTargetVertex) {
-                           continue;
-                       }
-
-                        // For self-loops (like similarity relationships), reference points to itself
-                        // For regular edges, reference points to the other vertex
-                       String referencedVertex;
-                       if (isSelfLoop) {
-                           referencedVertex = outVertexId;
-                       } else if (isSourceVertex) {
-                           referencedVertex = inVertexId;
-                       } else {
-                           referencedVertex = outVertexId;
-                       }
+                       String referencedVertex = isSelfLoop ? outVertexId : inVertexId;
 
                        EdgeVertexReference edgeRef = new EdgeVertexReference(
                                referencedVertex, edgeId, edgeLabel, inVertexId, outVertexId, valueMap
                        );
-
                        boolean wasAdded = vertexEdgePropertyCache.addEdgeLabelToVertexIds(
                                vertexId, edgeLabel, edgeRef, relationAttrsSize
                        );
-
                        if (wasAdded && !isSelfLoop) {
                            vertexIdsToProcess.add(referencedVertex);
                        }
+                   }
 
+                   // Process edges where this vertex is the inVertex (not self-loop, already handled above)
+                   List<Map<String, Object>> inEdges = edgesByInVertex.getOrDefault(vertexId, Collections.emptyList());
+                   for (Map<String, Object> relationEdge : inEdges) {
+                       LinkedHashMap<Object, Object> valueMap = (LinkedHashMap<Object, Object>) relationEdge.get("valueMap");
+                       String edgeId = relationEdge.get("id").toString();
+                       String edgeLabel = relationEdge.get("label").toString();
+                       String inVertexId = relationEdge.get("inVertexId").toString();
+                       String outVertexId = relationEdge.get("outVertexId").toString();
+
+                       String referencedVertex = outVertexId;
+
+                       EdgeVertexReference edgeRef = new EdgeVertexReference(
+                               referencedVertex, edgeId, edgeLabel, inVertexId, outVertexId, valueMap
+                       );
+                       boolean wasAdded = vertexEdgePropertyCache.addEdgeLabelToVertexIds(
+                               vertexId, edgeLabel, edgeRef, relationAttrsSize
+                       );
+                       if (wasAdded) {
+                           vertexIdsToProcess.add(referencedVertex);
+                       }
                    }
                }
            }
 
-           Pair<Map<String, Map<String, List<?>>>, Map<String, AtlasVertex>> referenceVertices = getVertexPropertiesValueMap(vertexIdsToProcess, 1000);
+           // Phase 3: Fetch referenced vertex properties
+           vertexIdsToProcess.removeAll(vertexIds); // Don't re-fetch vertices we already have from Phase 1
+           AtlasPerfMetrics.MetricRecorder phase3Metric = RequestContext.get().startMetricRecord("enrichVertexProperties.phase3.referenceFetch");
+           Pair<Map<String, Map<String, List<?>>>, Map<String, AtlasVertex>> referenceVertices =
+                   getVertexPropertiesValueMap(vertexIdsToProcess, 1000);
            for (Map.Entry<String, Map<String, List<?>>> entry : referenceVertices.getValue0().entrySet()) {
                String vertexId = entry.getKey();
                Map<String, List<?>> properties = entry.getValue();
@@ -1547,6 +1566,9 @@ public class EntityGraphRetriever {
                }
            }
            vertexEdgePropertyCache.addVertices(referenceVertices.getValue1());
+           LOG.debug("enrichVertexPropertiesByVertexIds: phase3 fetched {} reference vertices (from {} total referenced)",
+                   referenceVertices.getValue0().size(), vertexIdsToProcess.size());
+           RequestContext.get().endMetricRecord(phase3Metric);
 
            return vertexEdgePropertyCache;
        } finally {
