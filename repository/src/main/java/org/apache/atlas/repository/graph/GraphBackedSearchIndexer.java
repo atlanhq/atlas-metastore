@@ -255,6 +255,21 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
         }
     }
 
+    /**
+     * Runs a read-only audit of the JanusGraph mixed index schema and publishes
+     * Prometheus metrics reporting expected, indexed, and missing property keys.
+     *
+     * Opens a separate management transaction (rolled back in finally — no mutations).
+     * Uses a singleton IndexHealthMetricService so that Micrometer gauge references
+     * remain stable across invocations.
+     *
+     * Called from finally blocks in onLoadCompletion() and onChange() to ensure
+     * metrics always reflect the actual schema state, even after commit failures.
+     *
+     * Safe to call repeatedly — gauges are registered once and values are updated
+     * on each call. If the audit itself fails, it logs a warning and does not
+     * affect typedef loading or Atlas startup.
+     */
     private void runIndexHealthAudit() {
         AtlasGraphManagement auditMgmt = null;
         try {
