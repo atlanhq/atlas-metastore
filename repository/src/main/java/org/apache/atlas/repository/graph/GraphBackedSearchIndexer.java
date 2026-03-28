@@ -42,6 +42,7 @@ import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.IndexException;
 import org.apache.atlas.repository.RepositoryException;
 import org.apache.atlas.repository.graphdb.*;
+import org.apache.atlas.repository.metrics.IndexHealthMetricService;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.type.*;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
@@ -211,6 +212,9 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
         } catch (RepositoryException | IndexException e) {
             LOG.error("Failed to update indexes for changed typedefs", e);
             attemptRollback(changedTypeDefs, management);
+        } finally {
+            // Always audit — even if commit failed or rollback re-threw
+            runIndexHealthAudit();
         }
 
         notifyChangeListeners(changedTypeDefs);
@@ -243,6 +247,29 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
         } catch (RepositoryException | IndexException e) {
             LOG.error("Failed to update indexes for changed typedefs", e);
             attemptRollback(changedTypeDefs, management);
+        } finally {
+            // Always audit — even if commit failed or rollback re-threw.
+            // Reports the actual schema state so the dashboard never shows a false positive.
+            runIndexHealthAudit();
+        }
+    }
+
+    private void runIndexHealthAudit() {
+        AtlasGraphManagement auditMgmt = null;
+        try {
+            IndexHealthMetricService metricService = new IndexHealthMetricService(typeRegistry);
+            auditMgmt = provider.get().getManagementSystem();
+            metricService.auditIndexHealth(auditMgmt);
+        } catch (Exception e) {
+            LOG.warn("Index health audit failed — metrics will not be available", e);
+        } finally {
+            if (auditMgmt != null) {
+                try {
+                    auditMgmt.rollback();  // Read-only — always rollback
+                } catch (Exception e) {
+                    LOG.warn("Failed to rollback audit management transaction", e);
+                }
+            }
         }
     }
 
