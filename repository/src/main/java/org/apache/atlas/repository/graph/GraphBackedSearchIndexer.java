@@ -105,6 +105,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
 
     private boolean     recomputeIndexedKeys = true;
     private Set<String> vertexIndexKeys      = new HashSet<>();
+    private IndexHealthMetricService indexHealthMetricService;
 
     public static boolean isValidSearchWeight(int searchWeight) {
         if (searchWeight != -1 ) {
@@ -257,9 +258,11 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
     private void runIndexHealthAudit() {
         AtlasGraphManagement auditMgmt = null;
         try {
-            IndexHealthMetricService metricService = new IndexHealthMetricService(typeRegistry);
+            if (indexHealthMetricService == null) {
+                indexHealthMetricService = new IndexHealthMetricService(typeRegistry);
+            }
             auditMgmt = provider.get().getManagementSystem();
-            metricService.auditIndexHealth(auditMgmt);
+            indexHealthMetricService.auditIndexHealth(auditMgmt);
         } catch (Exception e) {
             LOG.warn("Index health audit failed — metrics will not be available", e);
         } finally {

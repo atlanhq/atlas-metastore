@@ -80,6 +80,7 @@ public class IndexHealthMetricService {
     private final AtomicInteger coreMissingTotal = new AtomicInteger(0);
     private final AtomicInteger healthStatus = new AtomicInteger(1); // 1 = healthy, 0 = unhealthy
     private final Map<String, AtomicInteger> perTypeMissing = new ConcurrentHashMap<>();
+    private final String tenant;
 
     @Inject
     public IndexHealthMetricService(AtlasTypeRegistry typeRegistry) {
@@ -90,6 +91,8 @@ public class IndexHealthMetricService {
     IndexHealthMetricService(AtlasTypeRegistry typeRegistry, MeterRegistry meterRegistry) {
         this.typeRegistry = typeRegistry;
         this.meterRegistry = meterRegistry;
+        String domainName = System.getenv("DOMAIN_NAME");
+        this.tenant = (domainName != null) ? domainName : "default";
         registerGauges();
     }
 
@@ -98,55 +101,65 @@ public class IndexHealthMetricService {
         Gauge.builder(METRIC_PREFIX + "_expected_total", entityExpected, AtomicInteger::get)
                 .description("Total primitive attributes expected in mixed index")
                 .tag("category", "entity")
+                .tag("tenant", tenant)
                 .register(meterRegistry);
 
         Gauge.builder(METRIC_PREFIX + "_indexed_total", entityIndexed, AtomicInteger::get)
                 .description("Primitive attributes registered in mixed index")
                 .tag("category", "entity")
+                .tag("tenant", tenant)
                 .register(meterRegistry);
 
         Gauge.builder(METRIC_PREFIX + "_missing_total", entityMissing, AtomicInteger::get)
                 .description("Primitive attributes missing from mixed index")
                 .tag("category", "entity")
                 .tag("source", "all")
+                .tag("tenant", tenant)
                 .register(meterRegistry);
 
         Gauge.builder(METRIC_PREFIX + "_missing_total", entityCoreMissing, AtomicInteger::get)
                 .description("Core type attributes missing from mixed index")
                 .tag("category", "entity")
                 .tag("source", "core")
+                .tag("tenant", tenant)
                 .register(meterRegistry);
 
         Gauge.builder(METRIC_PREFIX + "_missing_total", entityCustomMissing, AtomicInteger::get)
                 .description("Custom type attributes missing from mixed index")
                 .tag("category", "entity")
                 .tag("source", "custom")
+                .tag("tenant", tenant)
                 .register(meterRegistry);
 
         // Business metadata gauges
         Gauge.builder(METRIC_PREFIX + "_expected_total", bmExpected, AtomicInteger::get)
                 .description("Total BM attributes expected in mixed index")
                 .tag("category", "business_metadata")
+                .tag("tenant", tenant)
                 .register(meterRegistry);
 
         Gauge.builder(METRIC_PREFIX + "_indexed_total", bmIndexed, AtomicInteger::get)
                 .description("BM attributes registered in mixed index")
                 .tag("category", "business_metadata")
+                .tag("tenant", tenant)
                 .register(meterRegistry);
 
         Gauge.builder(METRIC_PREFIX + "_missing_total", bmMissing, AtomicInteger::get)
                 .description("BM attributes missing from mixed index")
                 .tag("category", "business_metadata")
                 .tag("source", "all")
+                .tag("tenant", tenant)
                 .register(meterRegistry);
 
         // Cross-category summary gauges
         Gauge.builder(METRIC_PREFIX + "_core_missing_total", coreMissingTotal, AtomicInteger::get)
                 .description("Core type attributes missing — affects all tenants if > 0")
+                .tag("tenant", tenant)
                 .register(meterRegistry);
 
         Gauge.builder(METRIC_PREFIX + "_status", healthStatus, AtomicInteger::get)
                 .description("Overall index health: 1 = healthy, 0 = unhealthy")
+                .tag("tenant", tenant)
                 .register(meterRegistry);
     }
 
@@ -269,7 +282,8 @@ public class IndexHealthMetricService {
             Gauge.builder(METRIC_PREFIX + "_type_missing", counter, AtomicInteger::get)
                     .description("Missing attributes for entity type")
                     .tag("typeName", name)
-                    .register(meterRegistry);
+                    .tag("tenant", tenant)
+                .register(meterRegistry);
             return counter;
         });
     }
