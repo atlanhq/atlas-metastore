@@ -19,6 +19,7 @@ package org.apache.atlas.repository.store.graph.v1;
 
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
+import org.apache.atlas.GraphTransactionInterceptor;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.TypeCategory;
@@ -87,6 +88,9 @@ public class RestoreHandlerV1 {
             AtlasGraphUtilsV2.setEncodedProperty(edge, STATE_PROPERTY_KEY, ACTIVE.name());
             AtlasGraphUtilsV2.setEncodedProperty(edge, MODIFICATION_TIMESTAMP_PROPERTY_KEY, RequestContext.get().getRequestTime());
             AtlasGraphUtilsV2.setEncodedProperty(edge, MODIFIED_BY_KEY, RequestContext.get().getUser());
+            // Invalidate any stale DELETED entry in the per-request edge-state cache so that
+            // subsequent getStatus() calls within the same transaction see ACTIVE immediately.
+            GraphTransactionInterceptor.addToEdgeStateCache(edge.getId(), ACTIVE);
         }
 
         if (isRelationshipEdge(edge))
