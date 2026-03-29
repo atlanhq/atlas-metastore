@@ -66,6 +66,7 @@ public class MigratorConfig {
 
     // Parallel ES indexing during Phase 1
     private final boolean esParallel;
+    private final int esVertexIndexerThreads;
 
     // ES edge index
     private final String targetEsEdgeIndex;
@@ -178,6 +179,7 @@ public class MigratorConfig {
 
         // Parallel ES indexing during Phase 1 (eliminates Phase 2)
         this.esParallel = getBoolean("migration.es.parallel", true);
+        this.esVertexIndexerThreads = getInt("migration.es.vertex.indexer.threads", 3);
 
         // ES edge index
         this.targetEsEdgeIndex = get("target.elasticsearch.edge.index", "atlas_graph_edge_index");
@@ -327,6 +329,7 @@ public class MigratorConfig {
 
     public int     getEsFieldLimit()      { return esFieldLimit; }
     public boolean isEsParallel()         { return esParallel; }
+    public int     getEsVertexIndexerThreads() { return esVertexIndexerThreads; }
     public String  getTargetEsEdgeIndex() { return targetEsEdgeIndex; }
     public String  getSourceEsEdgeIndex() { return sourceEsEdgeIndex; }
     public int     getSuperVertexEdgeChunkSize() { return superVertexEdgeChunkSize; }

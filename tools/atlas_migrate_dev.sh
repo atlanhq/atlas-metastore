@@ -73,6 +73,7 @@ SCANNER_THREADS="8"
 WRITER_THREADS="16"
 ES_BULK_SIZE="10000"
 ES_FIELD_LIMIT="10000"
+QUEUE_CAPACITY="100000"
 JVM_HEAP="8g"
 JVM_MIN_HEAP="4g"
 
@@ -223,6 +224,7 @@ Options:
   --writer-threads <n>    Writer parallelism (default: 16, auto-sized for large)
   --es-bulk-size <n>      ES bulk indexing batch size (default: 10000)
   --es-field-limit <n>    ES index mapping.total_fields.limit (default: 10000)
+  --queue-capacity <n>    Scanner→Writer queue capacity (default: 100000)
   --jvm-heap <size>       JVM max heap for migrator (default: 10g)
   --jvm-min-heap <size>   JVM initial heap for migrator (default: 4g)
   --fresh                 Clear migration state, start from scratch
@@ -291,6 +293,7 @@ parse_args() {
             --writer-threads) WRITER_THREADS="$2"; USER_SET_WRITER=true; shift 2 ;;
             --es-bulk-size)   ES_BULK_SIZE="$2"; USER_SET_BULK=true; shift 2 ;;
             --es-field-limit) ES_FIELD_LIMIT="$2"; shift 2 ;;
+            --queue-capacity) QUEUE_CAPACITY="$2"; shift 2 ;;
             --jvm-heap)       JVM_HEAP="$2"; USER_SET_HEAP=true; shift 2 ;;
             --jvm-min-heap)   JVM_MIN_HEAP="$2"; USER_SET_HEAP_MIN=true; shift 2 ;;
             --fresh)          MIGRATION_MODE="--fresh"; shift ;;
@@ -515,7 +518,7 @@ phase_preflight() {
 
     log "  Auto-sizing applied: tier=${SIZING_TIER}"
     log "    CPU: ${MIGRATOR_CPU}, Memory: ${MIGRATOR_MEMORY}, Heap: ${JVM_HEAP} (min: ${JVM_MIN_HEAP})"
-    log "    Scanner: ${SCANNER_THREADS}, Writer: ${WRITER_THREADS}, ES Bulk: ${ES_BULK_SIZE}"
+    log "    Scanner: ${SCANNER_THREADS}, Writer: ${WRITER_THREADS}, ES Bulk: ${ES_BULK_SIZE}, Queue: ${QUEUE_CAPACITY}"
 
     # 0.11 Config summary
     step "Configuration Summary"
@@ -538,6 +541,7 @@ phase_preflight() {
     log "  Writer Threads:    $WRITER_THREADS"
     log "  ES Bulk Size:      ${ES_BULK_SIZE:-default}"
     log "  ES Field Limit:    $ES_FIELD_LIMIT"
+    log "  Queue Capacity:    $QUEUE_CAPACITY"
     log "  JVM Heap:          $JVM_HEAP (min: $JVM_MIN_HEAP)"
     log "  Vertex Count:      ${VERTEX_COUNT}"
     log "  Sizing Tier:       ${SIZING_TIER}"
@@ -887,8 +891,8 @@ EOYAML
     ok "Migrator pod $MIGRATOR_POD_NAME is Running"
     record_phase "Phase 2: Spawn Pod" "PASS"
 
-    # Phase 3: Upload thin JAR
-    step "Phase 3: Upload JAR"
+    # Phase 3: Upload JAR + scripts
+    step "Phase 3: Upload JAR + Scripts"
     log "Uploading thin migrator JAR to pod..."
     log "  Source: $LOCAL_JAR"
     log "  Target: ${MIGRATOR_POD_NAME}:/opt/apache-atlas/libext/atlas-graphdb-migrator.jar"
@@ -914,6 +918,20 @@ EOYAML
     else
         warn "JAR size mismatch: local=${local_size}, remote=${remote_size}"
     fi
+    # Also upload local atlas_migrate.sh so any local changes take effect
+    local local_migrate_sh
+    local_migrate_sh="$(cd "$(dirname "$0")" && pwd)/atlas_migrate.sh"
+    if [ -f "$local_migrate_sh" ]; then
+        log "Uploading local atlas_migrate.sh to pod..."
+        if kubectl cp "$local_migrate_sh" "${NAMESPACE}/${MIGRATOR_POD_NAME}:/opt/apache-atlas/bin/atlas_migrate.sh" -c atlas-migrator; then
+            kubectl exec "$MIGRATOR_POD_NAME" -n "$NAMESPACE" -c atlas-migrator -- \
+                chmod +x /opt/apache-atlas/bin/atlas_migrate.sh 2>/dev/null || true
+            ok "atlas_migrate.sh uploaded"
+        else
+            warn "Failed to upload atlas_migrate.sh — using version from pod image"
+        fi
+    fi
+
     record_phase "Phase 3: Upload JAR" "PASS"
 }
 
@@ -938,7 +956,7 @@ phase_migration() {
         export SCANNER_THREADS='${SCANNER_THREADS}'
         export WRITER_THREADS='${WRITER_THREADS}'
         export ES_BULK_SIZE='${ES_BULK_SIZE:-1000}'
-        export QUEUE_CAPACITY='50000'
+        export QUEUE_CAPACITY='${QUEUE_CAPACITY}'
         export MIGRATOR_JVM_HEAP='${JVM_HEAP}'
         export MIGRATOR_JVM_MIN_HEAP='${JVM_MIN_HEAP}'
         export SOURCE_CONSISTENCY='ONE'
@@ -959,6 +977,8 @@ phase_migration() {
         echo '# Extra tuning (appended by atlas_migrate_dev.sh)' >> /tmp/migrator.properties
         echo 'migration.writer.max.inflight.per.thread=100' >> /tmp/migrator.properties
         echo 'migration.writer.batch.size=1000' >> /tmp/migrator.properties
+        echo 'migration.es.vertex.indexer.threads=3' >> /tmp/migrator.properties
+        echo 'migration.writer.max.edges.per.batch=5' >> /tmp/migrator.properties
     "
     ok "Extra tuning properties appended"
 

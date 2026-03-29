@@ -56,7 +56,7 @@ public class ParallelEsIndexer implements AutoCloseable {
 
     private final boolean isEdgeIndexer;
     private final BlockingQueue<EsDoc> queue;
-    private final Thread indexerThread;
+    private final Thread[] indexerThreads;
     private volatile boolean producerDone = false;
 
     private final AtomicLong totalIndexed = new AtomicLong(0);
@@ -97,6 +97,11 @@ public class ParallelEsIndexer implements AutoCloseable {
     /**
      * Constructor with custom ES index name and thread name.
      * Used for the edge ES indexer which targets a different index.
+     *
+     * Vertex indexer uses multiple threads (migration.es.vertex.indexer.threads, default 3)
+     * because vertex ES bulk requests are slow (~12-15s per batch due to large documents).
+     * Multiple threads allow concurrent bulk requests to overlap, preventing writer thread
+     * stalls from ES queue backpressure. Edge indexer uses 1 thread (fast enough at ~800ms/batch).
      */
     public ParallelEsIndexer(MigratorConfig config, MigrationMetrics metrics,
                               String esIndexName, String threadName, boolean isEdgeIndexer) {
@@ -108,8 +113,13 @@ public class ParallelEsIndexer implements AutoCloseable {
         this.isEdgeIndexer = isEdgeIndexer;
         this.queue    = new LinkedBlockingQueue<>(config.getQueueCapacity());
 
-        this.indexerThread = new Thread(this::indexerLoop, threadName);
-        this.indexerThread.setDaemon(true);
+        int threadCount = isEdgeIndexer ? 1 : config.getEsVertexIndexerThreads();
+        this.indexerThreads = new Thread[threadCount];
+        for (int i = 0; i < threadCount; i++) {
+            String name = threadCount > 1 ? threadName + "-" + i : threadName;
+            this.indexerThreads[i] = new Thread(this::indexerLoop, name);
+            this.indexerThreads[i].setDaemon(true);
+        }
     }
 
     /**
@@ -123,9 +133,11 @@ public class ParallelEsIndexer implements AutoCloseable {
     }
 
     public void start() {
-        LOG.info("Starting parallel ES indexer (queue capacity: {}, bulk size: {}, rank_feature fields: {})",
-                 config.getQueueCapacity(), bulkSize, rankFeatureFields);
-        indexerThread.start();
+        LOG.info("Starting parallel ES indexer (threads: {}, queue capacity: {}, bulk size: {}, rank_feature fields: {})",
+                 indexerThreads.length, config.getQueueCapacity(), bulkSize, rankFeatureFields);
+        for (Thread t : indexerThreads) {
+            t.start();
+        }
     }
 
     /** Expose discovered rank_feature fields (for ElasticsearchReindexer Phase 2 path). */
@@ -184,10 +196,13 @@ public class ParallelEsIndexer implements AutoCloseable {
         this.producerDone = true;
     }
 
-    /** Wait for the indexer thread to drain the queue and finish. */
+    /** Wait for all indexer threads to drain the queue and finish. */
     public void awaitCompletion() throws InterruptedException {
-        indexerThread.join(TimeUnit.HOURS.toMillis(24));
-        LOG.info("Parallel ES indexer complete: indexed={}, skipped={}, dropped/errors={}, rank_feature_normalized={}",
+        for (Thread t : indexerThreads) {
+            t.join(TimeUnit.HOURS.toMillis(24));
+        }
+        LOG.info("Parallel ES indexer complete: threads={}, indexed={}, skipped={}, dropped/errors={}, rank_feature_normalized={}",
+                 indexerThreads.length,
                  String.format("%,d", totalIndexed.get()),
                  String.format("%,d", totalSkipped.get()),
                  String.format("%,d", totalErrors.get()),

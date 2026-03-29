@@ -346,29 +346,22 @@ public class CassandraTargetWriter implements AutoCloseable {
     }
 
     /**
-     * Build batch(es) for a vertex and fire them asynchronously.
-     * Each batch is a single UNLOGGED batch containing vertex + index + edge mutations.
-     * The Semaphore limits how many batches are in-flight concurrently per thread.
+     * Write a vertex to target Cassandra asynchronously.
+     * Vertex + index statements are written as individual async statements (not batched)
+     * to avoid Cassandra's batch_size_fail_threshold for vertices with large propsJson.
+     * Edges are written in small UNLOGGED batches.
      */
     private void writeVertexAsync(DecodedVertex vertex, Semaphore inflight) throws InterruptedException {
-        List<BatchStatement> batches = buildVertexBatches(vertex);
+        VertexWritePlan plan = buildVertexWritePlan(vertex);
 
-        for (BatchStatement batch : batches) {
-            inflight.acquire();  // blocks if too many in-flight
+        // Write vertex + index as individual statements (no batch — avoids batch_size_fail_threshold)
+        for (BoundStatement stmt : plan.individualStatements) {
+            fireAsyncStatement(stmt, inflight, vertex.getVertexId());
+        }
 
-            writeAttempts.incrementAndGet();
-
-            targetSession.executeAsync(batch).whenComplete((result, error) -> {
-                inflight.release();
-                if (error != null) {
-                    metrics.incrWriteErrors();
-                    long errCount = writeErrors.incrementAndGet();
-                    if (errCount <= WRITE_SAMPLE_LOG_LIMIT) {
-                        LOG.error("Async batch write failed for vertex {}: {}",
-                                  vertex.getVertexId(), error.toString());
-                    }
-                }
-            });
+        // Write edges in small UNLOGGED batches
+        for (BatchStatement batch : plan.edgeBatches) {
+            fireAsyncStatement(batch, inflight, vertex.getVertexId());
         }
 
         // Count metrics optimistically — async writes to local Cassandra nearly always succeed
@@ -523,16 +516,35 @@ public class CassandraTargetWriter implements AutoCloseable {
     }
 
     /**
-     * Build all CQL mutations for a vertex into UNLOGGED batch(es).
-     * For typical vertices (≤15 edges), everything fits in 1 batch = 1 roundtrip.
-     * For high-edge vertices, edges are chunked to stay under batch_size_fail_threshold.
+     * Holds the write plan for a single vertex: individual statements for vertex + index rows
+     * (which can be large and must NOT be batched to avoid batch_size_fail_threshold),
+     * and small UNLOGGED batches for edges.
      */
-    private List<BatchStatement> buildVertexBatches(DecodedVertex vertex) {
+    private static class VertexWritePlan {
+        final List<BoundStatement> individualStatements;
+        final List<BatchStatement> edgeBatches;
+
+        VertexWritePlan(List<BoundStatement> individualStatements, List<BatchStatement> edgeBatches) {
+            this.individualStatements = individualStatements;
+            this.edgeBatches = edgeBatches;
+        }
+    }
+
+    /**
+     * Build the write plan for a vertex.
+     *
+     * Vertex INSERT + index/typedef statements are returned as individual statements
+     * (not batched) because vertices with many properties can have propsJson > 50KB,
+     * which exceeds Cassandra's batch_size_fail_threshold when batched.
+     * Individual (non-batch) statements have no size limit.
+     *
+     * Edges are grouped into small UNLOGGED batches (maxEdgesPerBatch) since each
+     * edge is small (~200 bytes) and batching reduces roundtrips.
+     */
+    private VertexWritePlan buildVertexWritePlan(DecodedVertex vertex) {
         String vertexId = resolveVertexId(vertex);
         Instant now = Instant.now();
 
-        // JanusGraph already stores the correct TypeCategory values (CLASS, TRAIT, ENUM, STRUCT, etc.)
-        // that match DataTypes.TypeCategory — no translation needed.
         Map<String, Object> props = vertex.getProperties();
 
         String propsJson;
@@ -543,15 +555,23 @@ public class CassandraTargetWriter implements AutoCloseable {
             LOG.warn("Failed to serialize properties for vertex {}", vertexId, e);
         }
 
-        List<BoundStatement> stmts = new ArrayList<>();
+        int propsBytes = propsJson.length();
+        if (propsBytes > 50_000) {
+            LOG.warn("Large vertex detected: jgId={} vertexId={} typeName={} propsJsonBytes={} propCount={} edgeCount={}",
+                     vertex.getJgVertexId(), vertexId, vertex.getTypeName(),
+                     String.format("%,d", propsBytes), props.size(), vertex.getOutEdges().size());
+        }
+
+        // --- Individual statements (vertex + indexes + typedefs) ---
+        List<BoundStatement> individualStmts = new ArrayList<>();
 
         // 1. Vertex INSERT
-        stmts.add(insertVertexStmt.bind(
+        individualStmts.add(insertVertexStmt.bind(
             vertexId, propsJson, vertex.getVertexLabel(),
             vertex.getTypeName(), vertex.getState(), now, now));
 
         // 2. Index INSERTs
-        int indexCount = buildIndexStatements(vertex, stmts);
+        int indexCount = buildIndexStatements(vertex, individualStmts);
         metrics.incrIndexesWritten(indexCount);
 
         // 3. TypeDef table INSERTs (if this is a TypeDef vertex)
@@ -559,47 +579,78 @@ public class CassandraTargetWriter implements AutoCloseable {
         Object rawCategory = props.get("__type_category");
         String typeCategory = rawCategory != null ? String.valueOf(rawCategory) : null;
         if ("typeSystem".equals(vertex.getVertexLabel()) && typeName != null && typeCategory != null) {
-            stmts.add(insertTypeDefStmt.bind(typeName, typeCategory, vertexId, now, now));
-            stmts.add(insertTypeDefByCategoryStmt.bind(typeCategory, typeName, vertexId));
+            individualStmts.add(insertTypeDefStmt.bind(typeName, typeCategory, vertexId, now, now));
+            individualStmts.add(insertTypeDefByCategoryStmt.bind(typeCategory, typeName, vertexId));
             metrics.incrTypeDefsWritten();
         }
 
-        // 4. Edge INSERTs (3 statements per edge: out, in, by_id)
+        // --- Edge batches ---
         List<DecodedEdge> edges = vertex.getOutEdges();
-        int maxEdges = config.getMaxEdgesPerBatch();
+        List<BatchStatement> edgeBatches = new ArrayList<>();
 
-        if (edges.size() <= maxEdges) {
-            // Everything fits in one batch
-            for (DecodedEdge edge : edges) {
-            buildEdgeStatements(edge, now, stmts);
+        if (!edges.isEmpty()) {
+            int maxEdges = config.getMaxEdgesPerBatch();
+            for (int i = 0; i < edges.size(); i += maxEdges) {
+                List<BoundStatement> edgeStmts = new ArrayList<>();
+                int end = Math.min(i + maxEdges, edges.size());
+                for (int j = i; j < end; j++) {
+                    buildEdgeStatements(edges.get(j), now, edgeStmts);
+                }
+                edgeBatches.add(BatchStatement.newInstance(BatchType.UNLOGGED,
+                    edgeStmts.toArray(new BatchableStatement[0])));
             }
-            return Collections.singletonList(
-                BatchStatement.newInstance(BatchType.UNLOGGED,
-                    stmts.toArray(new BatchableStatement[0])));
         }
 
-        // High-edge vertex: first batch gets vertex + indexes + first chunk of edges
-        List<BatchStatement> batches = new ArrayList<>();
+        return new VertexWritePlan(individualStmts, edgeBatches);
+    }
 
-        int firstChunk = Math.min(maxEdges, edges.size());
-        for (int i = 0; i < firstChunk; i++) {
-            buildEdgeStatements(edges.get(i), now, stmts);
-        }
-        batches.add(BatchStatement.newInstance(BatchType.UNLOGGED,
-            stmts.toArray(new BatchableStatement[0])));
+    /**
+     * Fire a single statement (BoundStatement or BatchStatement) asynchronously,
+     * respecting the per-thread inflight semaphore.
+     * Retries up to maxRetries times with exponential backoff on failure.
+     */
+    private void fireAsyncStatement(com.datastax.oss.driver.api.core.cql.Statement<?> stmt,
+                                      Semaphore inflight, String vertexId) throws InterruptedException {
+        inflight.acquire();
+        writeAttempts.incrementAndGet();
 
-        // Remaining edges in chunks
-        for (int i = firstChunk; i < edges.size(); i += maxEdges) {
-            List<BoundStatement> edgeStmts = new ArrayList<>();
-            int end = Math.min(i + maxEdges, edges.size());
-            for (int j = i; j < end; j++) {
-                buildEdgeStatements(edges.get(j), now, edgeStmts);
+        fireAsyncWithRetry(stmt, inflight, vertexId, 0);
+    }
+
+    private void fireAsyncWithRetry(com.datastax.oss.driver.api.core.cql.Statement<?> stmt,
+                                      Semaphore inflight, String vertexId, int attempt) {
+        targetSession.executeAsync(stmt).whenComplete((result, error) -> {
+            if (error != null) {
+                int maxRetries = config.getMaxRetries();
+                if (attempt < maxRetries) {
+                    // Exponential backoff: 500ms, 1s, 2s, ...
+                    long delayMs = 500L * (1L << attempt);
+                    LOG.warn("Async write failed for vertex {} (attempt {}/{}), retrying in {}ms: {}",
+                             vertexId, attempt + 1, maxRetries, delayMs, error.toString());
+                    try {
+                        Thread.sleep(delayMs);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        inflight.release();
+                        metrics.incrWriteErrors();
+                        writeErrors.incrementAndGet();
+                        return;
+                    }
+                    writeAttempts.incrementAndGet();
+                    fireAsyncWithRetry(stmt, inflight, vertexId, attempt + 1);
+                } else {
+                    inflight.release();
+                    metrics.incrWriteErrors();
+                    long errCount = writeErrors.incrementAndGet();
+                    if (errCount <= WRITE_SAMPLE_LOG_LIMIT) {
+                        LOG.error("Async write PERMANENTLY failed for vertex {} after {} retries: {}",
+                                  vertexId, maxRetries, error.toString());
+                    }
+                }
+            } else {
+                inflight.release();
             }
-            batches.add(BatchStatement.newInstance(BatchType.UNLOGGED,
-                edgeStmts.toArray(new BatchableStatement[0])));
-        }
-
-        return batches;
+        });
     }
 
     /**
