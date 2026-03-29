@@ -411,6 +411,45 @@ Seeded when Atlas starts with `atlas.authorizer.impl=atlas`. These are common ac
 
 ---
 
+## REFERENCE: User Types
+
+Every user in the system falls into one of two categories based on their Keycloak role membership. This determines their baseline access before any Persona or Purpose policies are evaluated.
+
+### Member Users
+
+- Users who are members of the **`$admin`** role in Keycloak
+- Granted a meaningful set of default permissions via the bootstrap entity, relationship, and typedef policies (`addons/policies/bootstrap_entity_policies.json`, etc.)
+- Can read and write metadata, create assets, manage relationships — the full metadata platform experience
+- Additional permissions can be granted through:
+  1. **Persona** — scoped access to specific connections/glossaries/domains via `personaUsers` / `personaGroups` assignments
+  2. **Purpose** — tag-based access to assets bearing specific classifications
+  3. **Connection All Admins route** — `$admin` role mapped as parent of `connection_admins_<guid>` (see Connection lifecycle section)
+
+### Guest Users
+
+- Users who are members of the **`$guest`** role in Keycloak
+- Only have **READ** permissions via bootstrap policies — write, create, delete, and classification operations are explicitly denied
+- The guest deny policies are typically higher-priority than any persona allow, meaning a guest user cannot be elevated to write access via a Persona alone
+- Intended for read-only consumers of the metadata catalog who should never mutate assets
+
+### Why this matters for debugging
+
+When investigating a 403 or unexpected deny:
+- **First check**: Is the user a `$admin` member or `$guest` member?
+  - Guest + write operation = expected deny, not a bug
+  - Member + write operation = investigate Persona/ABAC/policy cache
+- The `$guest` explicit deny policies at bootstrap level will appear in authz logs as `isExplicitDeny=true, engine=atlas` — don't confuse this with a misconfigured Persona policy
+- Adding a guest user to a Persona granting write permissions will NOT work — the bootstrap `$guest` deny wins over a normal-priority Persona allow (truth table row 3/4: Atlas explicit DENY at normal priority beats ABAC/Persona normal ALLOW)
+
+### Connection between user type and invertRoles
+
+The same `invertRoles()` mechanism that handles Connection All Admins applies here:
+- `$admin` → users under `$admin` role are treated as members
+- `$guest` → users under `$guest` role get the guest bootstrap deny policies applied
+- After inversion, the authorization engine can resolve "is this user under `$admin`?" or "is this user under `$guest`?" by traversing the inverted role graph
+
+---
+
 ## REFERENCE: API Keys
 
 API keys are Keycloak **Clients** (not users) with a service account. Naming convention: `apikey-<generated_guid>`.
@@ -703,7 +742,19 @@ Keycloak admin event check → Heracles read → UsersStore update. If Heracles 
 - Evidence: User was recently added to a group or Persona; issue resolves after 30-60s
 - Fix: Verify Heracles service health; check Keycloak admin events API response
 
-#### Category B: Policy configuration issues
+#### Category B: User type mismatch (check this before any policy investigation)
+
+**B0: Guest user attempting a write operation**
+If the user is a `$guest` role member, write/create/delete/classification operations are blocked by bootstrap deny policies — this is correct behavior, not a bug. The authz logs will show `isExplicitDeny=true, engine=atlas` from a bootstrap policy.
+
+Symptoms: 403 on any mutation. User is read-only by design.
+
+Resolution: If write access is intentional, the user must be moved from `$guest` to `$admin` in Keycloak — adding them to a Persona will not help because the `$guest` explicit deny at normal priority beats a normal Persona allow (truth table rows 3-5).
+
+**B0b: Guest user added to a Persona expecting elevated access**
+This is a common misconception. A Persona policy is a normal-priority allow. A `$guest` bootstrap deny is a normal-priority explicit deny. Per truth table row 3-5: Atlas explicit DENY at normal priority beats Atlas normal ALLOW. The Persona has no effect for guest users on write operations.
+
+#### Category C: Policy configuration issues
 
 **B1: isPolicyEnabled = false**
 The Persona or Purpose is disabled, or the policy was explicitly disabled. PolicyRefresher skips all policies where `isPolicyEnabled = false`.
@@ -787,6 +838,8 @@ If the problem is "entity not appearing in search results" rather than a 403:
 
 #### Other Candidates (ranked by likelihood)
 - [ ] Checked authz logs at https://observability.atlan.com/d/decuqe5bel0jkd/atlas-authz-logs
+- [ ] **User type**: Is the user $guest attempting a write? (expected deny — not a bug)
+- [ ] **User type**: Guest user in a Persona expecting write access? (won't work — $guest deny beats Persona allow)
 - [ ] Cache not loaded / stale (startup window, delta refresh miss, Heracles lag)
 - [ ] isPolicyEnabled = false on policy or parent Persona/Purpose
 - [ ] policyServiceName mismatch (atlas vs atlas_tag vs atlas_abac vs heka)
