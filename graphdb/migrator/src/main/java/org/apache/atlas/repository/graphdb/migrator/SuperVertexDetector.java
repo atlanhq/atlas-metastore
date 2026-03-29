@@ -39,6 +39,73 @@ public class SuperVertexDetector {
     }
 
     /**
+     * Count-only mode: runs Pass 1 (edge counting) but skips Pass 2 (label resolution).
+     * Used when super vertex detection is skipped but edge counts are still needed
+     * for validation (avoids falling back to unreliable system.size_estimates).
+     */
+    public SuperVertexReport countOnly() {
+        long startMs = System.currentTimeMillis();
+
+        LOG.info("Super vertex detection (count-only): counting edges...");
+
+        LOG.info("  Scanning edges_out...");
+        Map<String, Long> outEdgeCounts = new HashMap<>();
+        long edgesOutRowCount = scanEdgeCountsOnly(keyspace + ".edges_out", "out_vertex_id", outEdgeCounts);
+
+        LOG.info("  Scanning edges_in...");
+        Map<String, Long> inEdgeCounts = new HashMap<>();
+        long edgesInRowCount = scanEdgeCountsOnly(keyspace + ".edges_in", "in_vertex_id", inEdgeCounts);
+
+        LOG.info("  Scanning edges_by_id...");
+        long edgesByIdRowCount = scanRowCount(keyspace + ".edges_by_id", "edge_id");
+
+        // Compute stats without tracking super vertex details
+        Set<String> allVertexIds = new HashSet<>(outEdgeCounts.keySet());
+        allVertexIds.addAll(inEdgeCounts.keySet());
+
+        long maxEdge = 0;
+        int svCount = 0;
+        long over1k = 0, over10k = 0, over100k = 0, over1m = 0;
+
+        for (String vertexId : allVertexIds) {
+            long outCount = outEdgeCounts.getOrDefault(vertexId, 0L);
+            long inCount  = inEdgeCounts.getOrDefault(vertexId, 0L);
+            long totalEdges = outCount + inCount;
+
+            if (totalEdges > maxEdge) maxEdge = totalEdges;
+            if (totalEdges > 1000)      over1k++;
+            if (totalEdges > 10_000)    over10k++;
+            if (totalEdges > 100_000)   over100k++;
+            if (totalEdges > 1_000_000) over1m++;
+            if (totalEdges >= superVertexThreshold) svCount++;
+        }
+
+        long distinctVertices = allVertexIds.size();
+
+        SuperVertexReport report = new SuperVertexReport();
+        report.setTotalSuperVertexCount(svCount);
+        report.setMaxEdgeCount(maxEdge);
+        report.setTotalVerticesScanned(distinctVertices);
+        report.setScanDurationMs(System.currentTimeMillis() - startMs);
+        report.setVerticesOver1kEdges(over1k);
+        report.setVerticesOver10kEdges(over10k);
+        report.setVerticesOver100kEdges(over100k);
+        report.setVerticesOver1mEdges(over1m);
+        report.setEdgesOutRowCount(edgesOutRowCount);
+        report.setEdgesInRowCount(edgesInRowCount);
+        report.setEdgesByIdRowCount(edgesByIdRowCount);
+        report.setTopSuperVertices(new ArrayList<>());
+
+        LOG.info("Count-only scan complete in {}ms: {} distinct vertices, edges_out={}, edges_in={}, edges_by_id={}",
+                 report.getScanDurationMs(), distinctVertices,
+                 String.format("%,d", edgesOutRowCount),
+                 String.format("%,d", edgesInRowCount),
+                 String.format("%,d", edgesByIdRowCount));
+
+        return report;
+    }
+
+    /**
      * Scan edge tables and detect super vertices.
      * Uses a two-pass approach to limit memory:
      *   Pass 1: Count edges per vertex (only vertex IDs + counts in memory)

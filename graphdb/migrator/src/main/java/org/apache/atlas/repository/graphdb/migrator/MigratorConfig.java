@@ -99,6 +99,7 @@ public class MigratorConfig {
 
     // Analyze mode ("cassandra" for post-migration, "janus" for pre-migration)
     private final String analyzeMode;
+    private final boolean pushToMixpanel;
 
     // Auto-sizing: effective values (may be overridden by MigrationSizer)
     private int effectiveScannerThreads;
@@ -210,6 +211,7 @@ public class MigratorConfig {
 
         // Analyze mode
         this.analyzeMode = get("analyze.mode", "janus");
+        this.pushToMixpanel = getBoolean("analyze.push.to.mixpanel", false);
 
         // Validation
         this.validationVertexSampleSize  = getInt("validation.vertex.sample.size", 1000);
@@ -364,4 +366,5 @@ public class MigratorConfig {
     public boolean isSkipEsCountValidation()        { return skipEsCountValidation; }
     public String  getValidationTenantId()          { return validationTenantId; }
     public String  getAnalyzeMode()                 { return analyzeMode; }
+    public boolean isPushToMixpanel()               { return pushToMixpanel; }
 }

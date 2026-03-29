@@ -19,6 +19,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -185,9 +186,20 @@ public class ElasticsearchReindexer implements AutoCloseable {
             executeBulk(bulkBody.toString(), batchCount, totalDocs);
         }
 
-        LOG.info("ES re-indexing complete: {} documents indexed, {} skipped, {} rank_feature values normalized",
-                 String.format("%,d", totalDocs), String.format("%,d", skipped),
+        LOG.info("ES re-indexing complete: {} docs submitted, {} succeeded, {} failed, {} skipped, " +
+                 "{} rank_feature values normalized",
+                 String.format("%,d", totalDocs),
+                 String.format("%,d", totalBulkItemSuccesses),
+                 String.format("%,d", totalBulkItemFailures),
+                 String.format("%,d", skipped),
                  String.format("%,d", rankFeatureNormalized));
+
+        // Post-reindex verification: compare ES _count against Cassandra-sourced count
+        if (totalBulkItemFailures > 0) {
+            LOG.warn("ES REINDEX WARNING: {} item-level failures detected during bulk indexing. " +
+                     "Some documents may not be searchable.", totalBulkItemFailures);
+        }
+        verifyEsDocCount(esIndex, totalBulkItemSuccesses);
     }
 
     void ensureIndexExists(String esIndex) {
@@ -427,6 +439,12 @@ public class ElasticsearchReindexer implements AutoCloseable {
         }
     }
 
+    // Tracks cumulative bulk indexing failures across all batches
+    private long totalBulkItemFailures = 0;
+    private long totalBulkItemSuccesses = 0;
+    private long totalEdgeBulkItemFailures = 0;
+    private long totalEdgeBulkItemSuccesses = 0;
+
     private void executeBulk(String bulkBody, int docCount, long totalSoFar) throws IOException {
         long bulkStart = System.currentTimeMillis();
 
@@ -435,18 +453,25 @@ public class ElasticsearchReindexer implements AutoCloseable {
         Response response = esClient.performRequest(request);
         long bulkMs = System.currentTimeMillis() - bulkStart;
 
-        metrics.incrEsDocsIndexed(docCount);
-
         int statusCode = response.getStatusLine().getStatusCode();
+        String body = EntityUtils.toString(response.getEntity());
+
         if (statusCode >= 300) {
-            String body = EntityUtils.toString(response.getEntity());
             LOG.warn("ES bulk response status {}: {}", statusCode, body.substring(0, Math.min(500, body.length())));
+            totalBulkItemFailures += docCount;
         } else {
-            // Check for per-item errors in the response
-            String body = EntityUtils.toString(response.getEntity());
-            if (body.contains("\"errors\":true")) {
-                LOG.warn("ES bulk had item-level errors (total: {}): {}...",
-                         String.format("%,d", totalSoFar),
+            // Parse bulk response to count actual successes vs failures
+            int[] counts = parseBulkResponseCounts(body);
+            int succeeded = counts[0];
+            int failed = counts[1];
+            totalBulkItemSuccesses += succeeded;
+            totalBulkItemFailures += failed;
+            metrics.incrEsDocsIndexed(succeeded);
+
+            if (failed > 0) {
+                LOG.warn("ES bulk: {} succeeded, {} failed (batch total: {}, cumulative failures: {}): {}...",
+                         succeeded, failed, String.format("%,d", totalSoFar),
+                         totalBulkItemFailures,
                          body.substring(0, Math.min(500, body.length())));
             }
         }
@@ -454,6 +479,74 @@ public class ElasticsearchReindexer implements AutoCloseable {
         LOG.debug("ES bulk indexed {} docs in {}ms (total: {}, rate: {}/s)",
                   docCount, bulkMs, String.format("%,d", totalSoFar),
                   bulkMs > 0 ? (docCount * 1000L / bulkMs) : "N/A");
+    }
+
+    /**
+     * Parse a bulk response JSON to count successful vs failed items.
+     * Returns [succeeded, failed].
+     */
+    @SuppressWarnings("unchecked")
+    private int[] parseBulkResponseCounts(String body) {
+        int succeeded = 0;
+        int failed = 0;
+        try {
+            Map<String, Object> parsed = MAPPER.readValue(body, Map.class);
+            Object itemsObj = parsed.get("items");
+            if (itemsObj instanceof List) {
+                List<Map<String, Object>> items = (List<Map<String, Object>>) itemsObj;
+                for (Map<String, Object> item : items) {
+                    // Each item is {"index": {"_id": ..., "status": 200/201, ...}} or has "error" key
+                    for (Object actionResult : item.values()) {
+                        if (actionResult instanceof Map) {
+                            Map<String, Object> result = (Map<String, Object>) actionResult;
+                            if (result.containsKey("error")) {
+                                failed++;
+                            } else {
+                                succeeded++;
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // If parsing fails, check the simple "errors" flag
+            if (body.contains("\"errors\":true")) {
+                // Can't determine exact counts — assume all failed as worst case
+                LOG.warn("Failed to parse bulk response items: {}", e.getMessage());
+            }
+        }
+        return new int[]{succeeded, failed};
+    }
+
+    /**
+     * Post-reindex verification: refresh the index and compare ES _count against
+     * the expected count from bulk indexing.
+     */
+    @SuppressWarnings("unchecked")
+    private void verifyEsDocCount(String indexName, long expectedCount) {
+        try {
+            // Force a refresh so _count reflects all indexed docs
+            esClient.performRequest(new Request("POST", "/" + indexName + "/_refresh"));
+
+            Request countReq = new Request("GET", "/" + indexName + "/_count");
+            Response resp = esClient.performRequest(countReq);
+            String body = EntityUtils.toString(resp.getEntity());
+            Map<String, Object> parsed = MAPPER.readValue(body, Map.class);
+            long esCount = ((Number) parsed.get("count")).longValue();
+
+            if (esCount == expectedCount) {
+                LOG.info("ES doc count verification PASSED for '{}': ES={}, expected={}",
+                         indexName, String.format("%,d", esCount), String.format("%,d", expectedCount));
+            } else {
+                long diff = expectedCount - esCount;
+                LOG.warn("ES doc count verification MISMATCH for '{}': ES={}, expected={}, diff={} " +
+                         "(some documents may have been silently lost during indexing)",
+                         indexName, String.format("%,d", esCount), String.format("%,d", expectedCount),
+                         String.format("%,d", diff));
+            }
+        } catch (Exception e) {
+            LOG.warn("ES doc count verification failed for '{}': {}", indexName, e.getMessage());
+        }
     }
 
     /** Escape special JSON characters in a string value */
@@ -586,8 +679,17 @@ public class ElasticsearchReindexer implements AutoCloseable {
             executeEdgeBulk(bulkBody.toString(), batchCount, totalDocs);
         }
 
-        LOG.info("ES edge re-indexing complete: {} edge documents indexed into '{}'",
-                 String.format("%,d", totalDocs), esEdgeIndex);
+        LOG.info("ES edge re-indexing complete: {} docs submitted, {} succeeded, {} failed into '{}'",
+                 String.format("%,d", totalDocs),
+                 String.format("%,d", totalEdgeBulkItemSuccesses),
+                 String.format("%,d", totalEdgeBulkItemFailures),
+                 esEdgeIndex);
+
+        if (totalEdgeBulkItemFailures > 0) {
+            LOG.warn("ES EDGE REINDEX WARNING: {} item-level failures detected during bulk indexing.",
+                     totalEdgeBulkItemFailures);
+        }
+        verifyEsDocCount(esEdgeIndex, totalEdgeBulkItemSuccesses);
     }
 
     /**
@@ -633,17 +735,24 @@ public class ElasticsearchReindexer implements AutoCloseable {
         Response response = esClient.performRequest(request);
         long bulkMs = System.currentTimeMillis() - bulkStart;
 
-        metrics.incrEsEdgeDocsIndexed(docCount);
-
         int statusCode = response.getStatusLine().getStatusCode();
+        String body = EntityUtils.toString(response.getEntity());
+
         if (statusCode >= 300) {
-            String body = EntityUtils.toString(response.getEntity());
             LOG.warn("ES edge bulk response status {}: {}", statusCode, body.substring(0, Math.min(500, body.length())));
+            totalEdgeBulkItemFailures += docCount;
         } else {
-            String body = EntityUtils.toString(response.getEntity());
-            if (body.contains("\"errors\":true")) {
-                LOG.warn("ES edge bulk had item-level errors (total: {}): {}...",
-                         String.format("%,d", totalSoFar),
+            int[] counts = parseBulkResponseCounts(body);
+            int succeeded = counts[0];
+            int failed = counts[1];
+            totalEdgeBulkItemSuccesses += succeeded;
+            totalEdgeBulkItemFailures += failed;
+            metrics.incrEsEdgeDocsIndexed(succeeded);
+
+            if (failed > 0) {
+                LOG.warn("ES edge bulk: {} succeeded, {} failed (batch total: {}, cumulative failures: {}): {}...",
+                         succeeded, failed, String.format("%,d", totalSoFar),
+                         totalEdgeBulkItemFailures,
                          body.substring(0, Math.min(500, body.length())));
             }
         }

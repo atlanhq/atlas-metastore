@@ -188,6 +188,12 @@ public class MigrationValidator {
         // can be used instead of unreliable system.size_estimates.
         if (!config.isSkipSuperVertexDetection()) {
             runSuperVertexDetection(ks, report);
+        } else {
+            // Even when super vertex detection is skipped, we still need accurate
+            // edge counts for validation. Run count-only pass (Pass 1 only) to get
+            // exact row counts from edges_out/in/by_id instead of falling back to
+            // unreliable system.size_estimates (8-30% inaccurate after bulk writes).
+            runEdgeCountOnlyPass(ks, report);
         }
 
         // --- Check 2 & 3: Edge consistency ---
@@ -397,12 +403,42 @@ public class MigrationValidator {
         report.setEdgeInCount(edgeInCount);
         report.setEdgeByIdCount(edgeByIdCount);
 
+        String countSource = usingActualCounts ? "actual full scan" : "estimated, 5% tolerance";
+
+        // Check: Source baseline vs target edge count
+        // This catches silent edge loss during migration — if all three target tables
+        // are equally affected (e.g. 20% dropped), internal consistency checks pass
+        // but this comparison against the source will catch it.
+        if (sourceBaseline != null && sourceBaseline.totalEdges > 0) {
+            double ratio = edgeOutCount > 0 ? (double) edgeOutCount / sourceBaseline.totalEdges : 0.0;
+            boolean sourceMatch = isWithinTolerance(sourceBaseline.totalEdges, edgeOutCount, 0.05);
+            String sourceMsg = String.format(
+                "source_baseline_edges=%d, target_edges_out=%d, ratio=%.4f (source: %s)",
+                sourceBaseline.totalEdges, edgeOutCount, ratio, countSource);
+            if (!sourceMatch) {
+                if (ratio < 0.95) {
+                    sourceMsg += " [FAIL: target has >5% fewer edges than source]";
+                } else {
+                    sourceMsg += " [FAIL: target has >5% more edges than source]";
+                }
+            }
+            ValidationCheckResult sourceEdgeCheck = new ValidationCheckResult(
+                "source_target_edge_count",
+                "Target edge count matches source baseline within 5% tolerance",
+                sourceMatch ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.FAIL,
+                sourceMsg);
+            sourceEdgeCheck.addDetail("source_baseline_edges", sourceBaseline.totalEdges);
+            sourceEdgeCheck.addDetail("target_edges_out", edgeOutCount);
+            sourceEdgeCheck.addDetail("ratio", ratio);
+            sourceEdgeCheck.addDetail("count_source", usingActualCounts ? "full_scan" : "size_estimates");
+            report.addCheck(sourceEdgeCheck);
+        }
+
         // Check 2: edges_out vs edges_in
         // With actual counts (full scan): exact match required, FAIL on mismatch (real data issue)
         // With estimates (size_estimates): 5% tolerance, FAIL on mismatch (edge consistency is critical)
         double outInTolerance = usingActualCounts ? 0.0 : 0.05;
         boolean outInMatch = isWithinTolerance(edgeOutCount, edgeInCount, outInTolerance);
-        String countSource = usingActualCounts ? "actual full scan" : "estimated, 5% tolerance";
         ValidationCheckResult outInCheck = new ValidationCheckResult(
             "edge_out_in_consistency",
             "edges_out count matches edges_in count (" + countSource + ")",
@@ -1137,6 +1173,28 @@ public class MigrationValidator {
         result.addDetail("vertices_over_1m", svReport.getVerticesOver1mEdges());
         result.addDetail("scan_duration_ms", svReport.getScanDurationMs());
         report.addCheck(result);
+    }
+
+    // ========================================================================
+    // Edge count-only pass (when super vertex detection is skipped)
+    // ========================================================================
+
+    private void runEdgeCountOnlyPass(String ks, ValidationReport report) {
+        LOG.info("Edge count-only pass: scanning edge tables for accurate row counts " +
+                 "(super vertex detection skipped)...");
+
+        SuperVertexDetector detector = new SuperVertexDetector(
+            targetSession, ks,
+            config.getSuperVertexThreshold(),
+            config.getSuperVertexTopN());
+
+        SuperVertexReport svReport = detector.countOnly();
+        report.setSuperVertexReport(svReport);
+
+        LOG.info("Edge count-only pass complete: edges_out={}, edges_in={}, edges_by_id={}",
+                 String.format("%,d", svReport.getEdgesOutRowCount()),
+                 String.format("%,d", svReport.getEdgesInRowCount()),
+                 String.format("%,d", svReport.getEdgesByIdRowCount()));
     }
 
     // ========================================================================

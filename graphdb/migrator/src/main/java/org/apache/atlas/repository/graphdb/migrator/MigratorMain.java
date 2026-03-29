@@ -501,16 +501,20 @@ public class MigratorMain {
 
         // 5. Print Mixpanel payload preview
         LOG.info("========================================");
-        LOG.info("=== Mixpanel Payload Preview (engage $set) ===");
+        LOG.info("=== Mixpanel Payload (engage $set) ===");
         LOG.info("========================================");
         LOG.info("\n{}", report.toJson());
 
-        // 6. Push to Mixpanel (if configured via MIXPANEL_TOKEN env var)
-        MixpanelReporter mixpanel = MixpanelReporter.fromEnv();
-        if (mixpanel != null) {
-            mixpanel.send(report);
+        // 6. Push to Mixpanel (only if analyze.push.to.mixpanel=true AND MIXPANEL_TOKEN is set)
+        if (config.isPushToMixpanel()) {
+            MixpanelReporter mixpanel = MixpanelReporter.fromEnv();
+            if (mixpanel != null) {
+                mixpanel.send(report);
+            } else {
+                LOG.info("Mixpanel push enabled but MIXPANEL_TOKEN env var is not set — skipping push");
+            }
         } else {
-            LOG.info("Mixpanel not configured — set MIXPANEL_TOKEN env var to enable push");
+            LOG.info("Mixpanel push disabled (analyze.push.to.mixpanel=false) — printed payload above for reference");
         }
     }
 
@@ -528,17 +532,28 @@ public class MigratorMain {
         }
 
         try (JanusGraphAnalyzer analyzer = new JanusGraphAnalyzer(sourceSession, config)) {
-            // 1. Vertex + edge counts from ES
+            // 1. Vertex + edge counts from ES (kept as diagnostics / fallback)
             LOG.info("Step 1/3: Querying ES for vertex/edge counts and type distribution...");
             long totalVertices = analyzer.getTotalVertexCount();
             long totalEdges = analyzer.getTotalEdgeCount();
-            Map<String, Long> typeCounts = analyzer.getVertexTypeCounts();
+            Map<String, Long> esTypeCounts = analyzer.getVertexTypeCounts();
 
-            // 2. Super vertex detection from edgestore
+            // 2. Super vertex detection from edgestore (also extracts __typeName counts)
             LOG.info("Step 2/3: Scanning edgestore for super vertices...");
             SuperVertexReport svReport = analyzer.detectSuperVertices();
 
-            // 3. Build report
+            // 3. Prefer Cassandra-sourced type counts over ES (ground truth).
+            //    Fall back to ES if edgestore extraction yielded nothing (shouldn't happen).
+            Map<String, Long> typeCounts = analyzer.getEdgestoreTypeCounts();
+            if (typeCounts.isEmpty()) {
+                LOG.warn("Edgestore yielded 0 type counts — falling back to ES type distribution");
+                typeCounts = esTypeCounts;
+            } else {
+                LOG.info("Using Cassandra-sourced type counts ({} types) instead of ES ({} types)",
+                         typeCounts.size(), esTypeCounts.size());
+            }
+
+            // 3b. Build report
             LOG.info("Step 3/3: Building report...");
             AnalysisReport report = new AnalysisReport();
             report.populateFromJanusGraph(domainName, config, svReport, typeCounts, totalVertices, totalEdges);
@@ -546,18 +561,22 @@ public class MigratorMain {
             // 4. Print formatted report to console
             LOG.info(report.toPrettyString());
 
-            // 5. Print Mixpanel payload preview
+            // 5. Print Mixpanel payload
             LOG.info("========================================");
-            LOG.info("=== Mixpanel Payload Preview (engage $set) ===");
+            LOG.info("=== Mixpanel Payload (engage $set) ===");
             LOG.info("========================================");
             LOG.info("\n{}", report.toJson());
 
-            // 6. Push to Mixpanel (if configured via MIXPANEL_TOKEN env var)
-            MixpanelReporter mixpanel = MixpanelReporter.fromEnv();
-            if (mixpanel != null) {
-                mixpanel.send(report);
+            // 6. Push to Mixpanel (only if analyze.push.to.mixpanel=true AND MIXPANEL_TOKEN is set)
+            if (config.isPushToMixpanel()) {
+                MixpanelReporter mixpanel = MixpanelReporter.fromEnv();
+                if (mixpanel != null) {
+                    mixpanel.send(report);
+                } else {
+                    LOG.info("Mixpanel push enabled but MIXPANEL_TOKEN env var is not set — skipping push");
+                }
             } else {
-                LOG.info("Mixpanel not configured — set MIXPANEL_TOKEN env var to enable push");
+                LOG.info("Mixpanel push disabled (analyze.push.to.mixpanel=false) — printed payload above for reference");
             }
         } catch (Exception e) {
             LOG.error("JanusGraph analysis failed: {}", e.getMessage(), e);

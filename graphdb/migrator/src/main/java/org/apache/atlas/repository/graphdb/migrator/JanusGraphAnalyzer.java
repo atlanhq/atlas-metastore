@@ -70,6 +70,9 @@ public class JanusGraphAnalyzer implements AutoCloseable {
     private final EdgeSerializer      edgeSerializer;
     private final CachedTypeInspector cachedTypeInspector;
 
+    // Cassandra-sourced type counts from the last detectSuperVertices() run
+    private Map<String, Long> lastEdgestoreTypeCounts = Collections.emptyMap();
+
     public JanusGraphAnalyzer(CqlSession sourceSession, MigratorConfig config) {
         this.sourceSession = sourceSession;
         this.config = config;
@@ -218,10 +221,11 @@ public class JanusGraphAnalyzer implements AutoCloseable {
             .setPageSize(5000)
             .build();
 
-        // Per-vertex edge counts (OUT+IN combined, matching CassandraGraph SuperVertexDetector)
-        Map<ByteBuffer, Long> edgeCountPerVertex = new HashMap<>();
-        // Per-vertex edge label tracking (for super vertices)
-        Map<ByteBuffer, Map<String, Long>> edgeLabelsPerVertex = new HashMap<>();
+        // STREAMING approach: edgestore rows are grouped by partition key, so we track
+        // per-vertex edge counts using a running counter that resets on key transition.
+        // This uses O(topN) memory instead of O(numVertices) — safe for 100M+ vertices.
+        // Only super vertex candidates (topN by edge count) are kept in memory.
+        Map<String, Long> typeCountsFromEdgestore = new HashMap<>();
 
         ResultSet rs = sourceSession.execute(stmt);
         long totalRows = 0;
@@ -231,6 +235,21 @@ public class JanusGraphAnalyzer implements AutoCloseable {
         long totalSystemRows = 0;
         long totalNullType = 0;
         long totalDecodeErrors = 0;
+        long totalDistinctKeys = 0;
+        long distinctVerticesWithEdges = 0;
+        ByteBuffer previousKey = null;
+
+        // Streaming per-vertex counters (reset on each key transition)
+        long currentVertexEdgeCount = 0;
+        Map<String, Long> currentVertexLabels = new LinkedHashMap<>();
+
+        // Distribution buckets and super vertex tracking (computed inline)
+        long maxEdgeCount = 0;
+        int superVertexCount = 0;
+        long over1k = 0, over10k = 0, over100k = 0, over1m = 0;
+        PriorityQueue<SuperVertexCandidate> topQueue = new PriorityQueue<>(topN + 1);
+        // Map from super vertex candidate key (hex) to its edge labels
+        Map<String, Map<String, Long>> superVertexLabels = new HashMap<>();
 
         for (Row row : rs) {
             totalRows++;
@@ -238,6 +257,37 @@ public class JanusGraphAnalyzer implements AutoCloseable {
             ByteBuffer keyBuf = row.getByteBuffer("key");
             ByteBuffer colBuf = row.getByteBuffer("column1");
             ByteBuffer valBuf = row.getByteBuffer("value");
+
+            // Detect key transition — flush the previous vertex's edge count
+            if (previousKey == null || !previousKey.equals(keyBuf)) {
+                if (previousKey != null && currentVertexEdgeCount > 0) {
+                    // Flush previous vertex
+                    distinctVerticesWithEdges++;
+                    if (currentVertexEdgeCount > maxEdgeCount) maxEdgeCount = currentVertexEdgeCount;
+                    if (currentVertexEdgeCount > 1000)      over1k++;
+                    if (currentVertexEdgeCount > 10_000)    over10k++;
+                    if (currentVertexEdgeCount > 100_000)   over100k++;
+                    if (currentVertexEdgeCount > 1_000_000) over1m++;
+
+                    if (currentVertexEdgeCount >= threshold) {
+                        superVertexCount++;
+                        String keyHex = bytesToHex(previousKey);
+                        topQueue.add(new SuperVertexCandidate(previousKey, currentVertexEdgeCount));
+                        if (!currentVertexLabels.isEmpty()) {
+                            superVertexLabels.put(keyHex, new LinkedHashMap<>(currentVertexLabels));
+                        }
+                        if (topQueue.size() > topN) {
+                            SuperVertexCandidate evicted = topQueue.poll();
+                            superVertexLabels.remove(bytesToHex(evicted.getKey()));
+                        }
+                    }
+                }
+                // Reset for new vertex
+                currentVertexEdgeCount = 0;
+                currentVertexLabels.clear();
+                totalDistinctKeys++;
+                previousKey = keyBuf;
+            }
 
             try {
                 Entry entry = buildEntry(colBuf, valBuf);
@@ -262,24 +312,35 @@ public class JanusGraphAnalyzer implements AutoCloseable {
 
                 if (type.isPropertyKey()) {
                     totalProperties++;
+                    // Extract __typeName from property rows for Cassandra-sourced type counts.
+                    String propName = type.name();
+                    if ("__typeName".equals(propName) || "__typeName".equals(normalizePropertyName(propName))) {
+                        try {
+                            Object value = rel.getValue();
+                            if (value != null) {
+                                String typeName = value.toString();
+                                if (!typeName.isEmpty()) {
+                                    typeCountsFromEdgestore.merge(typeName, 1L, Long::sum);
+                                }
+                            }
+                        } catch (Exception e) {
+                            // Skip — property value extraction is best-effort
+                        }
+                    }
                     continue;
                 }
 
-                // It's an edge — count both directions (matches CassandraGraph SuperVertexDetector)
+                // It's an edge — count both directions
                 if (rel.direction == Direction.OUT) {
                     totalOutEdges++;
                 } else {
                     totalInEdges++;
                 }
-                edgeCountPerVertex.merge(keyBuf, 1L, Long::sum);
+                currentVertexEdgeCount++;
 
-                // Track edge label for potential super vertices
-                String edgeLabel = type.name();
-                long currentCount = edgeCountPerVertex.getOrDefault(keyBuf, 1L);
-                if (currentCount >= threshold / 2) { // start tracking labels early
-                    edgeLabelsPerVertex
-                        .computeIfAbsent(keyBuf, k -> new LinkedHashMap<>())
-                        .merge(edgeLabel, 1L, Long::sum);
+                // Track edge label for potential super vertices (start early)
+                if (currentVertexEdgeCount >= threshold / 2) {
+                    currentVertexLabels.merge(type.name(), 1L, Long::sum);
                 }
             } catch (Exception e) {
                 totalDecodeErrors++;
@@ -299,6 +360,29 @@ public class JanusGraphAnalyzer implements AutoCloseable {
             }
         }
 
+        // Flush the last vertex
+        if (previousKey != null && currentVertexEdgeCount > 0) {
+            distinctVerticesWithEdges++;
+            if (currentVertexEdgeCount > maxEdgeCount) maxEdgeCount = currentVertexEdgeCount;
+            if (currentVertexEdgeCount > 1000)      over1k++;
+            if (currentVertexEdgeCount > 10_000)    over10k++;
+            if (currentVertexEdgeCount > 100_000)   over100k++;
+            if (currentVertexEdgeCount > 1_000_000) over1m++;
+
+            if (currentVertexEdgeCount >= threshold) {
+                superVertexCount++;
+                String keyHex = bytesToHex(previousKey);
+                topQueue.add(new SuperVertexCandidate(previousKey, currentVertexEdgeCount));
+                if (!currentVertexLabels.isEmpty()) {
+                    superVertexLabels.put(keyHex, new LinkedHashMap<>(currentVertexLabels));
+                }
+                if (topQueue.size() > topN) {
+                    SuperVertexCandidate evicted = topQueue.poll();
+                    superVertexLabels.remove(bytesToHex(evicted.getKey()));
+                }
+            }
+        }
+
         LOG.info("Edgestore scan complete: {} total rows (outEdges={}, inEdges={}, properties={}, system={}, nullType={}, errors={})",
                  String.format("%,d", totalRows),
                  String.format("%,d", totalOutEdges),
@@ -307,34 +391,6 @@ public class JanusGraphAnalyzer implements AutoCloseable {
                  String.format("%,d", totalSystemRows),
                  String.format("%,d", totalNullType),
                  String.format("%,d", totalDecodeErrors));
-
-        // Analyze: find super vertices, compute distribution buckets
-        long maxEdgeCount = 0;
-        int superVertexCount = 0;
-        long over1k = 0, over10k = 0, over100k = 0, over1m = 0;
-
-        PriorityQueue<SuperVertexCandidate> topQueue = new PriorityQueue<>(topN + 1);
-
-        for (Map.Entry<ByteBuffer, Long> entry : edgeCountPerVertex.entrySet()) {
-            long edgeCount = entry.getValue();
-
-            if (edgeCount > maxEdgeCount) maxEdgeCount = edgeCount;
-            if (edgeCount > 1000)      over1k++;
-            if (edgeCount > 10_000)    over10k++;
-            if (edgeCount > 100_000)   over100k++;
-            if (edgeCount > 1_000_000) over1m++;
-
-            if (edgeCount >= threshold) {
-                superVertexCount++;
-                topQueue.add(new SuperVertexCandidate(entry.getKey(), edgeCount));
-                if (topQueue.size() > topN) {
-                    topQueue.poll();
-                }
-            }
-        }
-
-        long distinctVertices = edgeCountPerVertex.size();
-        edgeCountPerVertex = null; // allow GC
 
         // Resolve type names and edge labels for super vertices via ES
         LOG.info("Resolving type names for {} super vertices via ES...", topQueue.size());
@@ -347,16 +403,15 @@ public class JanusGraphAnalyzer implements AutoCloseable {
             String vertexIdHex = bytesToHex(candidate.getKey());
             String typeName = lookupTypeNameFromEs(vertexIdHex);
 
-            // Get edge labels if tracked
-            Map<String, Long> labelCounts = edgeLabelsPerVertex.getOrDefault(
-                candidate.getKey(), new LinkedHashMap<>());
+            Map<String, Long> labelCounts = superVertexLabels.getOrDefault(
+                vertexIdHex, new LinkedHashMap<>());
 
             SuperVertexReport.SuperVertexEntry entry = new SuperVertexReport.SuperVertexEntry(
                 vertexIdHex, typeName, candidate.getEdgeCount(), labelCounts);
             topList.add(entry);
         }
 
-        edgeLabelsPerVertex = null; // allow GC
+        superVertexLabels = null; // allow GC
 
         // Build report
         long durationMs = System.currentTimeMillis() - startMs;
@@ -364,7 +419,7 @@ public class JanusGraphAnalyzer implements AutoCloseable {
         SuperVertexReport report = new SuperVertexReport();
         report.setTotalSuperVertexCount(superVertexCount);
         report.setMaxEdgeCount(maxEdgeCount);
-        report.setTotalVerticesScanned(distinctVertices);
+        report.setTotalVerticesScanned(totalDistinctKeys);
         report.setScanDurationMs(durationMs);
         report.setVerticesOver1kEdges(over1k);
         report.setVerticesOver10kEdges(over10k);
@@ -378,8 +433,8 @@ public class JanusGraphAnalyzer implements AutoCloseable {
         report.setTopSuperVertices(topList);
 
         LOG.info("JanusGraph super vertex detection complete in {}ms: {} super vertices, " +
-                 "max edges (OUT+IN)={}, distinct vertices with edges={}",
-                 durationMs, superVertexCount, maxEdgeCount, distinctVertices);
+                 "max edges (OUT+IN)={}, distinct keys (total={}, with edges={})",
+                 durationMs, superVertexCount, maxEdgeCount, totalDistinctKeys, distinctVerticesWithEdges);
         LOG.info("Decoded totals: OUT-edges={}, IN-edges={}, properties={}, system={}, nullType={}, errors={}",
                  String.format("%,d", totalOutEdges),
                  String.format("%,d", totalInEdges),
@@ -387,6 +442,11 @@ public class JanusGraphAnalyzer implements AutoCloseable {
                  String.format("%,d", totalSystemRows),
                  String.format("%,d", totalNullType),
                  String.format("%,d", totalDecodeErrors));
+
+        // Store Cassandra-sourced type counts for the caller
+        this.lastEdgestoreTypeCounts = typeCountsFromEdgestore;
+        LOG.info("Extracted {} distinct __typeName values from edgestore property scan",
+                 typeCountsFromEdgestore.size());
 
         return report;
     }
@@ -439,6 +499,19 @@ public class JanusGraphAnalyzer implements AutoCloseable {
             LOG.trace("Failed to build entry", e);
             return null;
         }
+    }
+
+    /**
+     * Normalize JanusGraph property key names (same logic as JanusGraphScanner).
+     */
+    static String normalizePropertyName(String name) {
+        if (name == null) return null;
+        if (name.startsWith("__")) return name;
+        int dotIndex = name.indexOf('.');
+        if (dotIndex > 0 && dotIndex < name.length() - 1) {
+            name = name.substring(dotIndex + 1);
+        }
+        return name;
     }
 
     private boolean isSystemRelation(long typeId) {
@@ -534,6 +607,15 @@ public class JanusGraphAnalyzer implements AutoCloseable {
             .setSocketTimeout(120_000));
 
         return builder.build();
+    }
+
+    /**
+     * Get the vertex type counts extracted from the edgestore during the last
+     * {@link #detectSuperVertices()} call. These are Cassandra-sourced (ground truth)
+     * rather than ES-sourced. Returns an empty map if detectSuperVertices() hasn't run.
+     */
+    public Map<String, Long> getEdgestoreTypeCounts() {
+        return lastEdgestoreTypeCounts;
     }
 
     @Override

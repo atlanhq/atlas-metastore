@@ -57,9 +57,19 @@ public class SourceBaselineCollector {
      * Called from scanner threads — must be thread-safe.
      */
     public void recordVertex(DecodedVertex vertex) {
+        recordVertex(vertex, vertex.getOutEdges().size());
+    }
+
+    /**
+     * Record a decoded vertex with an explicit total edge count.
+     * Used by the scanner when edge chunking has trimmed the vertex's edge list —
+     * the caller passes the true total (first chunk + all EdgeChunks) so the
+     * baseline reflects all edges, not just the first chunk.
+     */
+    public void recordVertex(DecodedVertex vertex, int totalEdgeCount) {
         totalVertices.incrementAndGet();
 
-        int edgeCount = vertex.getOutEdges().size();
+        int edgeCount = totalEdgeCount;
         totalEdges.addAndGet(edgeCount);
 
         // Per-type count

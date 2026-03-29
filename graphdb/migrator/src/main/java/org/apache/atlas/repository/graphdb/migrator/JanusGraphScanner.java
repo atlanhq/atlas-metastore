@@ -366,16 +366,22 @@ public class JanusGraphScanner implements AutoCloseable {
             return null;
         }
 
-        if (baselineCollector != null) {
-            baselineCollector.recordVertex(vertex);
-        }
-
+        // Compute total edges BEFORE recording baseline — for super vertices,
+        // the vertex's edge list has been trimmed to the first chunk, so we must
+        // include EdgeChunk edges to get the true total.
         long totalEdges = vertex.getOutEdges().size();
         for (QueueItem item : items) {
-            consumer.accept(item);
             if (item instanceof EdgeChunk) {
                 totalEdges += ((EdgeChunk) item).getEdges().size();
             }
+        }
+
+        if (baselineCollector != null) {
+            baselineCollector.recordVertex(vertex, (int) totalEdges);
+        }
+
+        for (QueueItem item : items) {
+            consumer.accept(item);
         }
 
         return new long[]{1, totalEdges};

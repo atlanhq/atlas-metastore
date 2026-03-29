@@ -56,6 +56,8 @@ public class AnalysisReport {
     private long edgestoreSystemCount;    // system relation rows decoded from edgestore
     private long decodedOutEdges;         // OUT-edges decoded from edgestore
     private long decodedInEdges;          // IN-edges decoded from edgestore
+    private long esVertexCount;            // vertex count from ES _count (may differ from edgestore)
+    private long esEdgeCount;              // edge count from ES _count (may differ from decoded)
 
     /**
      * Populate this report from a SuperVertexReport and vertex type counts.
@@ -128,11 +130,13 @@ public class AnalysisReport {
         this.topSuperVertices       = svReport.getTopSuperVertices() != null
                                         ? svReport.getTopSuperVertices() : new ArrayList<>();
 
-        // Counts from ES
-        this.totalVertices = totalVerticesFromEs;
-        this.totalEdgesOut = totalEdgesFromEs > 0 ? totalEdgesFromEs : 0;
-        this.totalEdgesIn  = 0;
-        this.totalEdgesById = 0;
+        // Cassandra is source of truth: vertex count from edgestore distinct keys, edges from decoded scan
+        this.totalVertices = svReport.getTotalVerticesScanned();
+        this.esVertexCount = totalVerticesFromEs;
+        this.esEdgeCount = totalEdgesFromEs > 0 ? totalEdgesFromEs : 0;
+        this.totalEdgesOut  = decodedOutEdges > 0 ? decodedOutEdges : this.esEdgeCount;
+        this.totalEdgesIn   = decodedInEdges;
+        this.totalEdgesById = decodedOutEdges;  // JanusGraph: each edge has one ID, same as OUT count
         this.avgEdgesPerVertex = totalVertices > 0
             ? (double) totalEdgesOut / totalVertices : 0.0;
 
@@ -174,6 +178,8 @@ public class AnalysisReport {
 
         m.put("scan_duration_ms", scanDurationMs);
         if ("janus".equals(analyzeMode)) {
+            m.put("es_vertex_count", esVertexCount);
+            m.put("es_edge_count", esEdgeCount);
             m.put("edgestore_row_count", edgestoreRowCount);
             m.put("decoded_out_edges", decodedOutEdges);
             m.put("decoded_in_edges", decodedInEdges);
@@ -257,11 +263,16 @@ public class AnalysisReport {
         sb.append(THIN).append("\n\n");
         sb.append(String.format("  %-36s %,12d\n", "Total Vertices", totalVertices));
         if (isJanus) {
-            sb.append(String.format("  %-36s %,12d\n", "Total Edges (from ES)", totalEdgesOut));
+            sb.append(String.format("  %-36s %,12d\n", "Total Edges (OUT)", totalEdgesOut));
+            sb.append(String.format("  %-36s %,12d\n", "Total Edges (IN)", totalEdgesIn));
+            sb.append(String.format("  %-36s %,12d\n", "Total Edges (BY_ID)", totalEdgesById));
             sb.append(String.format("  %-36s %12.1f\n", "Avg Edges Per Vertex", avgEdgesPerVertex));
+            sb.append("\n");
+            sb.append(String.format("  %-36s %,12d\n", "ES Vertex Count (for comparison)", esVertexCount));
+            sb.append(String.format("  %-36s %,12d\n", "ES Edge Count (for comparison)", esEdgeCount));
             sb.append(String.format("  %-36s %,12d\n", "Edgestore Rows (total)", edgestoreRowCount));
-            sb.append(String.format("  %-36s %,12d\n", "  - OUT-edge rows", decodedOutEdges));
-            sb.append(String.format("  %-36s %,12d\n", "  - IN-edge rows", decodedInEdges));
+            sb.append(String.format("  %-36s %,12d\n", "  - OUT-edge rows (decoded)", decodedOutEdges));
+            sb.append(String.format("  %-36s %,12d\n", "  - IN-edge rows (decoded)", decodedInEdges));
             sb.append(String.format("  %-36s %,12d\n", "  - Property rows", edgestorePropertyCount));
             sb.append(String.format("  %-36s %,12d\n", "  - System rows", edgestoreSystemCount));
         } else {
