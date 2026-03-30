@@ -639,13 +639,13 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
 
     private void resolveIndexFieldName(AtlasGraphManagement managementSystem, AtlasAttribute attribute) {
         try {
-            if (attribute.getIndexFieldName() == null && isResolvableTypeCategory(attribute)) {
+            if (attribute.getIndexFieldName() == null && TypeCategory.PRIMITIVE.equals(attribute.getAttributeType().getTypeCategory())) {
                 AtlasStructType definedInType = attribute.getDefinedInType();
                 AtlasAttribute  baseInstance  = definedInType != null ? definedInType.getAttribute(attribute.getName()) : null;
 
                 if (baseInstance != null && baseInstance.getIndexFieldName() != null) {
                     attribute.setIndexFieldName(baseInstance.getIndexFieldName());
-                } else if (isIndexApplicable(getIndexableClass(attribute), toAtlasCardinality(attribute.getAttributeDef().getCardinality()))) {
+                } else if (isIndexApplicable(getPrimitiveClass(attribute.getTypeName()), toAtlasCardinality(attribute.getAttributeDef().getCardinality()))) {
                     AtlasPropertyKey propertyKey = managementSystem.getPropertyKey(attribute.getVertexPropertyName());
                     boolean isStringField = AtlasAttributeDef.IndexType.STRING.equals(attribute.getIndexType());
                     if (propertyKey != null) {
@@ -673,7 +673,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                                 + "attempting auto-repair for vertexPropertyName={}",
                                 attribute.getQualifiedName(), attribute.getVertexPropertyName());
                         try {
-                            Class primitiveClass = getIndexableClass(attribute);
+                            Class primitiveClass = getPrimitiveClass(attribute.getTypeName());
                             AtlasCardinality cardinality = toAtlasCardinality(attribute.getAttributeDef().getCardinality());
 
                             String indexFieldName = createVertexIndex(
