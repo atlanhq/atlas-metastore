@@ -290,9 +290,12 @@ public class StakeholderTitlePreProcessor implements PreProcessor {
             List<StakeholderInfo> emptyStakeholders,
             AtlasEntity titleEntity) throws AtlasBaseException {
 
+        String titleName = titleEntity.getAttribute(NAME) != null ?
+                (String) titleEntity.getAttribute(NAME) : "unknown";
+
         LOG.info("Auto-deleting {} empty Stakeholders for StakeholderTitle '{}' (guid: {}): [{}]",
                 emptyStakeholders.size(),
-                titleEntity.getAttribute(NAME),
+                titleName,
                 titleEntity.getGuid(),
                 emptyStakeholders.stream()
                         .map(s -> s.guid + "(" + s.qualifiedName + ")")
@@ -302,6 +305,11 @@ public class StakeholderTitlePreProcessor implements PreProcessor {
         boolean originalSkipAuthCheck = RequestContext.get().isSkipAuthorizationCheck();
 
         try {
+            // Authorization bypass is necessary here because:
+            // 1. User has already been authorized at domain-level for StakeholderTitle deletion
+            // 2. Auto-deletion of empty Stakeholders is a system-level cascade operation, not direct user action
+            // 3. This pattern follows existing code in QueryCollectionPreProcessor for policy cleanup
+            // The bypass is safely restored in the finally block regardless of success/failure
             RequestContext.get().setSkipAuthorizationCheck(true);
 
             // Bulk delete all empty stakeholders at once
@@ -319,7 +327,7 @@ public class StakeholderTitlePreProcessor implements PreProcessor {
                     AtlasErrorCode.INTERNAL_ERROR,
                     e,
                     format("Failed to auto-delete empty Stakeholders for StakeholderTitle '%s' (%s): %s",
-                            titleEntity.getAttribute(NAME), titleEntity.getGuid(), e.getMessage())
+                            titleName, titleEntity.getGuid(), e.getMessage())
             );
         } finally {
             RequestContext.get().setSkipAuthorizationCheck(originalSkipAuthCheck);
