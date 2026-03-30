@@ -340,9 +340,26 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
 
         Thread reindexThread = new Thread(() -> {
             try {
-                RepairIndex repairIndex = BeanUtil.getBean(RepairIndex.class);
+                // Wait for Spring context to be fully initialized.
+                // onLoadCompletion runs during startup before the context is ready,
+                // so BeanUtil.getBean() returns null if called immediately.
+                RepairIndex repairIndex = null;
+                for (int attempt = 1; attempt <= 12; attempt++) {
+                    try {
+                        Thread.sleep(10_000); // 10 seconds between attempts
+                        repairIndex = BeanUtil.getBean(RepairIndex.class);
+                        if (repairIndex != null) {
+                            LOG.info("INDEX AUTO-REPAIR: RepairIndex bean available after {}s", attempt * 10);
+                            break;
+                        }
+                    } catch (Exception e) {
+                        LOG.debug("INDEX AUTO-REPAIR: Waiting for Spring context... attempt {}/12", attempt);
+                    }
+                }
+
                 if (repairIndex == null) {
-                    LOG.error("INDEX AUTO-REPAIR: RepairIndex bean not available. Async reindex skipped.");
+                    LOG.error("INDEX AUTO-REPAIR: RepairIndex bean not available after 120s. Async reindex skipped. "
+                            + "Run manual repairIndex for types: {}", repairedTypeNames);
                     return;
                 }
 
