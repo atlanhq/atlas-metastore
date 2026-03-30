@@ -6,7 +6,7 @@ import java.util.*;
  * A vertex decoded from JanusGraph's binary edgestore format.
  * Contains the JG vertex ID, all properties, and all outgoing edges.
  */
-public class DecodedVertex {
+public class DecodedVertex implements QueueItem {
 
     private final long jgVertexId;
     private final Map<String, Object> properties;
@@ -18,6 +18,7 @@ public class DecodedVertex {
         this.outEdges   = new ArrayList<>();
     }
 
+    @Override
     public long getJgVertexId() {
         return jgVertexId;
     }
