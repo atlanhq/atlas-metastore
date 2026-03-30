@@ -29,7 +29,6 @@ on:
       - ms-664-fix-audit-search
       - hotfix-reindex-refresh
       - ms-864-keycloak-jwks-internal-url
-      - promethus_master_self_heal
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
