@@ -47,8 +47,6 @@ public class ClassificationPropagationTasks {
             String toEntityGuid = (String) parameters.get(PARAM_TO_ENTITY_GUID);
             String tagTypeName = getTaskDef().getTagTypeName();
             String parentEntityGuid = getTaskDef().getParentEntityGuid();
-            Boolean previousRestrictPropagationThroughLineage = (Boolean) parameters.get(PARAM_PREVIOUS_CLASSIFICATION_RESTRICT_PROPAGATE_THROUGH_LINEAGE);
-            Boolean previousRestrictPropagationThroughHierarchy = (Boolean) parameters.get(PARAM_PREVIOUS_CLASSIFICATION_RESTRICT_PROPAGATE_THROUGH_HIERARCHY);
 
             if (org.apache.atlas.service.config.DynamicConfigStore.isTagV2Enabled()) {
                 LOG.info("Using v2 tag flow (Cassandra) for Add propagation task");

@@ -6,6 +6,11 @@ import org.apache.atlas.repository.graphdb.AtlasGraphIndexClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.atlas.repository.graphdb.elasticsearch.AtlasElasticsearchDatabase;
+import org.elasticsearch.client.Request;
+import org.elasticsearch.client.Response;
+import org.elasticsearch.client.RestClient;
+
 import java.util.*;
 
 public class CassandraGraphIndexClient implements AtlasGraphIndexClient {
@@ -42,6 +47,13 @@ public class CassandraGraphIndexClient implements AtlasGraphIndexClient {
 
     @Override
     public boolean isHealthy() {
-        return true; // TODO: check ES cluster health
+        try {
+            RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
+            Response response = client.performRequest(new Request("GET", "/_cluster/health"));
+            return response.getStatusLine().getStatusCode() == 200;
+        } catch (Exception e) {
+            LOG.warn("ES health check failed: {}", e.getMessage());
+            return false;
+        }
     }
 }

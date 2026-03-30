@@ -143,7 +143,7 @@ public class RepairIndex {
                         guids.size(), vertexIds.size());
                 restoreByIdsCassandra(guids);
             } else {
-                LOG.warn("RepairIndex.reindexVerticesByIds (Cassandra): no GUIDs resolved from {} vertex IDs",
+                LOG.warn("RepairIndex.reindexVerticesByIds (Cassandra): no GUIDs resolved from {} vertex IDs ",
                         vertexIds.size());
             }
             return;

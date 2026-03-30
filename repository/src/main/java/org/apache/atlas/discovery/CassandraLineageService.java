@@ -420,7 +420,7 @@ public class CassandraLineageService {
         List<EdgeData> filtered = new ArrayList<>();
         for (EdgeData e : edges) {
             // For in-edges: process is outVertexId. For out-edges from process: check inVertexId's connected process
-            String processVid = processIsOut ? e.outVertexId : e.outVertexId;
+            String processVid = processIsOut ? e.outVertexId : e.inVertexId;
             VertexData pv = getVertexData(processVid);
             if (pv != null && ignoredProcesses.contains(pv.typeName)) continue;
             filtered.add(e);

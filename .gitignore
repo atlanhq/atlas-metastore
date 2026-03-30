@@ -88,3 +88,9 @@ distro/solr/*.tgz
 **.class
 */bin.vscode/
 **/bin
+*.local.md
+*.tgz
+
+# Migration config (local dev overrides — template lives in graphdb/migrator/)
+migration.properties
+validation-report-*.json
