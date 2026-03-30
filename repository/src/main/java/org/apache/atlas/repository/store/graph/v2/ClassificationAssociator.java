@@ -271,6 +271,14 @@ public class ClassificationAssociator {
                 }
             }
 
+            // Build a map of propagated classifications: typeName -> sourceEntityGuid
+            Map<String, String> propagatedClassificationSources = new HashMap<>();
+            for (AtlasClassification classification : Optional.ofNullable(entityToBeChanged.getClassifications()).orElse(Collections.emptyList())) {
+                if (!entityToBeChanged.getGuid().equals(classification.getEntityGuid())) {
+                    propagatedClassificationSources.put(classification.getTypeName(), classification.getEntityGuid());
+                }
+            }
+
             for (AtlasClassification classification : Optional.ofNullable(incomingEntityHeader.getRemoveClassifications()).orElse(Collections.emptyList())) {
                 if (entityToBeChanged.getGuid().equals(classification.getEntityGuid())) {
                     String key = generateClassificationComparisonKey(classification);
@@ -281,6 +289,12 @@ public class ClassificationAssociator {
                         //TODO -> remove after MS-402 fix
                         String playbookName = RequestContext.get().getPlaybookName();
                         if(StringUtils.isNotEmpty(playbookName)) {
+                            // For propagated tags, set entityGuid to the source entity so
+                            // deleteClassification routes to deletePropagatedClassification
+                            String sourceGuid = propagatedClassificationSources.get(classification.getTypeName());
+                            if (sourceGuid != null) {
+                                classification.setEntityGuid(sourceGuid);
+                            }
                             filteredRemoveClassifications.add(classification);
                         }
 
@@ -387,7 +401,13 @@ public class ClassificationAssociator {
 
             for (AtlasClassification c : list) {
                 try {
-                    entitiesStore.deleteClassification(entityGuid, c.getTypeName());
+                    String associatedEntityGuid = c.getEntityGuid();
+                    if (StringUtils.isNotEmpty(associatedEntityGuid) && !entityGuid.equals(associatedEntityGuid)) {
+                        // Propagated tag: route to deletePropagatedClassification via associatedEntityGuid
+                        entitiesStore.deleteClassification(entityGuid, c.getTypeName(), associatedEntityGuid);
+                    } else {
+                        entitiesStore.deleteClassification(entityGuid, c.getTypeName());
+                    }
                 } catch (AtlasBaseException e) {
                     LOG.error("Failed to remove classification association between {}, entity with guid {}", c.getTypeName(), c.getEntityGuid());
                     throw e;
