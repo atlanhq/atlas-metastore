@@ -634,13 +634,13 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
 
     private void resolveIndexFieldName(AtlasGraphManagement managementSystem, AtlasAttribute attribute) {
         try {
-            if (attribute.getIndexFieldName() == null && TypeCategory.PRIMITIVE.equals(attribute.getAttributeType().getTypeCategory())) {
+            if (attribute.getIndexFieldName() == null && isResolvableTypeCategory(attribute)) {
                 AtlasStructType definedInType = attribute.getDefinedInType();
                 AtlasAttribute  baseInstance  = definedInType != null ? definedInType.getAttribute(attribute.getName()) : null;
 
                 if (baseInstance != null && baseInstance.getIndexFieldName() != null) {
                     attribute.setIndexFieldName(baseInstance.getIndexFieldName());
-                } else if (isIndexApplicable(getPrimitiveClass(attribute.getTypeName()), toAtlasCardinality(attribute.getAttributeDef().getCardinality()))) {
+                } else if (isIndexApplicable(getIndexableClass(attribute), toAtlasCardinality(attribute.getAttributeDef().getCardinality()))) {
                     AtlasPropertyKey propertyKey = managementSystem.getPropertyKey(attribute.getVertexPropertyName());
                     boolean isStringField = AtlasAttributeDef.IndexType.STRING.equals(attribute.getIndexType());
                     if (propertyKey != null) {
@@ -668,7 +668,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                                 + "attempting auto-repair for vertexPropertyName={}",
                                 attribute.getQualifiedName(), attribute.getVertexPropertyName());
                         try {
-                            Class primitiveClass = getPrimitiveClass(attribute.getTypeName());
+                            Class primitiveClass = getIndexableClass(attribute);
                             AtlasCardinality cardinality = toAtlasCardinality(attribute.getAttributeDef().getCardinality());
 
                             String indexFieldName = createVertexIndex(
@@ -1239,6 +1239,56 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
 
             LOG.info("Created composite index for property {} of type {} and {}", propertyKey.getName(), propertyClass.getName(), systemPropertyKey);
         }
+    }
+
+    /**
+     * Checks if an attribute's type category is one that gets indexed in the mixed index.
+     * Covers primitives, enums, and arrays of primitives/enums — matching what
+     * createIndexForAttribute() creates vertex indices for.
+     */
+    private boolean isResolvableTypeCategory(AtlasAttribute attribute) {
+        TypeCategory typeCategory = attribute.getAttributeType().getTypeCategory();
+
+        if (TypeCategory.PRIMITIVE.equals(typeCategory) || TypeCategory.ENUM.equals(typeCategory)) {
+            return true;
+        }
+
+        if (TypeCategory.ARRAY.equals(typeCategory)) {
+            try {
+                AtlasType elementType = ((AtlasArrayType) attribute.getAttributeType()).getElementType();
+                TypeCategory elementCategory = elementType.getTypeCategory();
+                return TypeCategory.PRIMITIVE.equals(elementCategory) || TypeCategory.ENUM.equals(elementCategory);
+            } catch (Exception e) {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Returns the Java class to use for indexing this attribute.
+     * - Primitives: their primitive class (String.class, Long.class, etc.)
+     * - Enums: String.class (enums are indexed as strings)
+     * - Arrays of primitives: the element type's primitive class
+     * - Arrays of enums: String.class
+     */
+    private Class getIndexableClass(AtlasAttribute attribute) {
+        TypeCategory typeCategory = attribute.getAttributeType().getTypeCategory();
+
+        if (TypeCategory.ENUM.equals(typeCategory)) {
+            return String.class;
+        }
+
+        if (TypeCategory.ARRAY.equals(typeCategory)) {
+            AtlasType elementType = ((AtlasArrayType) attribute.getAttributeType()).getElementType();
+            if (TypeCategory.ENUM.equals(elementType.getTypeCategory())) {
+                return String.class;
+            }
+            return getPrimitiveClass(elementType.getTypeName());
+        }
+
+        return getPrimitiveClass(attribute.getTypeName());
     }
 
     private boolean isIndexApplicable(Class propertyClass, AtlasCardinality cardinality) {
