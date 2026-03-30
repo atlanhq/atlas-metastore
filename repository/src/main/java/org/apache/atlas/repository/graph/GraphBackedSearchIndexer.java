@@ -274,6 +274,9 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
      * Runs a read-only audit of the JanusGraph mixed index schema and publishes
      * Prometheus metrics reporting expected, indexed, and missing property keys.
      *
+     * Runs asynchronously as a daemon thread so it does not affect startup time
+     * or typedef change processing time.
+     *
      * Opens a separate management transaction (rolled back in finally — no mutations).
      * Uses a singleton IndexHealthMetricService so that Micrometer gauge references
      * remain stable across invocations.
@@ -286,24 +289,28 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
      * affect typedef loading or Atlas startup.
      */
     private void runIndexHealthAudit() {
-        AtlasGraphManagement auditMgmt = null;
-        try {
-            if (indexHealthMetricService == null) {
-                indexHealthMetricService = new IndexHealthMetricService(typeRegistry);
-            }
-            auditMgmt = provider.get().getManagementSystem();
-            indexHealthMetricService.auditIndexHealth(auditMgmt);
-        } catch (Exception e) {
-            LOG.warn("Index health audit failed — metrics will not be available", e);
-        } finally {
-            if (auditMgmt != null) {
-                try {
-                    auditMgmt.rollback();  // Read-only — always rollback
-                } catch (Exception e) {
-                    LOG.warn("Failed to rollback audit management transaction", e);
+        Thread auditThread = new Thread(() -> {
+            AtlasGraphManagement auditMgmt = null;
+            try {
+                if (indexHealthMetricService == null) {
+                    indexHealthMetricService = new IndexHealthMetricService(typeRegistry);
+                }
+                auditMgmt = provider.get().getManagementSystem();
+                indexHealthMetricService.auditIndexHealth(auditMgmt);
+            } catch (Exception e) {
+                LOG.warn("Index health audit failed — metrics will not be available", e);
+            } finally {
+                if (auditMgmt != null) {
+                    try {
+                        auditMgmt.rollback();  // Read-only — always rollback
+                    } catch (Exception e) {
+                        LOG.warn("Failed to rollback audit management transaction", e);
+                    }
                 }
             }
-        }
+        }, "index-health-audit");
+        auditThread.setDaemon(true);
+        auditThread.start();
     }
 
     /**
