@@ -31,7 +31,7 @@ global:
   # Graph backend mode: "janus" (default, JanusGraph) or "cassandra" (Cassandra+ES direct)
   graphBackend: "janus"
   # CassandraGraph ID strategy: "legacy" (UUID) or "deterministic" (SHA-256 of type+QN)
-  graphIdStrategy: "legacy"
+  graphIdStrategy: "deterministic"
   # CassandraGraph entity claim dedup via LWT (requires cassandra backend)
   graphClaimEnabled: false
     
