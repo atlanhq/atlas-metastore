@@ -20,6 +20,7 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/maven-v4_0_0.xsd">
 
+
     <parent>
         <groupId>org.apache</groupId>
         <artifactId>apache</artifactId>
@@ -703,7 +704,7 @@
         <elasticsearch.version>7.16.2</elasticsearch.version>
         <entity.repository.impl>org.apache.atlas.repository.audit.InMemoryEntityAuditRepository</entity.repository.impl>
         <enunciate-maven-plugin.version>2.17.0</enunciate-maven-plugin.version>
-        <failsafe.version>2.18.1</failsafe.version>
+        <failsafe.version>3.5.4</failsafe.version>
         <falcon.version>0.8</falcon.version>
         <fastutil.version>6.5.16</fastutil.version>
         <graph.index.backend>solr</graph.index.backend>
@@ -781,7 +782,7 @@
         <zookeeper.version>3.5.5</zookeeper.version>
         <redis.client.version>3.20.1</redis.client.version>
         <micrometer.version>1.11.1</micrometer.version>
-        <netty4.version>4.1.61.Final</netty4.version>
+        <netty4.version>4.1.125.Final</netty4.version>
         <junit.jupiter.version>5.9.3</junit.jupiter.version>
     </properties>
 
@@ -1096,13 +1097,19 @@
                 <version>${zookeeper.version}</version>
             </dependency>
 
-            <!-- <dependency>
+            <dependency>
                 <groupId>io.netty</groupId>
                 <artifactId>netty-bom</artifactId>
-                <version>4.1.61.Final</version>
+                <version>${netty4.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
-            </dependency> -->
+            </dependency>
+
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-codec-http2</artifactId>
+                <version>${netty4.version}</version>
+            </dependency>
 
             <dependency>
                 <groupId>org.springframework</groupId>
@@ -1847,6 +1854,7 @@
                         <atlas.log.file>application.log</atlas.log.file>
                         <logback.configurationFile>atlas-logback.xml</logback.configurationFile>
                         <embedded.solr.directory>${project.basedir}/target</embedded.solr.directory>
+                        <api.version>1.44</api.version>
                     </systemPropertyVariables>
                     <redirectTestOutputToFile>true</redirectTestOutputToFile>
                     <argLine>-Djava.awt.headless=true -Dproject.version=${project.version}

@@ -108,6 +108,9 @@ public class RequestContext {
     private boolean     includeClassifications = true;
     private boolean     includeRelationshipAttributes;
 
+    private String     lineageInputLabel = "";
+    private String     lineageOutputLabel = "";
+
     private boolean     includeClassificationNames = false;
     private boolean     skipProcessEdgeRestoration = false;
     private String      currentTypePatchAction = "";
@@ -182,6 +185,8 @@ public class RequestContext {
         this.onlyBAUpdateEntities.clear();
         this.relationAttrsForSearch.clear();
         this.includeRelationshipAttributes = false;
+        this.lineageInputLabel = "";
+        this.lineageOutputLabel = "";
         this.queuedTasks.clear();
         this.newElementsCreatedMap.clear();
         this.removedElementsMap.clear();
@@ -255,6 +260,22 @@ public class RequestContext {
 
     public void setIncludeRelationshipAttributes(boolean includeRelationshipAttributes) {
         this.includeRelationshipAttributes = includeRelationshipAttributes;
+    }
+
+    public String getLineageInputLabel() {
+        return lineageInputLabel;
+    }
+
+    public void setLineageInputLabel(String lineageInputLabel) {
+        this.lineageInputLabel = lineageInputLabel;
+    }
+
+    public String getLineageOutputLabel() {
+        return lineageOutputLabel;
+    }
+
+    public void setLineageOutputLabel(String lineageOutputLabel) {
+        this.lineageOutputLabel = lineageOutputLabel;
     }
 
     public Map<String, List<Object>> getRemovedElementsMap() {
@@ -413,6 +434,18 @@ public class RequestContext {
             updatedEntities.put(entity.getGuid(), entity);
         }
     }
+
+    /**
+     * Records an entity update triggered by a relationship change (e.g., sub-asset added/removed).
+     * Bypasses the entitiesToSkipUpdate check because relationship mutations are a material change
+     * even when the entity's own attributes are unchanged.
+     */
+    public void recordEntityUpdateForRelationshipChange(AtlasEntityHeader entity) {
+        if (entity != null && entity.getGuid() != null) {
+            updatedEntities.put(entity.getGuid(), entity);
+        }
+    }
+
     public void recordEntityToSkip(String guid) {
         if(! StringUtils.isEmpty(guid)) {
             entitiesToSkipUpdate.add(guid);

@@ -463,7 +463,7 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
     }
 
     private AtlasEdge createRelationship(AtlasVertex end1Vertex, AtlasVertex end2Vertex, AtlasRelationship relationship, boolean existingRelationshipCheck, boolean skipAuth) throws AtlasBaseException {
-        AtlasEdge ret;
+        AtlasEdge ret = null;
 
         try {
             validateRelationship(end1Vertex, end2Vertex, relationship);
@@ -481,7 +481,6 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
 
             AtlasRelationshipType relationType = typeRegistry.getRelationshipTypeByName(relationship.getTypeName());
 
-
             AtlasEntityHeader end1Entity = entityRetriever.toAtlasEntityHeaderWithClassifications(end1Vertex);
             AtlasEntityHeader end2Entity = entityRetriever.toAtlasEntityHeaderWithClassifications(end2Vertex);
 
@@ -489,7 +488,6 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
                 AtlasAuthorizationUtils.verifyAccess(new AtlasRelationshipAccessRequest(typeRegistry, AtlasPrivilege.RELATIONSHIP_ADD,
                         relationship.getTypeName(), end1Entity, end2Entity));
             }
-
 
             if (existingRelationshipCheck) {
                 ret = graphHelper.getOrCreateEdge(end1Vertex, end2Vertex, relationshipLabel);

@@ -17,6 +17,7 @@
  */
 package org.apache.atlas.web.security;
 
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.web.filters.*;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang.StringUtils;
@@ -38,6 +39,7 @@ import org.keycloak.adapters.springsecurity.management.HttpSessionManager;
 import org.keycloak.representations.adapters.config.AdapterConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.lang.reflect.Field;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -50,10 +52,12 @@ import org.springframework.security.config.annotation.web.builders.WebSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.security.core.session.SessionRegistryImpl;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.authentication.DelegatingAuthenticationEntryPoint;
 import org.springframework.security.web.authentication.logout.LogoutFilter;
+import org.springframework.security.web.authentication.session.NullAuthenticatedSessionStrategy;
 import org.springframework.security.web.authentication.session.RegisterSessionAuthenticationStrategy;
 import org.springframework.security.web.authentication.session.SessionAuthenticationStrategy;
 import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
@@ -71,7 +75,6 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 import static org.apache.atlas.AtlasConstants.ATLAS_MIGRATION_MODE_FILENAME;
 import static org.apache.atlas.web.filters.HeadersUtil.SERVER_KEY;
@@ -106,6 +109,7 @@ public class AtlasSecurityConfig extends WebSecurityConfigurerAdapter {
     private KeycloakConfigResolver keycloakConfigResolver;
 
     private final boolean keycloakEnabled;
+    private final boolean isKeycloakStatelessMode;
 
     @Inject
     public AtlasSecurityConfig(AtlasKnoxSSOAuthenticationFilter ssoAuthenticationFilter,
@@ -132,6 +136,10 @@ public class AtlasSecurityConfig extends WebSecurityConfigurerAdapter {
         this.activeServerFilter = activeServerFilter;
 
         this.keycloakEnabled = configuration.getBoolean(AtlasAuthenticationProvider.KEYCLOAK_AUTH_METHOD, false);
+        boolean keycloakStatelessEnabled = configuration.getBoolean(
+                AtlasConfiguration.KEYCLOAK_STATELESS_SESSION_ENABLED.getPropertyName(),
+                AtlasConfiguration.KEYCLOAK_STATELESS_SESSION_ENABLED.getBoolean());
+        this.isKeycloakStatelessMode = keycloakEnabled && keycloakStatelessEnabled;
     }
 
     public AuthenticationEntryPoint getAuthenticationEntryPoint() throws Exception {
@@ -199,6 +207,8 @@ public class AtlasSecurityConfig extends WebSecurityConfigurerAdapter {
     }
 
     protected void configure(HttpSecurity httpSecurity) throws Exception {
+        SessionCreationPolicy sessionCreationPolicy = isKeycloakStatelessMode ? SessionCreationPolicy.STATELESS : SessionCreationPolicy.IF_REQUIRED;
+
         //@formatter:off
         httpSecurity
                 .authorizeRequests().anyRequest().authenticated()
@@ -212,25 +222,35 @@ public class AtlasSecurityConfig extends WebSecurityConfigurerAdapter {
                     .csrf().disable()
                     .sessionManagement()
                     .enableSessionUrlRewriting(false)
-                    .sessionCreationPolicy(SessionCreationPolicy.ALWAYS)
+                    .sessionCreationPolicy(sessionCreationPolicy);
+
+        if (!isKeycloakStatelessMode) {
+            httpSecurity
+                    .sessionManagement()
                     .sessionFixation()
-                    .newSession()
-                .and()
+                    .newSession();
+        }
+
+        httpSecurity
                 .httpBasic()
-                .authenticationEntryPoint(getDelegatingAuthenticationEntryPoint())
-                .and()
+                .authenticationEntryPoint(getDelegatingAuthenticationEntryPoint());
+
+        if (!isKeycloakStatelessMode) {
+            httpSecurity
                     .formLogin()
-                        .loginPage("/login.jsp")
-                        .loginProcessingUrl("/j_spring_security_check")
-                        .successHandler(successHandler)
-                        .failureHandler(failureHandler)
-                        .usernameParameter("j_username")
-                        .passwordParameter("j_password")
-                .and()
-                    .logout()
-                        .logoutSuccessUrl("/login.jsp")
-                        .deleteCookies("ATLASSESSIONID")
-                        .logoutUrl("/logout.html");
+                    .loginPage("/login.jsp")
+                    .loginProcessingUrl("/j_spring_security_check")
+                    .successHandler(successHandler)
+                    .failureHandler(failureHandler)
+                    .usernameParameter("j_username")
+                    .passwordParameter("j_password");
+        }
+
+        httpSecurity
+                .logout()
+                .logoutSuccessUrl("/login.jsp")
+                .deleteCookies("ATLASSESSIONID")
+                .logoutUrl("/logout.html");
 
         //@formatter:on
 
@@ -265,7 +285,15 @@ public class AtlasSecurityConfig extends WebSecurityConfigurerAdapter {
 
     @Bean
     protected SessionAuthenticationStrategy sessionAuthenticationStrategy() {
-        return new RegisterSessionAuthenticationStrategy(new SessionRegistryImpl());
+        if (isKeycloakStatelessMode) {
+            return new NullAuthenticatedSessionStrategy();
+        }
+        return new RegisterSessionAuthenticationStrategy(sessionRegistry());
+    }
+
+    @Bean
+    protected SessionRegistry sessionRegistry() {
+        return new SessionRegistryImpl();
     }
 
     @Bean
@@ -295,7 +323,76 @@ public class AtlasSecurityConfig extends WebSecurityConfigurerAdapter {
         }
 
         factoryBean.afterPropertiesSet();
-        return factoryBean.getObject();
+        AdapterDeploymentContext context = factoryBean.getObject();
+        forceInternalKeycloakUrls(context);
+        return context;
+    }
+
+    /**
+     * Forces the Keycloak adapter to use internal K8s service URLs for JWKS and realm info,
+     * instead of the external domain URLs returned by Keycloak's OIDC discovery endpoint.
+     *
+     * Background: Keycloak's OIDC discovery document returns endpoint URLs using the configured
+     * Frontend URL (e.g., https://tenant.atlan.com/auth/...). When the Keycloak adapter fetches
+     * JWKS public keys, it uses these external URLs, causing outbound HTTPS calls from Atlas pods
+     * to the internet-facing load balancer and back (NAT hairpin). If the external endpoint is
+     * temporarily unreachable (TLS cert rotation, ALB failover), the outbound call blocks the
+     * Jetty thread for ~14 minutes (OS TCP timeout default), causing thread pool starvation.
+     *
+     * This method rewrites the JWKS and realm info URLs to use the internal Keycloak service URL
+     * (from auth-server-url in keycloak.json), eliminating the external dependency entirely.
+     *
+     * See: RCA southstatebank outage 2026-03-19 (MS-864)
+     */
+    private void forceInternalKeycloakUrls(AdapterDeploymentContext context) {
+        try {
+            // Extract the KeycloakDeployment from the context
+            Field deploymentField = AdapterDeploymentContext.class.getDeclaredField("deployment");
+            deploymentField.setAccessible(true);
+            KeycloakDeployment deployment = (KeycloakDeployment) deploymentField.get(context);
+
+            if (deployment == null) {
+                LOG.warn("KeycloakDeployment is null, skipping internal URL override");
+                return;
+            }
+
+            String authServerBaseUrl = deployment.getAuthServerBaseUrl();
+            if (StringUtils.isEmpty(authServerBaseUrl)) {
+                LOG.warn("auth-server-url is empty, skipping internal URL override");
+                return;
+            }
+
+            String realm = deployment.getRealm();
+            String internalRealmUrl = authServerBaseUrl + "/realms/" + realm;
+            String internalJwksUrl = internalRealmUrl + "/protocol/openid-connect/certs";
+
+            // Trigger resolveUrls() so the fields are populated (they're lazily initialized)
+            // This makes the first OIDC discovery call at startup time, not at first request
+            try {
+                deployment.getJwksUrl();
+            } catch (Exception e) {
+                LOG.warn("Initial JWKS URL resolution failed (external endpoint may be unreachable), " +
+                         "will set internal URLs directly: {}", e.getMessage());
+            }
+
+            String currentJwksUrl = null;
+            // Override the resolved URLs with internal equivalents
+            Field realmInfoUrlField = KeycloakDeployment.class.getDeclaredField("realmInfoUrl");
+            realmInfoUrlField.setAccessible(true);
+            realmInfoUrlField.set(deployment, internalRealmUrl);
+
+            Field jwksUrlField = KeycloakDeployment.class.getDeclaredField("jwksUrl");
+            jwksUrlField.setAccessible(true);
+            currentJwksUrl = (String) jwksUrlField.get(deployment);
+            jwksUrlField.set(deployment, internalJwksUrl);
+
+            LOG.info("Keycloak JWKS URL overridden: {} -> {}", currentJwksUrl, internalJwksUrl);
+            LOG.info("Keycloak realm info URL overridden to: {}", internalRealmUrl);
+
+        } catch (NoSuchFieldException | IllegalAccessException e) {
+            LOG.error("Failed to override Keycloak URLs to internal service. " +
+                      "JWKS calls may still go through the external domain. Error: {}", e.getMessage());
+        }
     }
 
     @Bean
@@ -329,3 +426,4 @@ public class AtlasSecurityConfig extends WebSecurityConfigurerAdapter {
         return filter;
     }
 }
+

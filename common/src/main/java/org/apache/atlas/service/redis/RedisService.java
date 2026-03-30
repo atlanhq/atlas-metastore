@@ -12,6 +12,8 @@ public interface RedisService {
 
   void releaseDistributedLock(String key);
 
+  void forceReleaseDistributedLock(String key);
+
   void releaseDistributedLockV2(Lock lock, String key);
 
   String getValue(String key);
@@ -25,5 +27,9 @@ public interface RedisService {
   void removeValue(String key);
 
   Logger getLogger();
+
+  default boolean isAvailable() {
+    return false;
+  }
 
 }
