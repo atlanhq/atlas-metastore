@@ -119,7 +119,7 @@ jobs:
         run: |
           mvn test -pl webapp \
             -Datlas.graphdb.backend=${{ matrix.backend }} \
-            -Dtest="EntityCrudIntegrationTest,GlossaryIntegrationTest,GlossaryExtendedIntegrationTest,SQLAssetHierarchyIntegrationTest,ClassificationIntegrationTest,LineageIntegrationTest,SearchIntegrationTest,RelationshipIntegrationTest,BusinessMetadataIntegrationTest,DataMeshIntegrationTest,PersonaPurposeIntegrationTest,PurposeDiscoveryIntegrationTest,LabelIntegrationTest,TypeDefIntegrationTest,AsyncIngestionIntegrationTest" \
+            -Dtest="EntityCrudIntegrationTest,GlossaryIntegrationTest,GlossaryExtendedIntegrationTest,SQLAssetHierarchyIntegrationTest,ClassificationIntegrationTest,LineageIntegrationTest,SearchIntegrationTest,RelationshipIntegrationTest,BusinessMetadataIntegrationTest,DataMeshIntegrationTest,PersonaPurposeIntegrationTest,PurposeDiscoveryIntegrationTest,LabelIntegrationTest,TypeDefIntegrationTest,AsyncIngestionIntegrationTest,SubAssetAddParentUpdateNotificationTest" \
             -Drat.skip=true \
             -Dsurefire.failIfNoSpecifiedTests=false \
             2>&1 | tee test-output.log

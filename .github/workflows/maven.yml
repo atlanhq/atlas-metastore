@@ -34,11 +34,10 @@ on:
       - hotfix-reindex-refresh
       - migrator-validations
       - nb-switchable-graph-provider
-      - ms-664-fix-audit-search
-      - hotfix-reindex-refresh
       - migrator-validations-customization
       - migration_edge_chunking
       - merge-migrator-into-sgp
+      - ms-864-keycloak-jwks-internal-url
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
