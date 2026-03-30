@@ -54,6 +54,7 @@ public class MigratorMain {
             System.err.println("       java -jar atlas-graphdb-migrator.jar <config-file> --es-only");
             System.err.println("       java -jar atlas-graphdb-migrator.jar <config-file> --fresh (clears state, starts over)");
             System.err.println("       java -jar atlas-graphdb-migrator.jar <config-file> --analyze (read-only graph analysis)");
+            System.err.println("       java -jar atlas-graphdb-migrator.jar <config-file> --convert-ids <hex1> <hex2> ...");
             System.exit(1);
         }
 
@@ -62,8 +63,44 @@ public class MigratorMain {
         boolean esOnly = args.length > 1 && "--es-only".equals(args[1]);
         boolean fresh = args.length > 1 && "--fresh".equals(args[1]);
         boolean analyze = args.length > 1 && "--analyze".equals(args[1]);
+        boolean convertIds = args.length > 2 && "--convert-ids".equals(args[1]);
 
         MigratorConfig config = new MigratorConfig(configPath);
+
+        // --convert-ids: convert hex partition keys (from old Mixpanel reports) to JG vertex IDs
+        if (convertIds) {
+            java.util.List<String> hexKeys = new java.util.ArrayList<>();
+            for (int i = 2; i < args.length; i++) {
+                hexKeys.add(args[i]);
+            }
+            if (hexKeys.isEmpty()) {
+                System.err.println("Usage: --convert-ids <hex1> <hex2> ...");
+                System.err.println("Example: --convert-ids c800000008127480 f8000000088e2b00");
+                System.exit(1);
+            }
+
+            LOG.info("=== Convert Hex Partition Keys → JanusGraph Vertex IDs ===");
+            CqlSession sourceSession = buildCqlSession(
+                config.getSourceCassandraHostname(), config.getSourceCassandraPort(),
+                config.getSourceCassandraDatacenter(), config.getSourceCassandraKeyspace(),
+                config.getSourceCassandraUsername(), config.getSourceCassandraPassword(),
+                false, Duration.ofSeconds(30), config.getSourceConsistencyLevel());
+
+            try (JanusGraphAnalyzer analyzer = new JanusGraphAnalyzer(sourceSession, config)) {
+                Map<String, String> results = analyzer.convertHexKeysToVertexIds(hexKeys);
+                LOG.info("Conversion results ({} keys):", results.size());
+                System.out.println();
+                System.out.println("hex_partition_key          -> janus_vertex_id");
+                System.out.println("-------------------------------------------");
+                for (Map.Entry<String, String> entry : results.entrySet()) {
+                    System.out.printf("%-26s -> %s%n", entry.getKey(), entry.getValue());
+                }
+                System.out.println();
+            } finally {
+                sourceSession.close();
+            }
+            return;
+        }
 
         // Auto-size thread pools based on estate size (skip for analyze/validate modes)
         if (!analyze && !validateOnly) {

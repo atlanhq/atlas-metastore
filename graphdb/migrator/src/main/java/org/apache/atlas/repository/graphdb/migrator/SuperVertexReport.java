@@ -110,19 +110,27 @@ public class SuperVertexReport {
      */
     public static class SuperVertexEntry implements Comparable<SuperVertexEntry> {
         private final String vertexId;
+        private final String guid;
         private final String typeName;
         private final long   edgeCount;
         private final Map<String, Long> edgeLabelCounts;
 
         public SuperVertexEntry(String vertexId, String typeName, long edgeCount,
                                 Map<String, Long> edgeLabelCounts) {
+            this(vertexId, null, typeName, edgeCount, edgeLabelCounts);
+        }
+
+        public SuperVertexEntry(String vertexId, String guid, String typeName, long edgeCount,
+                                Map<String, Long> edgeLabelCounts) {
             this.vertexId       = vertexId;
+            this.guid           = guid;
             this.typeName       = typeName;
             this.edgeCount      = edgeCount;
             this.edgeLabelCounts = edgeLabelCounts != null ? edgeLabelCounts : new LinkedHashMap<>();
         }
 
         public String getVertexId()      { return vertexId; }
+        public String getGuid()          { return guid; }
         public String getTypeName()      { return typeName; }
         public long   getEdgeCount()     { return edgeCount; }
         public Map<String, Long> getEdgeLabelCounts() { return edgeLabelCounts; }
@@ -135,6 +143,9 @@ public class SuperVertexReport {
         public Map<String, Object> toMap() {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("vertex_id", vertexId);
+            if (guid != null) {
+                m.put("guid", guid);
+            }
             m.put("type_name", typeName);
             m.put("edge_count", edgeCount);
             m.put("edge_label_counts", edgeLabelCounts);

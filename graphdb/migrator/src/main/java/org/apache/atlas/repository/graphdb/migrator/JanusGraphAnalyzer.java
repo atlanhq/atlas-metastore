@@ -248,7 +248,8 @@ public class JanusGraphAnalyzer implements AutoCloseable {
         int superVertexCount = 0;
         long over1k = 0, over10k = 0, over100k = 0, over1m = 0;
         PriorityQueue<SuperVertexCandidate> topQueue = new PriorityQueue<>(topN + 1);
-        Map<String, Map<String, Long>> superVertexLabels = new HashMap<>();
+        // Map from vertexId (long) to edge label counts — only kept for top-N super vertices
+        Map<Long, Map<String, Long>> superVertexLabels = new HashMap<>();
 
         for (int rangeIdx = 0; rangeIdx < tokenRanges.size(); rangeIdx++) {
             long[] range = tokenRanges.get(rangeIdx);
@@ -261,7 +262,10 @@ public class JanusGraphAnalyzer implements AutoCloseable {
                 .setPageSize(5000));
 
             ByteBuffer previousKey = null;
+            long currentVertexId = -1;
             long currentVertexEdgeCount = 0;
+            String currentTypeName = null;
+            String currentGuid = null;
             Map<String, Long> currentVertexLabels = new LinkedHashMap<>();
 
             for (Row row : rs) {
@@ -284,21 +288,33 @@ public class JanusGraphAnalyzer implements AutoCloseable {
 
                         if (currentVertexEdgeCount >= threshold) {
                             superVertexCount++;
-                            String keyHex = bytesToHex(previousKey);
-                            topQueue.add(new SuperVertexCandidate(previousKey, currentVertexEdgeCount));
+                            topQueue.add(new SuperVertexCandidate(
+                                currentVertexId, currentVertexEdgeCount,
+                                currentTypeName, currentGuid));
                             if (!currentVertexLabels.isEmpty()) {
-                                superVertexLabels.put(keyHex, new LinkedHashMap<>(currentVertexLabels));
+                                superVertexLabels.put(currentVertexId, new LinkedHashMap<>(currentVertexLabels));
                             }
                             if (topQueue.size() > topN) {
                                 SuperVertexCandidate evicted = topQueue.poll();
-                                superVertexLabels.remove(bytesToHex(evicted.getKey()));
+                                superVertexLabels.remove(evicted.getVertexId());
                             }
                         }
                     }
                     currentVertexEdgeCount = 0;
+                    currentTypeName = null;
+                    currentGuid = null;
                     currentVertexLabels.clear();
                     totalDistinctKeys++;
                     previousKey = keyBuf;
+                    // Extract real JanusGraph vertex ID from partition key
+                    try {
+                        currentVertexId = extractVertexId(keyBuf);
+                    } catch (Exception e) {
+                        currentVertexId = -1;
+                        if (totalDecodeErrors <= 5) {
+                            LOG.debug("Could not extract vertex ID from partition key: {}", e.getMessage());
+                        }
+                    }
                 }
 
                 try {
@@ -324,19 +340,39 @@ public class JanusGraphAnalyzer implements AutoCloseable {
                     if (type.isPropertyKey()) {
                         totalProperties++;
                         String propName = type.name();
-                        if ("__typeName".equals(propName) || "__typeName".equals(normalizePropertyName(propName))) {
+                        String normalizedName = normalizePropertyName(propName);
+
+                        // Capture __typeName for this vertex (both aggregate and per-vertex)
+                        if ("__typeName".equals(propName) || "__typeName".equals(normalizedName)) {
                             try {
                                 Object value = rel.getValue();
                                 if (value != null) {
                                     String typeName = value.toString();
                                     if (!typeName.isEmpty()) {
                                         typeCountsFromEdgestore.merge(typeName, 1L, Long::sum);
+                                        currentTypeName = typeName;
                                     }
                                 }
                             } catch (Exception e) {
                                 // Skip — property value extraction is best-effort
                             }
                         }
+
+                        // Capture __guid for this vertex
+                        if ("__guid".equals(propName) || "__guid".equals(normalizedName)) {
+                            try {
+                                Object value = rel.getValue();
+                                if (value != null) {
+                                    String guid = value.toString();
+                                    if (!guid.isEmpty()) {
+                                        currentGuid = guid;
+                                    }
+                                }
+                            } catch (Exception e) {
+                                // Skip — property value extraction is best-effort
+                            }
+                        }
+
                         continue;
                     }
 
@@ -379,14 +415,15 @@ public class JanusGraphAnalyzer implements AutoCloseable {
 
                 if (currentVertexEdgeCount >= threshold) {
                     superVertexCount++;
-                    String keyHex = bytesToHex(previousKey);
-                    topQueue.add(new SuperVertexCandidate(previousKey, currentVertexEdgeCount));
+                    topQueue.add(new SuperVertexCandidate(
+                        currentVertexId, currentVertexEdgeCount,
+                        currentTypeName, currentGuid));
                     if (!currentVertexLabels.isEmpty()) {
-                        superVertexLabels.put(keyHex, new LinkedHashMap<>(currentVertexLabels));
+                        superVertexLabels.put(currentVertexId, new LinkedHashMap<>(currentVertexLabels));
                     }
                     if (topQueue.size() > topN) {
                         SuperVertexCandidate evicted = topQueue.poll();
-                        superVertexLabels.remove(bytesToHex(evicted.getKey()));
+                        superVertexLabels.remove(evicted.getVertexId());
                     }
                 }
             }
@@ -404,23 +441,28 @@ public class JanusGraphAnalyzer implements AutoCloseable {
                  String.format("%,d", totalNullType),
                  String.format("%,d", totalDecodeErrors));
 
-        // Resolve type names and edge labels for super vertices via ES
-        LOG.info("Resolving type names for {} super vertices via ES...", topQueue.size());
+        // Build super vertex entries from candidates (type names already captured from edgestore)
+        LOG.info("Building super vertex report for {} candidates (type names from edgestore scan)...", topQueue.size());
 
         List<SuperVertexReport.SuperVertexEntry> topList = new ArrayList<>();
         List<SuperVertexCandidate> candidates = new ArrayList<>(topQueue);
         candidates.sort(Comparator.comparingLong(SuperVertexCandidate::getEdgeCount).reversed());
 
         for (SuperVertexCandidate candidate : candidates) {
-            String vertexIdHex = bytesToHex(candidate.getKey());
-            String typeName = lookupTypeNameFromEs(vertexIdHex);
+            String vertexIdStr = String.valueOf(candidate.getVertexId());
+            String typeName = candidate.getTypeName() != null ? candidate.getTypeName() : "unknown";
+            String guid = candidate.getGuid();
 
             Map<String, Long> labelCounts = superVertexLabels.getOrDefault(
-                vertexIdHex, new LinkedHashMap<>());
+                candidate.getVertexId(), new LinkedHashMap<>());
 
             SuperVertexReport.SuperVertexEntry entry = new SuperVertexReport.SuperVertexEntry(
-                vertexIdHex, typeName, candidate.getEdgeCount(), labelCounts);
+                vertexIdStr, guid, typeName, candidate.getEdgeCount(), labelCounts);
             topList.add(entry);
+
+            LOG.info("  Super vertex: jgId={}, guid={}, type={}, edges={}",
+                     vertexIdStr, guid != null ? guid : "N/A", typeName,
+                     String.format("%,d", candidate.getEdgeCount()));
         }
 
         superVertexLabels = null; // allow GC
@@ -463,30 +505,9 @@ public class JanusGraphAnalyzer implements AutoCloseable {
         return report;
     }
 
-    /**
-     * Look up a vertex's __typeName from the JanusGraph ES index.
-     * JanusGraph stores vertex IDs as hex strings in ES document IDs.
-     */
-    @SuppressWarnings("unchecked")
-    private String lookupTypeNameFromEs(String vertexIdHex) {
-        try {
-            String index = config.getSourceEsIndex();
-            Request request = new Request("GET",
-                "/" + index + "/_doc/" + vertexIdHex + "?_source=__typeName");
-
-            Response response = esClient.performRequest(request);
-            String body = EntityUtils.toString(response.getEntity());
-            Map<String, Object> result = MAPPER.readValue(body, Map.class);
-
-            Map<String, Object> source = (Map<String, Object>) result.get("_source");
-            if (source != null && source.get("__typeName") != null) {
-                return source.get("__typeName").toString();
-            }
-        } catch (Exception e) {
-            LOG.debug("Could not look up type for vertex {}: {}", vertexIdHex, e.getMessage());
-        }
-        return "unknown";
-    }
+    // lookupTypeNameFromEs() removed — type names are now captured directly from
+    // the edgestore scan (via __typeName property decoding), which is both correct
+    // and faster than N individual ES lookups.
 
     // ---- JanusGraph entry decode helpers (reused from JanusGraphScanner) ----
 
@@ -652,7 +673,44 @@ public class JanusGraphAnalyzer implements AutoCloseable {
     }
 
     /**
-     * Convert a ByteBuffer to a hex string (JanusGraph vertex ID representation).
+     * Convert hex partition keys (from old Mixpanel reports) to real JanusGraph vertex IDs.
+     * Useful for looking up vertices that were reported before the ID fix.
+     *
+     * @param hexKeys list of hex strings like "c800000008127480"
+     * @return map of hexKey → JanusGraph vertex ID (long as string)
+     */
+    public Map<String, String> convertHexKeysToVertexIds(List<String> hexKeys) {
+        Map<String, String> results = new LinkedHashMap<>();
+        for (String hexKey : hexKeys) {
+            try {
+                byte[] bytes = hexToBytes(hexKey);
+                StaticBuffer key = new StaticArrayBuffer(bytes);
+                Object id = idManager.getKeyID(key);
+                long vertexId = ((Number) id).longValue();
+                results.put(hexKey, String.valueOf(vertexId));
+            } catch (Exception e) {
+                LOG.warn("Could not convert hex key '{}': {}", hexKey, e.getMessage());
+                results.put(hexKey, "ERROR: " + e.getMessage());
+            }
+        }
+        return results;
+    }
+
+    /**
+     * Convert a hex string to byte array.
+     */
+    private static byte[] hexToBytes(String hex) {
+        int len = hex.length();
+        byte[] bytes = new byte[len / 2];
+        for (int i = 0; i < len; i += 2) {
+            bytes[i / 2] = (byte) ((Character.digit(hex.charAt(i), 16) << 4)
+                                  + Character.digit(hex.charAt(i + 1), 16));
+        }
+        return bytes;
+    }
+
+    /**
+     * Convert a ByteBuffer to a hex string (Cassandra partition key representation).
      */
     private static String bytesToHex(ByteBuffer buffer) {
         byte[] bytes = new byte[buffer.remaining()];
@@ -687,19 +745,38 @@ public class JanusGraphAnalyzer implements AutoCloseable {
     }
 
     /**
-     * Candidate super vertex from edgestore scan (before ES type name lookup).
+     * Extract the actual JanusGraph vertex ID from the Cassandra edgestore partition key.
+     * The partition key is a StaticBuffer encoding — IDManager.getKeyID() decodes it
+     * to the real vertex ID (a long). This matches JanusGraphScanner.extractVertexId().
+     */
+    private long extractVertexId(ByteBuffer keyBuf) {
+        byte[] bytes = new byte[keyBuf.remaining()];
+        keyBuf.duplicate().get(bytes);
+        StaticBuffer key = new StaticArrayBuffer(bytes);
+        Object id = idManager.getKeyID(key);
+        return ((Number) id).longValue();
+    }
+
+    /**
+     * Candidate super vertex from edgestore scan with captured metadata.
      */
     private static class SuperVertexCandidate implements Comparable<SuperVertexCandidate> {
-        private final ByteBuffer key;
+        private final long vertexId;
         private final long edgeCount;
+        private final String typeName;
+        private final String guid;
 
-        SuperVertexCandidate(ByteBuffer key, long edgeCount) {
-            this.key = key;
+        SuperVertexCandidate(long vertexId, long edgeCount, String typeName, String guid) {
+            this.vertexId  = vertexId;
             this.edgeCount = edgeCount;
+            this.typeName  = typeName;
+            this.guid      = guid;
         }
 
-        ByteBuffer getKey()     { return key; }
+        long getVertexId()      { return vertexId; }
         long getEdgeCount()     { return edgeCount; }
+        String getTypeName()    { return typeName; }
+        String getGuid()        { return guid; }
 
         @Override
         public int compareTo(SuperVertexCandidate other) {
