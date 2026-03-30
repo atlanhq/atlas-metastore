@@ -271,24 +271,28 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
      * affect typedef loading or Atlas startup.
      */
     private void runIndexHealthAudit() {
-        AtlasGraphManagement auditMgmt = null;
-        try {
-            if (indexHealthMetricService == null) {
-                indexHealthMetricService = new IndexHealthMetricService(typeRegistry);
-            }
-            auditMgmt = provider.get().getManagementSystem();
-            indexHealthMetricService.auditIndexHealth(auditMgmt);
-        } catch (Exception e) {
-            LOG.warn("Index health audit failed — metrics will not be available", e);
-        } finally {
-            if (auditMgmt != null) {
-                try {
-                    auditMgmt.rollback();  // Read-only — always rollback
-                } catch (Exception e) {
-                    LOG.warn("Failed to rollback audit management transaction", e);
+        Thread auditThread = new Thread(() -> {
+            AtlasGraphManagement auditMgmt = null;
+            try {
+                if (indexHealthMetricService == null) {
+                    indexHealthMetricService = new IndexHealthMetricService(typeRegistry);
+                }
+                auditMgmt = provider.get().getManagementSystem();
+                indexHealthMetricService.auditIndexHealth(auditMgmt);
+            } catch (Exception e) {
+                LOG.warn("Index health audit failed — metrics will not be available", e);
+            } finally {
+                if (auditMgmt != null) {
+                    try {
+                        auditMgmt.rollback();  // Read-only — always rollback
+                    } catch (Exception e) {
+                        LOG.warn("Failed to rollback audit management transaction", e);
+                    }
                 }
             }
-        }
+        }, "index-health-audit");
+        auditThread.setDaemon(true);
+        auditThread.start();
     }
 
     public Set<String> getVertexIndexKeys() {

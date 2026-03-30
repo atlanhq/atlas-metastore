@@ -180,9 +180,13 @@ public class IndexHealthMetricService {
 
         // Get the mixed index field keys — this is what determines if an attribute is searchable in ES
         AtlasGraphIndex vertexIndex = managementSystem.getGraphIndex("vertex_index");
-        Set<AtlasPropertyKey> indexedFieldKeys = (vertexIndex != null)
-                ? new HashSet<>(vertexIndex.getFieldKeys())
-                : Collections.emptySet();
+        if (vertexIndex == null) {
+            LOG.error("INDEX HEALTH AUDIT: vertex_index not found in graph management. "
+                    + "Mixed index may not be initialized. Reporting UNHEALTHY.");
+            healthStatus.set(0);
+            return;
+        }
+        Set<AtlasPropertyKey> indexedFieldKeys = new HashSet<>(vertexIndex.getFieldKeys());
 
         // Audit entity types
         for (AtlasEntityType entityType : typeRegistry.getAllEntityDefs()
@@ -297,14 +301,14 @@ public class IndexHealthMetricService {
     private boolean isIndexedInMixedIndex(AtlasAttribute attribute) {
         TypeCategory typeCategory = attribute.getAttributeType().getTypeCategory();
 
-        if (typeCategory == TypeCategory.PRIMITIVE || typeCategory == TypeCategory.ENUM) {
+        if (TypeCategory.PRIMITIVE.equals(typeCategory) || TypeCategory.ENUM.equals(typeCategory)) {
             return true;
         }
 
-        if (typeCategory == TypeCategory.ARRAY) {
+        if (TypeCategory.ARRAY.equals(typeCategory)) {
             AtlasType elementType = ((org.apache.atlas.type.AtlasArrayType) attribute.getAttributeType()).getElementType();
             TypeCategory elementCategory = elementType.getTypeCategory();
-            return elementCategory == TypeCategory.PRIMITIVE || elementCategory == TypeCategory.ENUM;
+            return TypeCategory.PRIMITIVE.equals(elementCategory) || TypeCategory.ENUM.equals(elementCategory);
         }
 
         return false;
