@@ -64,4 +64,4 @@ nav:
   - API Reference:
     - Entity Bulk (Create/Update): api/entity-bulk.md
     - IndexSearch (Search): api/search-indexsearch.md
-    - Repair Endpoints: repair-endpoints.md
+    - Repair Endpoints: api/repair-endpoints.md
