@@ -38,6 +38,7 @@ on:
       - hotfix-reindex-refresh
       - migrator-validations-customization
       - migration_edge_chunking
+      - merge-migrator-into-sgp
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'

@@ -70,7 +70,7 @@ public class AuxiliaryKeyspaceMigrator {
         if (config.isMigrateConfigStore()) {
             migrateConfigStore();
         } else {
-            LOG.warn("config_store migration is disabled (migration.migrate.config.store=false). " +
+            LOG.warn("config_store migration is  disabled (migration.migrate.config.store=false). " +
                      "Source and target are different clusters — config_store data will NOT be available on target.");
         }
 
