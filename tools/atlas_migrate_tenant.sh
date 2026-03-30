@@ -1909,39 +1909,9 @@ else:
         fi
     fi
 
-    # 7.9 Write test (create + delete)
-    if [ "$have_token" = "true" ]; then
-        log "Running write test (create + delete entity)..."
-        local create_resp
-        create_resp=$(kexec_quiet curl -s -X POST \
-            -H "Authorization: Bearer ${KEYCLOAK_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d '{"entity":{"typeName":"Table","attributes":{"qualifiedName":"zg-migration-write-test-delete-me","name":"zg-migration-write-test-delete-me"}}}' \
-            "localhost:21000/api/atlas/v2/entity" 2>/dev/null || echo "")
-
-        local test_guid
-        test_guid=$(echo "$create_resp" | py_extract "
-import sys, json
-d = json.load(sys.stdin)
-guids = d.get('guidAssignments', d.get('mutatedEntities', {}).get('CREATE', []))
-if isinstance(guids, dict) and guids:
-    print(list(guids.values())[0])
-elif isinstance(guids, list) and guids:
-    print(guids[0].get('guid', ''))
-else:
-    print('')
-")
-
-        if [ -n "$test_guid" ]; then
-            # Delete the test entity
-            kexec_quiet curl -s -X DELETE \
-                -H "Authorization: Bearer ${KEYCLOAK_TOKEN}" \
-                "localhost:21000/api/atlas/v2/entity/guid/${test_guid}?type=HARD" 2>/dev/null || true
-            verify_check "Write test" "true" "Created and deleted entity $test_guid"
-        else
-            verify_check "Write test" "false" "Could not create test entity (resp: ${create_resp:0:200})"
-        fi
-    fi
+    # 7.9 Write test — SKIPPED (this script runs against production data;
+    #      creating/deleting entities is not safe for production verification)
+    verify_check "Write test" "true" "Skipped (read-only verification for production safety)"
 
     # 7.10 Lineage test
     if [ "$have_token" = "true" ]; then
