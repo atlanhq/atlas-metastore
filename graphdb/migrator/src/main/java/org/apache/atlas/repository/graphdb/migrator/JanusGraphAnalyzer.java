@@ -32,6 +32,8 @@ import org.janusgraph.graphdb.relations.RelationCache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.datastax.oss.driver.api.core.cql.PreparedStatement;
+
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -212,22 +214,25 @@ public class JanusGraphAnalyzer implements AutoCloseable {
         int threshold = config.getSuperVertexThreshold();
         int topN = config.getSuperVertexTopN();
 
-        LOG.info("Scanning {}.{} with EdgeSerializer decode for super vertices (threshold={})...",
-                 keyspace, table, threshold);
+        // Split into token ranges to avoid Cassandra driver's ~2B row iteration limit.
+        // A single SELECT * scan silently stops at Integer.MAX_VALUE rows.
+        // Token-range scanning ensures each sub-scan stays well under that limit.
+        int numRanges = 16; // 16 ranges → each handles ~500M rows for a 8B-row edgestore
+        List<long[]> tokenRanges = splitTokenRanges(numRanges);
+        String edgestoreTable = keyspace + "." + table;
 
-        // Scan edgestore reading key + column1 + value for decoding
-        SimpleStatement stmt = SimpleStatement.builder(
-                "SELECT key, column1, value FROM " + keyspace + "." + table)
-            .setPageSize(5000)
-            .build();
+        PreparedStatement scanStmt = sourceSession.prepare(
+            "SELECT key, column1, value FROM " + edgestoreTable +
+            " WHERE token(key) >= ? AND token(key) <= ?");
+
+        LOG.info("Scanning {}.{} with EdgeSerializer decode for super vertices (threshold={}, tokenRanges={})...",
+                 keyspace, table, threshold, numRanges);
 
         // STREAMING approach: edgestore rows are grouped by partition key, so we track
         // per-vertex edge counts using a running counter that resets on key transition.
         // This uses O(topN) memory instead of O(numVertices) — safe for 100M+ vertices.
-        // Only super vertex candidates (topN by edge count) are kept in memory.
         Map<String, Long> typeCountsFromEdgestore = new HashMap<>();
 
-        ResultSet rs = sourceSession.execute(stmt);
         long totalRows = 0;
         long totalOutEdges = 0;
         long totalInEdges = 0;
@@ -237,150 +242,157 @@ public class JanusGraphAnalyzer implements AutoCloseable {
         long totalDecodeErrors = 0;
         long totalDistinctKeys = 0;
         long distinctVerticesWithEdges = 0;
-        ByteBuffer previousKey = null;
-
-        // Streaming per-vertex counters (reset on each key transition)
-        long currentVertexEdgeCount = 0;
-        Map<String, Long> currentVertexLabels = new LinkedHashMap<>();
 
         // Distribution buckets and super vertex tracking (computed inline)
         long maxEdgeCount = 0;
         int superVertexCount = 0;
         long over1k = 0, over10k = 0, over100k = 0, over1m = 0;
         PriorityQueue<SuperVertexCandidate> topQueue = new PriorityQueue<>(topN + 1);
-        // Map from super vertex candidate key (hex) to its edge labels
         Map<String, Map<String, Long>> superVertexLabels = new HashMap<>();
 
-        for (Row row : rs) {
-            totalRows++;
+        for (int rangeIdx = 0; rangeIdx < tokenRanges.size(); rangeIdx++) {
+            long[] range = tokenRanges.get(rangeIdx);
+            long rangeRows = 0;
 
-            ByteBuffer keyBuf = row.getByteBuffer("key");
-            ByteBuffer colBuf = row.getByteBuffer("column1");
-            ByteBuffer valBuf = row.getByteBuffer("value");
+            LOG.info("Scanning token range {}/{}: [{}, {}]", rangeIdx + 1, numRanges,
+                     range[0], range[1]);
 
-            // Detect key transition — flush the previous vertex's edge count
-            if (previousKey == null || !previousKey.equals(keyBuf)) {
-                if (previousKey != null && currentVertexEdgeCount > 0) {
-                    // Flush previous vertex
-                    distinctVerticesWithEdges++;
-                    if (currentVertexEdgeCount > maxEdgeCount) maxEdgeCount = currentVertexEdgeCount;
-                    if (currentVertexEdgeCount > 1000)      over1k++;
-                    if (currentVertexEdgeCount > 10_000)    over10k++;
-                    if (currentVertexEdgeCount > 100_000)   over100k++;
-                    if (currentVertexEdgeCount > 1_000_000) over1m++;
+            ResultSet rs = sourceSession.execute(scanStmt.bind(range[0], range[1])
+                .setPageSize(5000));
 
-                    if (currentVertexEdgeCount >= threshold) {
-                        superVertexCount++;
-                        String keyHex = bytesToHex(previousKey);
-                        topQueue.add(new SuperVertexCandidate(previousKey, currentVertexEdgeCount));
-                        if (!currentVertexLabels.isEmpty()) {
-                            superVertexLabels.put(keyHex, new LinkedHashMap<>(currentVertexLabels));
-                        }
-                        if (topQueue.size() > topN) {
-                            SuperVertexCandidate evicted = topQueue.poll();
-                            superVertexLabels.remove(bytesToHex(evicted.getKey()));
-                        }
-                    }
-                }
-                // Reset for new vertex
-                currentVertexEdgeCount = 0;
-                currentVertexLabels.clear();
-                totalDistinctKeys++;
-                previousKey = keyBuf;
-            }
+            ByteBuffer previousKey = null;
+            long currentVertexEdgeCount = 0;
+            Map<String, Long> currentVertexLabels = new LinkedHashMap<>();
 
-            try {
-                Entry entry = buildEntry(colBuf, valBuf);
-                if (entry == null) {
-                    totalDecodeErrors++;
-                    continue;
-                }
+            for (Row row : rs) {
+                totalRows++;
+                rangeRows++;
 
-                RelationCache rel = edgeSerializer.parseRelation(entry, true, cachedTypeInspector);
+                ByteBuffer keyBuf = row.getByteBuffer("key");
+                ByteBuffer colBuf = row.getByteBuffer("column1");
+                ByteBuffer valBuf = row.getByteBuffer("value");
 
-                // Skip JanusGraph internal system relations (VertexExists, SchemaName, etc.)
-                if (isSystemRelation(rel.typeId)) {
-                    totalSystemRows++;
-                    continue;
-                }
+                // Detect key transition — flush the previous vertex's edge count
+                if (previousKey == null || !previousKey.equals(keyBuf)) {
+                    if (previousKey != null && currentVertexEdgeCount > 0) {
+                        distinctVerticesWithEdges++;
+                        if (currentVertexEdgeCount > maxEdgeCount) maxEdgeCount = currentVertexEdgeCount;
+                        if (currentVertexEdgeCount > 1000)      over1k++;
+                        if (currentVertexEdgeCount > 10_000)    over10k++;
+                        if (currentVertexEdgeCount > 100_000)   over100k++;
+                        if (currentVertexEdgeCount > 1_000_000) over1m++;
 
-                RelationType type = cachedTypeInspector.getExistingRelationType(rel.typeId);
-                if (type == null) {
-                    totalNullType++;
-                    continue;
-                }
-
-                if (type.isPropertyKey()) {
-                    totalProperties++;
-                    // Extract __typeName from property rows for Cassandra-sourced type counts.
-                    String propName = type.name();
-                    if ("__typeName".equals(propName) || "__typeName".equals(normalizePropertyName(propName))) {
-                        try {
-                            Object value = rel.getValue();
-                            if (value != null) {
-                                String typeName = value.toString();
-                                if (!typeName.isEmpty()) {
-                                    typeCountsFromEdgestore.merge(typeName, 1L, Long::sum);
-                                }
+                        if (currentVertexEdgeCount >= threshold) {
+                            superVertexCount++;
+                            String keyHex = bytesToHex(previousKey);
+                            topQueue.add(new SuperVertexCandidate(previousKey, currentVertexEdgeCount));
+                            if (!currentVertexLabels.isEmpty()) {
+                                superVertexLabels.put(keyHex, new LinkedHashMap<>(currentVertexLabels));
                             }
-                        } catch (Exception e) {
-                            // Skip — property value extraction is best-effort
+                            if (topQueue.size() > topN) {
+                                SuperVertexCandidate evicted = topQueue.poll();
+                                superVertexLabels.remove(bytesToHex(evicted.getKey()));
+                            }
                         }
                     }
-                    continue;
+                    currentVertexEdgeCount = 0;
+                    currentVertexLabels.clear();
+                    totalDistinctKeys++;
+                    previousKey = keyBuf;
                 }
 
-                // It's an edge — count both directions
-                if (rel.direction == Direction.OUT) {
-                    totalOutEdges++;
-                } else {
-                    totalInEdges++;
-                }
-                currentVertexEdgeCount++;
+                try {
+                    Entry entry = buildEntry(colBuf, valBuf);
+                    if (entry == null) {
+                        totalDecodeErrors++;
+                        continue;
+                    }
 
-                // Track edge label for potential super vertices (start early)
-                if (currentVertexEdgeCount >= threshold / 2) {
-                    currentVertexLabels.merge(type.name(), 1L, Long::sum);
+                    RelationCache rel = edgeSerializer.parseRelation(entry, true, cachedTypeInspector);
+
+                    if (isSystemRelation(rel.typeId)) {
+                        totalSystemRows++;
+                        continue;
+                    }
+
+                    RelationType type = cachedTypeInspector.getExistingRelationType(rel.typeId);
+                    if (type == null) {
+                        totalNullType++;
+                        continue;
+                    }
+
+                    if (type.isPropertyKey()) {
+                        totalProperties++;
+                        String propName = type.name();
+                        if ("__typeName".equals(propName) || "__typeName".equals(normalizePropertyName(propName))) {
+                            try {
+                                Object value = rel.getValue();
+                                if (value != null) {
+                                    String typeName = value.toString();
+                                    if (!typeName.isEmpty()) {
+                                        typeCountsFromEdgestore.merge(typeName, 1L, Long::sum);
+                                    }
+                                }
+                            } catch (Exception e) {
+                                // Skip — property value extraction is best-effort
+                            }
+                        }
+                        continue;
+                    }
+
+                    if (rel.direction == Direction.OUT) {
+                        totalOutEdges++;
+                    } else {
+                        totalInEdges++;
+                    }
+                    currentVertexEdgeCount++;
+
+                    if (currentVertexEdgeCount >= threshold / 2) {
+                        currentVertexLabels.merge(type.name(), 1L, Long::sum);
+                    }
+                } catch (Exception e) {
+                    totalDecodeErrors++;
+                    if (totalDecodeErrors <= 20) {
+                        LOG.debug("Decode error at row {}: {}", totalRows, e.getMessage());
+                    }
                 }
-            } catch (Exception e) {
-                totalDecodeErrors++;
-                if (totalDecodeErrors <= 20) {
-                    LOG.debug("Decode error at row {}: {}", totalRows, e.getMessage());
+
+                if (totalRows % 5_000_000 == 0) {
+                    LOG.info("  ... scanned {} edgestore rows (range {}/{}): outEdges={}, inEdges={}, properties={}, system={}, errors={}",
+                             String.format("%,d", totalRows), rangeIdx + 1, numRanges,
+                             String.format("%,d", totalOutEdges),
+                             String.format("%,d", totalInEdges),
+                             String.format("%,d", totalProperties),
+                             String.format("%,d", totalSystemRows),
+                             String.format("%,d", totalDecodeErrors));
                 }
             }
 
-            if (totalRows % 5_000_000 == 0) {
-                LOG.info("  ... scanned {} edgestore rows: outEdges={}, inEdges={}, properties={}, system={}, errors={}",
-                         String.format("%,d", totalRows),
-                         String.format("%,d", totalOutEdges),
-                         String.format("%,d", totalInEdges),
-                         String.format("%,d", totalProperties),
-                         String.format("%,d", totalSystemRows),
-                         String.format("%,d", totalDecodeErrors));
-            }
-        }
+            // Flush last vertex of this range
+            if (previousKey != null && currentVertexEdgeCount > 0) {
+                distinctVerticesWithEdges++;
+                if (currentVertexEdgeCount > maxEdgeCount) maxEdgeCount = currentVertexEdgeCount;
+                if (currentVertexEdgeCount > 1000)      over1k++;
+                if (currentVertexEdgeCount > 10_000)    over10k++;
+                if (currentVertexEdgeCount > 100_000)   over100k++;
+                if (currentVertexEdgeCount > 1_000_000) over1m++;
 
-        // Flush the last vertex
-        if (previousKey != null && currentVertexEdgeCount > 0) {
-            distinctVerticesWithEdges++;
-            if (currentVertexEdgeCount > maxEdgeCount) maxEdgeCount = currentVertexEdgeCount;
-            if (currentVertexEdgeCount > 1000)      over1k++;
-            if (currentVertexEdgeCount > 10_000)    over10k++;
-            if (currentVertexEdgeCount > 100_000)   over100k++;
-            if (currentVertexEdgeCount > 1_000_000) over1m++;
-
-            if (currentVertexEdgeCount >= threshold) {
-                superVertexCount++;
-                String keyHex = bytesToHex(previousKey);
-                topQueue.add(new SuperVertexCandidate(previousKey, currentVertexEdgeCount));
-                if (!currentVertexLabels.isEmpty()) {
-                    superVertexLabels.put(keyHex, new LinkedHashMap<>(currentVertexLabels));
-                }
-                if (topQueue.size() > topN) {
-                    SuperVertexCandidate evicted = topQueue.poll();
-                    superVertexLabels.remove(bytesToHex(evicted.getKey()));
+                if (currentVertexEdgeCount >= threshold) {
+                    superVertexCount++;
+                    String keyHex = bytesToHex(previousKey);
+                    topQueue.add(new SuperVertexCandidate(previousKey, currentVertexEdgeCount));
+                    if (!currentVertexLabels.isEmpty()) {
+                        superVertexLabels.put(keyHex, new LinkedHashMap<>(currentVertexLabels));
+                    }
+                    if (topQueue.size() > topN) {
+                        SuperVertexCandidate evicted = topQueue.poll();
+                        superVertexLabels.remove(bytesToHex(evicted.getKey()));
+                    }
                 }
             }
+
+            LOG.info("Token range {}/{} complete: {} rows", rangeIdx + 1, numRanges,
+                     String.format("%,d", rangeRows));
         }
 
         LOG.info("Edgestore scan complete: {} total rows (outEdges={}, inEdges={}, properties={}, system={}, nullType={}, errors={})",
@@ -650,6 +662,28 @@ public class JanusGraphAnalyzer implements AutoCloseable {
             sb.append(String.format("%02x", b & 0xff));
         }
         return sb.toString();
+    }
+
+    /**
+     * Split the full Cassandra token range (Long.MIN_VALUE .. Long.MAX_VALUE) into
+     * numRanges contiguous sub-ranges. Each sub-range can be scanned independently
+     * using WHERE token(key) >= ? AND token(key) <= ?, avoiding the Cassandra driver's
+     * ~2 billion row iteration limit on a single ResultSet.
+     */
+    private List<long[]> splitTokenRanges(int numRanges) {
+        BigInteger minToken = BigInteger.valueOf(Long.MIN_VALUE);
+        BigInteger maxToken = BigInteger.valueOf(Long.MAX_VALUE);
+        BigInteger totalRange = maxToken.subtract(minToken).add(BigInteger.ONE);
+        BigInteger rangeSize = totalRange.divide(BigInteger.valueOf(numRanges));
+
+        List<long[]> ranges = new ArrayList<>(numRanges);
+        BigInteger current = minToken;
+        for (int i = 0; i < numRanges; i++) {
+            BigInteger end = (i == numRanges - 1) ? maxToken : current.add(rangeSize).subtract(BigInteger.ONE);
+            ranges.add(new long[]{current.longValueExact(), end.longValueExact()});
+            current = end.add(BigInteger.ONE);
+        }
+        return ranges;
     }
 
     /**
