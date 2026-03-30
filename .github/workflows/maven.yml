@@ -29,9 +29,15 @@ on:
       - ring-*
       - ms-635
       - sgp-consistency-improvements
-      - lg-async-producer
-      - ms-428-delete-by-conn
+      - switchable_graph_bug_fixes
       - ms-664-fix-audit-search
+      - hotfix-reindex-refresh
+      - migrator-validations
+      - nb-switchable-graph-provider
+      - migrator-validations-customization
+      - migration_edge_chunking
+      - merge-migrator-into-sgp
+      - ms-864-keycloak-jwks-internal-url
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
@@ -44,6 +50,7 @@ on:
 permissions:
   id-token: write
   contents: write
+  security-events: write
 
 jobs:
   # Detect what changed to optimize workflow execution
@@ -898,6 +905,7 @@ jobs:
       - name: Create GitHub Release
         continue-on-error: true
         if: steps.can_publish.outputs.should_publish == 'true'
+        continue-on-error: true
         uses: ncipollo/release-action@v1
         with:
           tag: helm-${{ matrix.chart }}-v${{ steps.version.outputs.chart }}
