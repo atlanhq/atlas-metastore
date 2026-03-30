@@ -71,6 +71,7 @@ import org.apache.atlas.repository.store.graph.v2.preprocessor.accesscontrol.Sta
 import org.apache.atlas.repository.store.graph.v2.preprocessor.contract.ContractPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.datamesh.DataDomainPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.datamesh.DataProductPreProcessor;
+import org.apache.atlas.repository.store.graph.v2.preprocessor.datamesh.DatasetPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.datamesh.StakeholderTitlePreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.glossary.CategoryPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.glossary.GlossaryPreProcessor;
@@ -2431,6 +2432,10 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 preProcessors.add(new DataProductPreProcessor(typeRegistry, entityRetriever, graph, this));
                 break;
 
+            case DATASET_ENTITY_TYPE:
+                preProcessors.add(new DatasetPreProcessor(typeRegistry, entityRetriever, graph));
+                break;
+
             case QUERY_ENTITY_TYPE:
                 preProcessors.add(new QueryPreProcessor(typeRegistry, entityRetriever));
                 break;
@@ -2476,7 +2481,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 break;
 
             case STAKEHOLDER_TITLE_ENTITY_TYPE:
-                preProcessors.add(new StakeholderTitlePreProcessor(graph, typeRegistry, entityRetriever));
+                preProcessors.add(new StakeholderTitlePreProcessor(graph, typeRegistry, entityRetriever, this));
                 break;
         }
 

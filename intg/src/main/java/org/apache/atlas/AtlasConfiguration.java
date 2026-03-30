@@ -42,6 +42,7 @@ public enum AtlasConfiguration {
     NOTIFICATION_ENTITIES_TOPIC_NAME("atlas.notification.entities.topic.name", "ATLAS_ENTITIES"),
     NOTIFICATION_RELATIONSHIPS_TOPIC_NAME("atlas.notification.relationships.topic.name", "ATLAS_RELATIONSHIPS"),
     NOTIFICATION_ATLAS_DISTRIBUTED_TASKS_TOPIC_NAME("atlas.notification.distributed.tasks.topic.name", "ATLAS_DISTRIBUTED_TASKS"),
+    NOTIFICATION_TASK_EVENTS_TOPIC_NAME("atlas.notification.task.events.topic.name", "ATLAS_TASK_EVENTS"),
 
     NOTIFICATION_HOOK_CONSUMER_TOPIC_NAMES("atlas.notification.hook.consumer.topic.names", "ATLAS_HOOK"), //  a comma separated list of topic names
     NOTIFICATION_ENTITIES_CONSUMER_TOPIC_NAMES("atlas.notification.entities.consumer.topic.names", "ATLAS_ENTITIES"), //  a comma separated list of topic names
@@ -193,7 +194,7 @@ public enum AtlasConfiguration {
     MIN_EDGES_SUPER_VERTEX("atlas.jg.super.vertex.min.edge.count", 100),
 
     // Task resource management configuration
-    TASK_MEMORY_THRESHOLD_PERCENT("atlas.tasks.memory.threshold.percent", 75),
+    TASK_MEMORY_THRESHOLD_PERCENT("atlas.tasks.memory.threshold.percent", 85),
     TASK_HIGH_MEMORY_PAUSE_MS("atlas.tasks.high.memory.pause.ms", 2000),
     TASK_MAX_RETRY_ATTEMPTS("atlas.tasks.max.retry.attempts", 3),
 
