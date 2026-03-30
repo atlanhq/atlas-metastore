@@ -108,7 +108,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
     private boolean     recomputeIndexedKeys = true;
     private Set<String> vertexIndexKeys      = new HashSet<>();
     private IndexHealthMetricService indexHealthMetricService;
-    private final List<AtlasAttribute> repairedAttributes = new ArrayList<>();
+    private final java.util.concurrent.ConcurrentLinkedQueue<AtlasAttribute> repairedAttributes = new java.util.concurrent.ConcurrentLinkedQueue<>();
 
     public static boolean isValidSearchWeight(int searchWeight) {
         if (searchWeight != -1 ) {
