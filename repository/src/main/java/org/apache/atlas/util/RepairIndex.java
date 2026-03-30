@@ -47,10 +47,13 @@ import javax.annotation.PostConstruct;
 import javax.inject.Inject;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.atlas.repository.graphdb.AtlasGraphQuery;
+import static org.apache.atlas.repository.Constants.ENTITY_TYPE_PROPERTY_KEY;
 import static org.apache.atlas.repository.Constants.GUID_PROPERTY_KEY;
 import static org.apache.atlas.type.Constants.INDEX_NAME_EDGE_INDEX;
 import static org.apache.atlas.type.Constants.INDEX_NAME_VERTEX_INDEX;
@@ -65,10 +68,12 @@ public class RepairIndex {
     private AtlanElasticSearchIndex searchIndex;
     private EntityMutationService entityMutationService;
     private GraphHelper graphHelper;
+    private AtlasGraph atlasGraph;
 
     @Inject
     public RepairIndex(EntityMutationService entityMutationService, AtlasGraph atlasGraph) {
         this.entityMutationService = entityMutationService;
+        this.atlasGraph = atlasGraph;
         graphHelper = new GraphHelper(atlasGraph);
     }
 
@@ -195,6 +200,82 @@ public class RepairIndex {
                 tx.rollback();
             }
         }
+    }
+
+    /**
+     * Reindex all entities of a given type name. Queries JanusGraph (Cassandra) for all
+     * vertices of the type, collects GUIDs in batches, and reindexes them.
+     *
+     * Used by the self-healing mechanism in GraphBackedSearchIndexer to backfill existing
+     * entities after a missing property key is auto-repaired.
+     *
+     * @param typeName       the entity type name (e.g., "DataDomain", "Table")
+     * @param batchSize      number of GUIDs to process per batch (to avoid OOM)
+     * @param delayBetweenBatchesMs  delay between batches in milliseconds (to avoid overloading ES)
+     */
+    public void restoreByTypeName(String typeName, int batchSize, long delayBetweenBatchesMs) throws Exception {
+        if (typeName == null || typeName.isEmpty()) {
+            LOG.warn("restoreByTypeName: typeName is null or empty, skipping");
+            return;
+        }
+
+        LOG.info("restoreByTypeName: Starting reindex for type={}, batchSize={}", typeName, batchSize);
+
+        if (this.atlasGraph == null) {
+            LOG.warn("restoreByTypeName: graph is null, skipping");
+            return;
+        }
+
+        // Query all vertices of this type from JanusGraph (Cassandra composite index — fast)
+        AtlasGraphQuery query = this.atlasGraph.query()
+                .has(ENTITY_TYPE_PROPERTY_KEY, AtlasGraphQuery.ComparisionOperator.EQUAL, typeName);
+
+        Iterator<AtlasVertex> vertices = query.vertices().iterator();
+        if (vertices == null || !vertices.hasNext()) {
+            LOG.info("restoreByTypeName: No vertices found for type={}", typeName);
+            return;
+        }
+
+        Set<String> batchGuids = new HashSet<>();
+        int totalProcessed = 0;
+
+        while (vertices.hasNext()) {
+            AtlasVertex vertex = vertices.next();
+            String guid = vertex.getProperty(GUID_PROPERTY_KEY, String.class);
+            if (guid != null) {
+                batchGuids.add(guid);
+            }
+
+            if (batchGuids.size() >= batchSize) {
+                LOG.info("restoreByTypeName: Processing batch of {} GUIDs for type={} (total so far: {})",
+                        batchGuids.size(), typeName, totalProcessed);
+                try {
+                    restoreByIds(batchGuids);
+                    totalProcessed += batchGuids.size();
+                } catch (Exception e) {
+                    LOG.error("restoreByTypeName: Failed to restore batch for type={}, processed so far: {}",
+                            typeName, totalProcessed, e);
+                    // Continue with next batch — don't fail the entire reindex
+                }
+                batchGuids.clear();
+
+                if (delayBetweenBatchesMs > 0) {
+                    Thread.sleep(delayBetweenBatchesMs);
+                }
+            }
+        }
+
+        // Process remaining
+        if (!batchGuids.isEmpty()) {
+            try {
+                restoreByIds(batchGuids);
+                totalProcessed += batchGuids.size();
+            } catch (Exception e) {
+                LOG.error("restoreByTypeName: Failed to restore final batch for type={}", typeName, e);
+            }
+        }
+
+        LOG.info("restoreByTypeName: Completed reindex for type={}, total entities processed: {}", typeName, totalProcessed);
     }
 
     private static Set<String> getEntityAndReferenceGuids(String guid, Map<String, AtlasEntity> referredEntities) throws Exception {

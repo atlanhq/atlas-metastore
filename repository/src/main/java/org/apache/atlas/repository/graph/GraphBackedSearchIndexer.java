@@ -43,6 +43,8 @@ import org.apache.atlas.repository.IndexException;
 import org.apache.atlas.repository.RepositoryException;
 import org.apache.atlas.repository.graphdb.*;
 import org.apache.atlas.repository.metrics.IndexHealthMetricService;
+import org.apache.atlas.util.BeanUtil;
+import org.apache.atlas.util.RepairIndex;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.type.*;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
@@ -106,6 +108,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
     private boolean     recomputeIndexedKeys = true;
     private Set<String> vertexIndexKeys      = new HashSet<>();
     private IndexHealthMetricService indexHealthMetricService;
+    private final List<AtlasAttribute> repairedAttributes = new ArrayList<>();
 
     public static boolean isValidSearchWeight(int searchWeight) {
         if (searchWeight != -1 ) {
@@ -178,6 +181,9 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
 
         AtlasGraphManagement management = null;
 
+        // Clear repaired list from any previous run
+        repairedAttributes.clear();
+
         try {
             management = provider.get().getManagementSystem();
 
@@ -210,6 +216,9 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
 
             //Commit indexes
             commit(management);
+
+            // After successful commit, trigger async reindex for repaired types
+            triggerAsyncReindexForRepairedTypes();
         } catch (RepositoryException | IndexException e) {
             LOG.error("Failed to update indexes for changed typedefs", e);
             attemptRollback(changedTypeDefs, management);
@@ -235,6 +244,9 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
         ChangedTypeDefs      changedTypeDefs = new ChangedTypeDefs(null, new ArrayList<>(typeDefs), null);
         AtlasGraphManagement management      = null;
 
+        // Clear repaired list from any previous run
+        repairedAttributes.clear();
+
         try {
             management = provider.get().getManagementSystem();
 
@@ -245,6 +257,9 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
             commit(management);
 
             notifyInitializationCompletion(changedTypeDefs);
+
+            // After successful commit, trigger async reindex for repaired types
+            triggerAsyncReindexForRepairedTypes();
         } catch (RepositoryException | IndexException e) {
             LOG.error("Failed to update indexes for changed typedefs", e);
             attemptRollback(changedTypeDefs, management);
@@ -289,6 +304,63 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                 }
             }
         }
+    }
+
+    /**
+     * Triggers an async background reindex for entity types that had missing property keys
+     * auto-repaired during resolveIndexFieldNames().
+     *
+     * This backfills existing entities that were written while the property key was missing —
+     * their attributes are in Cassandra but not in ES. After the property key is repaired and
+     * committed, new writes will go to ES automatically, but existing entities need reindexing.
+     *
+     * Runs as a daemon thread so it doesn't block startup. Errors are logged but don't
+     * affect Atlas operation. The Grafana dashboard will show the repaired state immediately
+     * (via runIndexHealthAudit), and the reindex ensures existing entity data catches up.
+     */
+    private void triggerAsyncReindexForRepairedTypes() {
+        if (repairedAttributes.isEmpty()) {
+            return;
+        }
+
+        Set<String> repairedTypeNames = new HashSet<>();
+        for (AtlasAttribute attr : repairedAttributes) {
+            AtlasStructType definedInType = attr.getDefinedInType();
+            if (definedInType != null) {
+                repairedTypeNames.add(definedInType.getTypeName());
+            }
+        }
+
+        if (repairedTypeNames.isEmpty()) {
+            return;
+        }
+
+        LOG.error("INDEX AUTO-REPAIR: Created {} missing property keys for types: {}. Scheduling async reindex.",
+                repairedAttributes.size(), repairedTypeNames);
+
+        Thread reindexThread = new Thread(() -> {
+            try {
+                RepairIndex repairIndex = BeanUtil.getBean(RepairIndex.class);
+                if (repairIndex == null) {
+                    LOG.error("INDEX AUTO-REPAIR: RepairIndex bean not available. Async reindex skipped.");
+                    return;
+                }
+
+                for (String typeName : repairedTypeNames) {
+                    try {
+                        LOG.info("INDEX AUTO-REPAIR: Reindexing type {}", typeName);
+                        repairIndex.restoreByTypeName(typeName, 500, 100);
+                        LOG.info("INDEX AUTO-REPAIR: Completed reindex for type {}", typeName);
+                    } catch (Exception e) {
+                        LOG.error("INDEX AUTO-REPAIR: Failed to reindex type {}", typeName, e);
+                    }
+                }
+            } catch (Exception e) {
+                LOG.error("INDEX AUTO-REPAIR: Async reindex failed", e);
+            }
+        }, "index-auto-repair");
+        reindexThread.setDaemon(true);
+        reindexThread.start();
     }
 
     public Set<String> getVertexIndexKeys() {
@@ -569,7 +641,53 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                             LOG.debug("Property {} is mapped to index field name {}", attribute.getQualifiedName(), attribute.getIndexFieldName());
                         }
                     } else {
-                        LOG.warn("resolveIndexFieldName(attribute={}): propertyKey is null for vertextPropertyName={}", attribute.getQualifiedName(), attribute.getVertexPropertyName());
+                        // SELF-HEALING: property key is missing from the mixed index.
+                        // This happens when typedef seeding (Cedar push) partially fails —
+                        // the typedef is persisted but the property key was never registered.
+                        // createVertexIndex() is idempotent: it checks getPropertyKey() first,
+                        // creates only if missing, and checks getFieldKeys().contains() before
+                        // adding to the mixed index.
+                        LOG.warn("resolveIndexFieldName(attribute={}): propertyKey is null — "
+                                + "attempting auto-repair for vertexPropertyName={}",
+                                attribute.getQualifiedName(), attribute.getVertexPropertyName());
+                        try {
+                            Class primitiveClass = getPrimitiveClass(attribute.getTypeName());
+                            AtlasCardinality cardinality = toAtlasCardinality(attribute.getAttributeDef().getCardinality());
+
+                            String indexFieldName = createVertexIndex(
+                                    managementSystem,
+                                    attribute.getVertexPropertyName(),
+                                    UniqueKind.NONE,
+                                    primitiveClass,
+                                    cardinality,
+                                    attribute.getAttributeDef().getIsIndexable(),
+                                    false,
+                                    isStringField,
+                                    attribute.getAttributeDef().getIndexTypeESConfig(),
+                                    attribute.getAttributeDef().getIndexTypeESFields()
+                            );
+
+                            if (indexFieldName != null) {
+                                attribute.setIndexFieldName(indexFieldName);
+
+                                if (baseInstance != null) {
+                                    baseInstance.setIndexFieldName(indexFieldName);
+                                }
+
+                                typeRegistry.addIndexFieldName(attribute.getVertexPropertyName(), indexFieldName);
+                                repairedAttributes.add(attribute);
+
+                                LOG.info("Auto-repaired missing index for attribute={}, indexFieldName={}",
+                                        attribute.getQualifiedName(), indexFieldName);
+                            } else {
+                                LOG.error("CRITICAL: Failed to auto-repair index for attribute={}. "
+                                        + "ES sync WILL BE BROKEN for this field.",
+                                        attribute.getQualifiedName());
+                            }
+                        } catch (Exception repairEx) {
+                            LOG.error("CRITICAL: Auto-repair threw exception for attribute={}",
+                                    attribute.getQualifiedName(), repairEx);
+                        }
                     }
                 }
             }
