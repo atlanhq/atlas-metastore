@@ -32,7 +32,12 @@ on:
       - switchable_graph_bug_fixes
       - ms-664-fix-audit-search
       - hotfix-reindex-refresh
+      - migrator-validations
       - nb-switchable-graph-provider
+      - ms-664-fix-audit-search
+      - hotfix-reindex-refresh
+      - migrator-validations-customization
+      - migration_edge_chunking
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'

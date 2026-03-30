@@ -61,14 +61,64 @@ public class MigratorConfig {
     private final boolean edgesOutOnly;
     private final int maxEdgesPerBatch;
 
+    // ES index settings
+    private final int esFieldLimit;
+
+    // Parallel ES indexing during Phase 1
+    private final boolean esParallel;
+    private final int esVertexIndexerThreads;
+
+    // ES edge index
+    private final String targetEsEdgeIndex;
+
+    // Source ES edge index (for field limit discovery during migration)
+    private final String sourceEsEdgeIndex;
+
+    // Super vertex chunking
+    private final int superVertexEdgeChunkSize;
+
     // Skip flags
     private final boolean skipEsReindex;
     private final boolean skipClassifications;
     private final boolean skipTasks;
 
+    // Auxiliary keyspace migration flags
+    private final boolean migrateConfigStore;
+    private final boolean migrateTags;
+
+    // Retry
+    private final int maxRetries;
+
     // ID strategy / claim
     private final IdStrategy idStrategy;
     private final boolean claimEnabled;
+
+    // Cassandra consistency levels
+    private final String sourceConsistencyLevel;
+    private final String targetConsistencyLevel;
+
+    // Analyze mode ("cassandra" for post-migration, "janus" for pre-migration)
+    private final String analyzeMode;
+    private final boolean pushToMixpanel;
+
+    // Auto-sizing: effective values (may be overridden by MigrationSizer)
+    private int effectiveScannerThreads;
+    private int effectiveWriterThreads;
+    private int effectiveEsBulkSize;
+    private int effectiveQueueCapacity;
+    private int effectiveMaxInflightPerThread;
+    private boolean autoSized = false;
+
+    // Validation settings
+    private final int     validationVertexSampleSize;
+    private final int     validationEdgeSampleSize;
+    private final int     validationIndexSampleSize;
+    private final int     validationTokenProbes;
+    private final int     superVertexThreshold;
+    private final int     superVertexTopN;
+    private final boolean skipSuperVertexDetection;
+    private final boolean skipEsCountValidation;
+    private final String  validationTenantId;
 
     public MigratorConfig(String configPath) throws IOException {
         this.props = new Properties();
@@ -112,12 +162,12 @@ public class MigratorConfig {
         this.targetReplicationFactor   = getInt("target.cassandra.replication.factor", 3);
 
         // Tuning
-        this.scannerThreads  = getInt("migration.scanner.threads", 32);
-        this.writerThreads   = getInt("migration.writer.threads", 8);
+        this.scannerThreads  = getInt("migration.scanner.threads", 16);
+        this.writerThreads   = getInt("migration.writer.threads", 16);
         this.writerBatchSize = getInt("migration.writer.batch.size", 500);
-        this.esBulkSize      = getInt("migration.es.bulk.size", 1000);
+        this.esBulkSize      = getInt("migration.es.bulk.size", 5000);
         this.scanFetchSize   = getInt("migration.scan.fetch.size", 5000);
-        this.queueCapacity   = getInt("migration.queue.capacity", 10000);
+        this.queueCapacity   = getInt("migration.queue.capacity", 20000);
         this.resume          = getBoolean("migration.resume", true);
 
         // Write optimizations
@@ -125,14 +175,61 @@ public class MigratorConfig {
         this.edgesOutOnly         = getBoolean("migration.edges.out.only", true);
         this.maxEdgesPerBatch     = getInt("migration.writer.max.edges.per.batch", 15);
 
+        // ES index settings
+        this.esFieldLimit = getInt("target.elasticsearch.field.limit", 10000);
+
+        // Parallel ES indexing during Phase 1 (eliminates Phase 2)
+        this.esParallel = getBoolean("migration.es.parallel", true);
+        this.esVertexIndexerThreads = getInt("migration.es.vertex.indexer.threads", 3);
+
+        // ES edge index
+        this.targetEsEdgeIndex = get("target.elasticsearch.edge.index", "atlas_graph_edge_index");
+        this.sourceEsEdgeIndex = get("source.elasticsearch.edge.index", "");
+
+        // Super vertex chunking
+        this.superVertexEdgeChunkSize = getInt("migration.super.vertex.edge.chunk.size", 10000);
+
         // Skip flags
         this.skipEsReindex      = getBoolean("migration.skip.es.reindex", false);
         this.skipClassifications = getBoolean("migration.skip.classifications", false);
         this.skipTasks           = getBoolean("migration.skip.tasks", false);
 
+        // Auxiliary keyspace migration flags
+        this.migrateConfigStore = getBoolean("migration.migrate.config.store", false);
+        this.migrateTags        = getBoolean("migration.migrate.tags", false);
+
+        // Retry
+        this.maxRetries = getInt("migration.max.retries", 3);
+
         // ID strategy / claim
         this.idStrategy = IdStrategy.from(get("migration.id.strategy", "legacy"));
         this.claimEnabled = getBoolean("migration.claim.enabled", false);
+
+        // Cassandra consistency levels
+        this.sourceConsistencyLevel = get("source.cassandra.consistency", "ONE");
+        this.targetConsistencyLevel = get("target.cassandra.consistency", "LOCAL_QUORUM");
+
+        // Analyze mode
+        this.analyzeMode = get("analyze.mode", "janus");
+        this.pushToMixpanel = getBoolean("analyze.push.to.mixpanel", false);
+
+        // Validation
+        this.validationVertexSampleSize  = getInt("validation.vertex.sample.size", 1000);
+        this.validationEdgeSampleSize    = getInt("validation.edge.sample.size", 500);
+        this.validationIndexSampleSize   = getInt("validation.index.sample.size", 500);
+        this.validationTokenProbes       = getInt("validation.token.probes", 5);
+        this.superVertexThreshold        = getInt("validation.super.vertex.threshold", 100000);
+        this.superVertexTopN             = getInt("validation.super.vertex.topn", 100);
+        this.skipSuperVertexDetection    = getBoolean("validation.skip.super.vertex.detection", false);
+        this.skipEsCountValidation       = getBoolean("validation.skip.es.count", false);
+        this.validationTenantId          = get("validation.tenant.id", "unknown");
+
+        // Initialize effective values to config defaults (may be overridden by MigrationSizer)
+        this.effectiveScannerThreads      = this.scannerThreads;
+        this.effectiveWriterThreads       = this.writerThreads;
+        this.effectiveEsBulkSize          = this.esBulkSize;
+        this.effectiveQueueCapacity       = this.queueCapacity;
+        this.effectiveMaxInflightPerThread = this.maxInflightPerThread;
     }
 
     private String get(String key, String defaultValue) {
@@ -148,6 +245,42 @@ public class MigratorConfig {
         String val = props.getProperty(key);
         return val != null ? Boolean.parseBoolean(val.trim()) : defaultValue;
     }
+
+    /**
+     * Check if a property was explicitly set in the config file.
+     * Returns false if the property was absent (meaning the default was used).
+     */
+    public boolean isExplicitlySet(String key) {
+        return props.getProperty(key) != null;
+    }
+
+    /**
+     * Apply auto-sized values for parameters not explicitly set by the user.
+     * Called by MigrationSizer after querying estate size from ES.
+     * Only overrides values that the user did NOT explicitly set in the config file.
+     */
+    public void applyAutoSizing(int scannerThreads, int writerThreads,
+                                 int esBulkSize, int queueCapacity,
+                                 int maxInflightPerThread) {
+        if (!isExplicitlySet("migration.scanner.threads")) {
+            this.effectiveScannerThreads = scannerThreads;
+        }
+        if (!isExplicitlySet("migration.writer.threads")) {
+            this.effectiveWriterThreads = writerThreads;
+        }
+        if (!isExplicitlySet("migration.es.bulk.size")) {
+            this.effectiveEsBulkSize = esBulkSize;
+        }
+        if (!isExplicitlySet("migration.queue.capacity")) {
+            this.effectiveQueueCapacity = queueCapacity;
+        }
+        if (!isExplicitlySet("migration.writer.max.inflight.per.thread")) {
+            this.effectiveMaxInflightPerThread = maxInflightPerThread;
+        }
+        this.autoSized = true;
+    }
+
+    public boolean isAutoSized() { return autoSized; }
 
     // Getters
     public String getSourceJanusGraphConfig()    { return sourceJanusGraphConfig; }
@@ -177,22 +310,61 @@ public class MigratorConfig {
     public String  getTargetReplicationStrategy() { return targetReplicationStrategy; }
     public int     getTargetReplicationFactor()  { return targetReplicationFactor; }
 
-    public int     getScannerThreads()   { return scannerThreads; }
-    public int     getWriterThreads()    { return writerThreads; }
+    public int     getScannerThreads()   { return effectiveScannerThreads; }
+    public int     getWriterThreads()    { return effectiveWriterThreads; }
     public int     getWriterBatchSize()  { return writerBatchSize; }
-    public int     getEsBulkSize()       { return esBulkSize; }
+    public int     getEsBulkSize()       { return effectiveEsBulkSize; }
     public int     getScanFetchSize()    { return scanFetchSize; }
-    public int     getQueueCapacity()    { return queueCapacity; }
+    public int     getQueueCapacity()    { return effectiveQueueCapacity; }
     public boolean isResume()            { return resume; }
 
-    public int     getMaxInflightPerThread() { return maxInflightPerThread; }
+    public int     getMaxInflightPerThread() { return effectiveMaxInflightPerThread; }
+
+    // Raw (config-specified) getters for logging
+    public int     getRawScannerThreads()       { return scannerThreads; }
+    public int     getRawWriterThreads()        { return writerThreads; }
+    public int     getRawEsBulkSize()           { return esBulkSize; }
+    public int     getRawQueueCapacity()        { return queueCapacity; }
+    public int     getRawMaxInflightPerThread() { return maxInflightPerThread; }
     public boolean isEdgesOutOnly()          { return edgesOutOnly; }
     public int     getMaxEdgesPerBatch()     { return maxEdgesPerBatch; }
+
+    public int     getEsFieldLimit()      { return esFieldLimit; }
+    public boolean isEsParallel()         { return esParallel; }
+    public int     getEsVertexIndexerThreads() { return esVertexIndexerThreads; }
+    public String  getTargetEsEdgeIndex() { return targetEsEdgeIndex; }
+    public String  getSourceEsEdgeIndex() { return sourceEsEdgeIndex; }
+    public int     getSuperVertexEdgeChunkSize() { return superVertexEdgeChunkSize; }
 
     public boolean isSkipEsReindex()      { return skipEsReindex; }
     public boolean isSkipClassifications() { return skipClassifications; }
     public boolean isSkipTasks()           { return skipTasks; }
 
+    public boolean isMigrateConfigStore()  { return migrateConfigStore; }
+    public boolean isMigrateTags()         { return migrateTags; }
+
+    public boolean isSameCassandraCluster() {
+        return sourceCassandraHostname.equals(targetCassandraHostname)
+            && sourceCassandraPort == targetCassandraPort;
+    }
+
+    public int     getMaxRetries()        { return maxRetries; }
+
     public IdStrategy getIdStrategy()      { return idStrategy; }
     public boolean isClaimEnabled()        { return claimEnabled; }
+
+    public String getSourceConsistencyLevel() { return sourceConsistencyLevel; }
+    public String getTargetConsistencyLevel() { return targetConsistencyLevel; }
+
+    public int     getValidationVertexSampleSize()  { return validationVertexSampleSize; }
+    public int     getValidationEdgeSampleSize()    { return validationEdgeSampleSize; }
+    public int     getValidationIndexSampleSize()   { return validationIndexSampleSize; }
+    public int     getValidationTokenProbes()       { return validationTokenProbes; }
+    public int     getSuperVertexThreshold()        { return superVertexThreshold; }
+    public int     getSuperVertexTopN()             { return superVertexTopN; }
+    public boolean isSkipSuperVertexDetection()     { return skipSuperVertexDetection; }
+    public boolean isSkipEsCountValidation()        { return skipEsCountValidation; }
+    public String  getValidationTenantId()          { return validationTenantId; }
+    public String  getAnalyzeMode()                 { return analyzeMode; }
+    public boolean isPushToMixpanel()               { return pushToMixpanel; }
 }
