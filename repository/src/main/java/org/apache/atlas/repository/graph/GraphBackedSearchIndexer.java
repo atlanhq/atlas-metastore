@@ -257,15 +257,13 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
             commit(management);
 
             notifyInitializationCompletion(changedTypeDefs);
-
-            // After successful commit, trigger async reindex for repaired types
-            triggerAsyncReindexForRepairedTypes();
         } catch (RepositoryException | IndexException e) {
             LOG.error("Failed to update indexes for changed typedefs", e);
             attemptRollback(changedTypeDefs, management);
         } finally {
-            // Always audit — even if commit failed or rollback re-threw.
-            // Reports the actual schema state so the dashboard never shows a false positive.
+            // Both in finally — guaranteed to run even if notifyInitializationCompletion
+            // or attemptRollback throws RuntimeException.
+            triggerAsyncReindexForRepairedTypes();
             runIndexHealthAudit();
         }
     }
@@ -342,7 +340,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
             return;
         }
 
-        LOG.error("INDEX AUTO-REPAIR: Created {} missing property keys for types: {}. Scheduling async reindex.",
+        LOG.warn("INDEX AUTO-REPAIR: Created {} missing property keys for types: {}. Scheduling async reindex.",
                 repairedAttributes.size(), repairedTypeNames);
 
         Thread reindexThread = new Thread(() -> {
