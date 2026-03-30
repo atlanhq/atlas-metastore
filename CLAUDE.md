@@ -431,6 +431,31 @@ gh pr create --repo atlanhq/atlas-metastore --title "..." --body "..."
 
 
 
+## API Reference
+
+Full API docs live at **https://k.atlan.dev/metastore/master** (VPN required).
+Source files: `docs/api/` — use `/atlas-api` skill to load full content as context.
+
+| Endpoint | Purpose | Auth |
+|---|---|---|
+| `POST /api/meta/entity/bulk` | Create / update entities | authenticated |
+| `POST /api/meta/search/indexsearch` | Search assets via ES DSL | authenticated |
+| `POST /api/meta/entity/repairClassificationsMappings/{guid}` | Fix tag desync for one entity | any user |
+| `POST /api/meta/entity/bulk/repairClassificationsMappings` | Fix tag desync for multiple GUIDs | any user |
+| `POST /api/meta/entity/repairAllClassifications` | Tenant-wide tag desync repair | `ADMIN_REPAIR_INDEX` |
+| `POST /api/meta/entity/guid/{guid}/repairindex` | Re-index single entity | `ADMIN_REPAIR_INDEX` |
+| `POST /api/meta/entity/guid/bulk/repairindex` | Re-index multiple entities | `ADMIN_REPAIR_INDEX` |
+| `POST /api/meta/entity/repairindex/{typename}` | Re-index all entities of a type | `ADMIN_REPAIR_INDEX` |
+| `POST /api/meta/repair/single-index` | Fix single JanusGraph index by qualifiedName | `ADMIN_REPAIR_INDEX` |
+| `POST /api/meta/repair/composite-index` | Fix composite JanusGraph index | `ADMIN_REPAIR_INDEX` |
+| `POST /api/meta/repair/batch` | Batch repair JanusGraph indices | `ADMIN_REPAIR_INDEX` |
+| `POST /api/meta/entity/repairhaslineage` | Fix stale `hasLineage` flag (by GUID) | any user |
+| `POST /api/meta/entity/repairhaslineagebyids` | Fix stale `hasLineage` flag (by vertex ID) | any user |
+| `POST /api/meta/entity/repair/accesscontrolAlias/{guid}` | Rebuild ES alias for a Persona | any user |
+| `POST /api/meta/entity/guid/bulk/repairattributes` | Repair specific attribute on entities | `ADMIN_REPAIR_INDEX` |
+| `POST /api/meta/migration/repair-unique-qualified-name` | Re-derive qualifiedName for assets | authenticated |
+| `POST /api/meta/migration/repair-stakeholder-qualified-name` | Re-derive qualifiedName for Stakeholders | authenticated |
+
 ## External Resources
 
 
