@@ -12,9 +12,6 @@ import org.junit.Test;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.utility.DockerImageName;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -58,93 +55,87 @@ public class Abac100kUsersBenchmarkIT {
 
     @Test
     public void benchmarkRelevantPoliciesLookupFor100kUsers() throws Exception {
-        try (GenericContainer<?> redis = new GenericContainer<>(DockerImageName.parse("redis:6.2.14")).withExposedPorts(6379)) {
-            redis.start();
-            Assert.assertTrue("Redis container should be running", redis.isRunning());
-            Assert.assertTrue("Redis mapped port must be > 0", redis.getMappedPort(6379) > 0);
+        seedUsersAndRoles();
+        seedAbacPolicies();
+        warmup();
 
-            seedUsersAndRoles();
-            seedAbacPolicies();
-            warmup();
+        long[] latenciesNanos = new long[TOTAL_REQUESTS];
+        AtomicInteger latencyIndex = new AtomicInteger();
+        CountDownLatch startGate = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(THREAD_COUNT);
 
-            long[] latenciesNanos = new long[TOTAL_REQUESTS];
-            AtomicInteger latencyIndex = new AtomicInteger();
-            CountDownLatch startGate = new CountDownLatch(1);
-            ExecutorService executor = Executors.newFixedThreadPool(THREAD_COUNT);
+        List<Callable<Integer>> tasks = new ArrayList<>(THREAD_COUNT);
+        for (int i = 0; i < THREAD_COUNT; i++) {
+            tasks.add(() -> {
+                startGate.await();
+                int matchedPolicies = 0;
 
-            List<Callable<Integer>> tasks = new ArrayList<>(THREAD_COUNT);
-            for (int i = 0; i < THREAD_COUNT; i++) {
-                tasks.add(() -> {
-                    startGate.await();
-                    int matchedPolicies = 0;
+                for (int j = 0; j < REQUESTS_PER_THREAD; j++) {
+                    String user = "user-" + ThreadLocalRandom.current().nextInt(USER_COUNT);
+                    setCurrentUser(user);
 
-                    for (int j = 0; j < REQUESTS_PER_THREAD; j++) {
-                        String user = "user-" + ThreadLocalRandom.current().nextInt(USER_COUNT);
-                        setCurrentUser(user);
+                    long start = System.nanoTime();
+                    List<RangerPolicy> policies = PoliciesStore.getInstance().getRelevantPolicies(
+                            null,
+                            null,
+                            SERVICE_NAME,
+                            Collections.singletonList(ACTION),
+                            POLICY_TYPE_ALLOW);
+                    long elapsed = System.nanoTime() - start;
 
-                        long start = System.nanoTime();
-                        List<RangerPolicy> policies = PoliciesStore.getInstance().getRelevantPolicies(
-                                null,
-                                null,
-                                SERVICE_NAME,
-                                Collections.singletonList(ACTION),
-                                POLICY_TYPE_ALLOW);
-                        long elapsed = System.nanoTime() - start;
-
-                        int index = latencyIndex.getAndIncrement();
-                        if (index < latenciesNanos.length) {
-                            latenciesNanos[index] = elapsed;
-                        }
-                        matchedPolicies += policies.size();
+                    int index = latencyIndex.getAndIncrement();
+                    if (index < latenciesNanos.length) {
+                        latenciesNanos[index] = elapsed;
                     }
+                    matchedPolicies += policies.size();
+                }
 
-                    SecurityContextHolder.clearContext();
-                    RequestContext.clear();
-                    return matchedPolicies;
-                });
-            }
-
-            List<Future<Integer>> futures = new ArrayList<>(THREAD_COUNT);
-            for (Callable<Integer> task : tasks) {
-                futures.add(executor.submit(task));
-            }
-
-            long benchmarkStart = System.nanoTime();
-            startGate.countDown();
-
-            int totalMatchedPolicies = 0;
-            for (Future<Integer> future : futures) {
-                totalMatchedPolicies += future.get();
-            }
-
-            executor.shutdown();
-            Assert.assertTrue("Executor did not terminate in time", executor.awaitTermination(10, TimeUnit.MINUTES));
-
-            long benchmarkDurationNanos = System.nanoTime() - benchmarkStart;
-            double benchmarkSeconds = benchmarkDurationNanos / 1_000_000_000.0;
-            double throughput = TOTAL_REQUESTS / benchmarkSeconds;
-
-            Arrays.sort(latenciesNanos);
-            long p50 = percentile(latenciesNanos, 50);
-            long p95 = percentile(latenciesNanos, 95);
-            long p99 = percentile(latenciesNanos, 99);
-
-            System.out.println("=== ABAC 100k user benchmark (with Testcontainers runtime) ===");
-            System.out.println("users=" + USER_COUNT
-                    + ", groups=" + GROUP_COUNT
-                    + ", roles=" + ROLE_COUNT
-                    + ", policies=" + POLICY_COUNT
-                    + ", threads=" + THREAD_COUNT
-                    + ", requests=" + TOTAL_REQUESTS);
-            System.out.println("throughput_rps=" + String.format("%.2f", throughput));
-            System.out.println("latency_ms_p50=" + nanosToMillis(p50)
-                    + ", latency_ms_p95=" + nanosToMillis(p95)
-                    + ", latency_ms_p99=" + nanosToMillis(p99));
-            System.out.println("totalMatchedPolicies=" + totalMatchedPolicies);
-
-            Assert.assertTrue("Benchmark returned no policy matches", totalMatchedPolicies > 0);
-            Assert.assertTrue("Expected positive throughput", throughput > 0.0d);
+                SecurityContextHolder.clearContext();
+                RequestContext.clear();
+                return matchedPolicies;
+            });
         }
+
+        List<Future<Integer>> futures = new ArrayList<>(THREAD_COUNT);
+        for (Callable<Integer> task : tasks) {
+            futures.add(executor.submit(task));
+        }
+
+        long benchmarkStart = System.nanoTime();
+        startGate.countDown();
+
+        int totalMatchedPolicies = 0;
+        for (Future<Integer> future : futures) {
+            totalMatchedPolicies += future.get();
+        }
+
+        executor.shutdown();
+        Assert.assertTrue("Executor did not terminate in time", executor.awaitTermination(10, TimeUnit.MINUTES));
+
+        long benchmarkDurationNanos = System.nanoTime() - benchmarkStart;
+        double benchmarkSeconds = benchmarkDurationNanos / 1_000_000_000.0;
+        double throughput = TOTAL_REQUESTS / benchmarkSeconds;
+
+        Arrays.sort(latenciesNanos);
+        long p50 = percentile(latenciesNanos, 50);
+        long p95 = percentile(latenciesNanos, 95);
+        long p99 = percentile(latenciesNanos, 99);
+
+        System.out.println("=== ABAC 100k user benchmark ===");
+        System.out.println("users=" + USER_COUNT
+                + ", groups=" + GROUP_COUNT
+                + ", roles=" + ROLE_COUNT
+                + ", policies=" + POLICY_COUNT
+                + ", threads=" + THREAD_COUNT
+                + ", requests=" + TOTAL_REQUESTS);
+        System.out.println("throughput_rps=" + String.format("%.2f", throughput));
+        System.out.println("latency_ms_p50=" + nanosToMillis(p50)
+                + ", latency_ms_p95=" + nanosToMillis(p95)
+                + ", latency_ms_p99=" + nanosToMillis(p99));
+        System.out.println("totalMatchedPolicies=" + totalMatchedPolicies);
+
+        Assert.assertTrue("Benchmark returned no policy matches", totalMatchedPolicies > 0);
+        Assert.assertTrue("Expected positive throughput", throughput > 0.0d);
     }
 
     private static void warmup() {
@@ -213,7 +204,7 @@ public class Abac100kUsersBenchmarkIT {
             RangerPolicy.RangerPolicyItem policyItem = new RangerPolicy.RangerPolicyItem();
             policyItem.setAccesses(Collections.singletonList(new RangerPolicy.RangerPolicyItemAccess(ACTION, true)));
             policyItem.setUsers(Collections.singletonList("user-" + (i % USER_COUNT)));
-            policyItem.setGroups(Collections.singletonList("group-" + (i % GROUP_COUNT)));
+            policyItem.setGroups(new ArrayList<>(Collections.singletonList("group-" + (i % GROUP_COUNT))));
             policyItem.setRoles(Collections.singletonList("role-" + (i % ROLE_COUNT)));
 
             // Keep some broad-match policies in the mix.

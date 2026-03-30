@@ -24,13 +24,9 @@ public class PoliciesStore {
 
     private static final PoliciesStore INSTANCE = new PoliciesStore();
 
-    private volatile List<RangerPolicy> resourcePolicies = Collections.emptyList();
-    private volatile List<RangerPolicy> tagPolicies = Collections.emptyList();
-    private volatile List<RangerPolicy> abacPolicies = Collections.emptyList();
-
-    private volatile ServicePolicyIndex resourcePolicyIndex = ServicePolicyIndex.EMPTY;
-    private volatile ServicePolicyIndex tagPolicyIndex = ServicePolicyIndex.EMPTY;
-    private volatile ServicePolicyIndex abacPolicyIndex = ServicePolicyIndex.EMPTY;
+    private volatile PolicySnapshot resourceSnapshot = PolicySnapshot.EMPTY;
+    private volatile PolicySnapshot tagSnapshot = PolicySnapshot.EMPTY;
+    private volatile PolicySnapshot abacSnapshot = PolicySnapshot.EMPTY;
 
     private PoliciesStore() {} // private constructor
 
@@ -40,32 +36,29 @@ public class PoliciesStore {
 
     public void setResourcePolicies(List<RangerPolicy> resourcePolicies) {
         List<RangerPolicy> normalized = normalizePolicies(resourcePolicies);
-        this.resourcePolicies = normalized;
-        this.resourcePolicyIndex = ServicePolicyIndex.build(normalized);
+        this.resourceSnapshot = new PolicySnapshot(normalized, ServicePolicyIndex.build(normalized));
     }
 
     private List<RangerPolicy> getResourcePolicies() {
-        return resourcePolicies;
+        return resourceSnapshot.policies;
     }
 
     public void setTagPolicies(List<RangerPolicy> tagPolicies) {
         List<RangerPolicy> normalized = normalizePolicies(tagPolicies);
-        this.tagPolicies = normalized;
-        this.tagPolicyIndex = ServicePolicyIndex.build(normalized);
+        this.tagSnapshot = new PolicySnapshot(normalized, ServicePolicyIndex.build(normalized));
     }
 
     private List<RangerPolicy> getTagPolicies() {
-        return tagPolicies;
+        return tagSnapshot.policies;
     }
 
     public void setAbacPolicies(List<RangerPolicy> abacPolicies) {
         List<RangerPolicy> normalized = normalizePolicies(abacPolicies);
-        this.abacPolicies = normalized;
-        this.abacPolicyIndex = ServicePolicyIndex.build(normalized);
+        this.abacSnapshot = new PolicySnapshot(normalized, ServicePolicyIndex.build(normalized));
     }
 
     public List<RangerPolicy> getAbacPolicies() {
-        return abacPolicies;
+        return abacSnapshot.policies;
     }
 
     public List<RangerPolicy> getRelevantPolicies(String persona, String purpose, String serviceName, List<String> actions, String policyType) {
@@ -150,14 +143,30 @@ public class PoliciesStore {
 
     private ServicePolicyIndex getPolicyIndex(String serviceName) {
         if ("atlas".equals(serviceName)) {
-            return resourcePolicyIndex;
+            return resourceSnapshot.index;
         } else if ("atlas_tag".equals(serviceName)) {
-            return tagPolicyIndex;
+            return tagSnapshot.index;
         } else if ("atlas_abac".equals(serviceName)) {
-            return abacPolicyIndex;
+            return abacSnapshot.index;
         }
 
         return ServicePolicyIndex.EMPTY;
+    }
+
+    /**
+     * Immutable holder that groups a policy list with its pre-built index.
+     * Swapped via a single volatile write so readers always see a consistent pair.
+     */
+    static final class PolicySnapshot {
+        static final PolicySnapshot EMPTY = new PolicySnapshot(Collections.emptyList(), ServicePolicyIndex.EMPTY);
+
+        final List<RangerPolicy> policies;
+        final ServicePolicyIndex index;
+
+        PolicySnapshot(List<RangerPolicy> policies, ServicePolicyIndex index) {
+            this.policies = policies;
+            this.index = index;
+        }
     }
 
     private static final class ServicePolicyIndex {

@@ -18,8 +18,7 @@ public class UsersStore {
     private static final RoleIndex EMPTY_ROLE_INDEX = new RoleIndex(Collections.emptyMap(), Collections.emptyMap(), Collections.emptyMap());
 
     private volatile RangerUserStore userStore;
-    private volatile RangerRoles allRoles;
-    private volatile RoleIndex roleIndex = EMPTY_ROLE_INDEX;
+    private volatile RolesSnapshot rolesSnapshot = RolesSnapshot.EMPTY;
 
     private UsersStore() {} // private constructor
 
@@ -36,12 +35,11 @@ public class UsersStore {
     }
 
     public void setAllRoles(RangerRoles allRoles) {
-        this.allRoles = allRoles;
-        this.roleIndex = buildRoleIndex(allRoles);
+        this.rolesSnapshot = new RolesSnapshot(allRoles, buildRoleIndex(allRoles));
     }
 
     public RangerRoles getAllRoles() {
-        return allRoles;
+        return rolesSnapshot.roles;
     }
 
     public List<String> getGroupsForUser(String user, RangerUserStore userStore) {
@@ -102,7 +100,8 @@ public class UsersStore {
             return EMPTY_ROLE_INDEX;
         }
 
-        return roles == this.allRoles ? this.roleIndex : buildRoleIndex(roles);
+        RolesSnapshot snapshot = this.rolesSnapshot;
+        return roles == snapshot.roles ? snapshot.index : buildRoleIndex(roles);
     }
 
     private static RoleIndex buildRoleIndex(RangerRoles roles) {
@@ -166,6 +165,22 @@ public class UsersStore {
             this.rolesByUser = rolesByUser;
             this.rolesByGroup = rolesByGroup;
             this.parentRolesByNestedRole = parentRolesByNestedRole;
+        }
+    }
+
+    /**
+     * Immutable holder that groups roles with their pre-built index.
+     * Swapped via a single volatile write so readers always see a consistent pair.
+     */
+    static final class RolesSnapshot {
+        static final RolesSnapshot EMPTY = new RolesSnapshot(null, EMPTY_ROLE_INDEX);
+
+        final RangerRoles roles;
+        final RoleIndex index;
+
+        RolesSnapshot(RangerRoles roles, RoleIndex index) {
+            this.roles = roles;
+            this.index = index;
         }
     }
 }
