@@ -9,6 +9,7 @@ import com.datastax.oss.driver.api.core.DriverTimeoutException;
 import com.datastax.oss.driver.api.core.config.DefaultDriverOption;
 import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
 import com.datastax.oss.driver.api.core.cql.*;
+import com.datastax.oss.driver.api.core.cql.AsyncResultSet;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -730,6 +731,73 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }
+    }
+
+    @Override
+    public Map<String, List<Tag>> getAllTagsByVertexIds(Collection<String> vertexIds) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getAllTagsByVertexIds");
+        try {
+            if (vertexIds == null || vertexIds.isEmpty()) {
+                return Collections.emptyMap();
+            }
+
+            // Fire all reads in parallel using async execution
+            Map<String, CompletionStage<AsyncResultSet>> futures = new LinkedHashMap<>();
+            for (String vertexId : vertexIds) {
+                int bucket = calculateBucket(vertexId);
+                BoundStatement bound = findAllTagDetailsForAssetStmt.bind(bucket, vertexId);
+                futures.put(vertexId, cassSession.executeAsync(bound));
+            }
+
+            // Collect results
+            Map<String, List<Tag>> result = new HashMap<>();
+            for (Map.Entry<String, CompletionStage<AsyncResultSet>> entry : futures.entrySet()) {
+                String vertexId = entry.getKey();
+                try {
+                    AsyncResultSet asyncRs = entry.getValue().toCompletableFuture().join();
+                    List<Tag> tags = asyncResultSetToTags(vertexId, asyncRs);
+                    result.put(vertexId, tags);
+                } catch (Exception e) {
+                    LOG.error("Error in getAllTagsByVertexIds for vertexId={}", vertexId, e);
+                    throw new AtlasBaseException("Error batch-reading tags for vertexId=" + vertexId, e);
+                }
+            }
+            return result;
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
+        }
+    }
+
+    private static List<Tag> asyncResultSetToTags(String vertexId, AsyncResultSet asyncRs) {
+        List<Tag> tags = new ArrayList<>();
+        // Process all pages of the async result set
+        AsyncResultSet currentPage = asyncRs;
+        while (currentPage != null) {
+            for (Row row : currentPage.currentPage()) {
+                if (row.getBoolean("is_deleted")) {
+                    continue;
+                }
+                Tag tag = new Tag();
+                tag.setVertexId(vertexId);
+                tag.setTagTypeName(row.getString("tag_type_name"));
+                tag.setPropagated(row.getBoolean("is_propagated"));
+                tag.setSourceVertexId(row.getString("source_id"));
+                try {
+                    tag.setTagMetaJson(objectMapper.readValue(row.getString("tag_meta_json"), new TypeReference<>() {
+                    }));
+                } catch (JsonProcessingException e) {
+                    LOG.error("Error parsing tag_meta_json in getAllTagsByVertexIds for vertexId: {}", vertexId, e);
+                    continue;
+                }
+                tags.add(tag);
+            }
+            if (currentPage.hasMorePages()) {
+                currentPage = currentPage.fetchNextPage().toCompletableFuture().join();
+            } else {
+                currentPage = null;
+            }
+        }
+        return tags;
     }
 
     public PaginatedVertexIdResult getVertexIdFromTagsByIdTableWithPagination(String pagingStateStr, int pageSize) throws AtlasBaseException {
