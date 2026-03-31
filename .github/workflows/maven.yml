@@ -33,7 +33,6 @@ on:
       - ms-664-fix-audit-search
       - hotfix-reindex-refresh
       - nb-switchable-graph-provider
-      - ms-692-direction-aware-fix
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
