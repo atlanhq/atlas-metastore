@@ -4557,7 +4557,11 @@ public class EntityGraphMapper {
                 for (Map.Entry<String, Map<String, Object>> entry : assetMinAttrsMap.entrySet()) {
                     RequestContext.get().addVertexNeedingTagDenorm(entry.getKey(), (String) entry.getValue().get(GUID_PROPERTY_KEY));
                 }
-                flushTagDenormToES();
+                try {
+                    flushTagDenormToES();
+                } catch (Exception e) {
+                    LOG.error("flushTagDenormToES failed during propagation add, DLQ handles recovery", e);
+                }
                 
                 // Convert vertices to entities before async notification (prevent transaction closure issues)
                 try {
@@ -5614,7 +5618,11 @@ public class EntityGraphMapper {
 
                 // Buffer vertex IDs for full-snapshot ES denorm, then flush per chunk (delete already happened above)
                 bufferTagDenormForTags(batchToDelete);
-                flushTagDenormToES();
+                try {
+                    flushTagDenormToES();
+                } catch (Exception e) {
+                    LOG.error("flushTagDenormToES failed during propagation delete, DLQ handles recovery", e);
+                }
 
                 Set<AtlasVertex> vertices = graph.getVertices(vertexIds.toArray(new String[0]));
 
@@ -6697,7 +6705,11 @@ public class EntityGraphMapper {
 
                 // Buffer vertex IDs for full-snapshot ES denorm, then flush per chunk (update already happened above)
                 bufferTagDenormForTags(batchToUpdate);
-                flushTagDenormToES();
+                try {
+                    flushTagDenormToES();
+                } catch (Exception e) {
+                    LOG.error("flushTagDenormToES failed during propagation update, DLQ handles recovery", e);
+                }
 
                 //new bulk method to fetch in batches
                 Set<AtlasVertex> propagtedVertices = graph.getVertices(vertexIds.toArray(new String[0]));
@@ -6926,7 +6938,11 @@ public class EntityGraphMapper {
 
         // Buffer vertex IDs for full-snapshot ES denorm, then flush per chunk (delete already happened above)
         bufferTagDenormForTags(tagsToDelete);
-        flushTagDenormToES();
+        try {
+            flushTagDenormToES();
+        } catch (Exception e) {
+            LOG.error("flushTagDenormToES failed during propagation refresh delete, DLQ handles recovery", e);
+        }
 
         Set<AtlasVertex> vertices = graph.getVertices(vertexIdsToDelete.toArray(new String[0]));
         if (!vertices.isEmpty()) {
