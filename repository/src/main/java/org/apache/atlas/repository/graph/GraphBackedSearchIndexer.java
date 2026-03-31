@@ -43,8 +43,6 @@ import org.apache.atlas.repository.IndexException;
 import org.apache.atlas.repository.RepositoryException;
 import org.apache.atlas.repository.graphdb.*;
 import org.apache.atlas.repository.metrics.IndexHealthMetricService;
-import org.apache.atlas.util.BeanUtil;
-import org.apache.atlas.util.RepairIndex;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.type.*;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
@@ -108,7 +106,6 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
     private boolean     recomputeIndexedKeys = true;
     private Set<String> vertexIndexKeys      = new HashSet<>();
     private IndexHealthMetricService indexHealthMetricService;
-    private final java.util.concurrent.ConcurrentLinkedQueue<AtlasAttribute> repairedAttributes = new java.util.concurrent.ConcurrentLinkedQueue<>();
 
     public static boolean isValidSearchWeight(int searchWeight) {
         if (searchWeight != -1 ) {
@@ -181,9 +178,6 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
 
         AtlasGraphManagement management = null;
 
-        // Clear repaired list from any previous run
-        repairedAttributes.clear();
-
         try {
             management = provider.get().getManagementSystem();
 
@@ -216,9 +210,6 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
 
             //Commit indexes
             commit(management);
-
-            // After successful commit, trigger async reindex for repaired types
-            triggerAsyncReindexForRepairedTypes();
         } catch (RepositoryException | IndexException e) {
             LOG.error("Failed to update indexes for changed typedefs", e);
             attemptRollback(changedTypeDefs, management);
@@ -244,9 +235,6 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
         ChangedTypeDefs      changedTypeDefs = new ChangedTypeDefs(null, new ArrayList<>(typeDefs), null);
         AtlasGraphManagement management      = null;
 
-        // Clear repaired list from any previous run
-        repairedAttributes.clear();
-
         try {
             management = provider.get().getManagementSystem();
 
@@ -261,9 +249,6 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
             LOG.error("Failed to update indexes for changed typedefs", e);
             attemptRollback(changedTypeDefs, management);
         } finally {
-            // Both in finally — guaranteed to run even if notifyInitializationCompletion
-            // or attemptRollback throws RuntimeException.
-            triggerAsyncReindexForRepairedTypes();
             runIndexHealthAudit();
         }
     }
@@ -309,80 +294,6 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
         }, "index-health-audit");
         auditThread.setDaemon(true);
         auditThread.start();
-    }
-
-    /**
-     * Triggers an async background reindex for entity types that had missing property keys
-     * auto-repaired during resolveIndexFieldNames().
-     *
-     * This backfills existing entities that were written while the property key was missing —
-     * their attributes are in Cassandra but not in ES. After the property key is repaired and
-     * committed, new writes will go to ES automatically, but existing entities need reindexing.
-     *
-     * Runs as a daemon thread so it doesn't block startup. Errors are logged but don't
-     * affect Atlas operation. The Grafana dashboard will show the repaired state immediately
-     * (via runIndexHealthAudit), and the reindex ensures existing entity data catches up.
-     */
-    private void triggerAsyncReindexForRepairedTypes() {
-        if (repairedAttributes.isEmpty()) {
-            return;
-        }
-
-        Set<String> repairedTypeNames = new HashSet<>();
-        for (AtlasAttribute attr : repairedAttributes) {
-            AtlasStructType definedInType = attr.getDefinedInType();
-            if (definedInType != null) {
-                repairedTypeNames.add(definedInType.getTypeName());
-            }
-        }
-
-        if (repairedTypeNames.isEmpty()) {
-            return;
-        }
-
-        LOG.warn("INDEX AUTO-REPAIR: Created {} missing property keys for types: {}. Scheduling async reindex.",
-                repairedAttributes.size(), repairedTypeNames);
-
-        Thread reindexThread = new Thread(() -> {
-            try {
-                // Wait for Spring context to be fully initialized.
-                // onLoadCompletion runs during startup before the context is ready,
-                // so BeanUtil.getBean() returns null if called immediately.
-                RepairIndex repairIndex = null;
-                for (int attempt = 1; attempt <= 12; attempt++) {
-                    try {
-                        Thread.sleep(10_000); // 10 seconds between attempts
-                        repairIndex = BeanUtil.getBean(RepairIndex.class);
-                        if (repairIndex != null) {
-                            LOG.info("INDEX AUTO-REPAIR: RepairIndex bean available after {}s", attempt * 10);
-                            break;
-                        }
-                    } catch (Exception e) {
-                        LOG.debug("INDEX AUTO-REPAIR: Waiting for Spring context... attempt {}/12", attempt);
-                    }
-                }
-
-                if (repairIndex == null) {
-                    LOG.error("INDEX AUTO-REPAIR: RepairIndex bean not available after 120s. Async reindex skipped. "
-                            + "Run manual repairIndex for types: {}", repairedTypeNames);
-                    return;
-                }
-
-                for (String typeName : repairedTypeNames) {
-                    try {
-                        LOG.info("INDEX AUTO-REPAIR: Reindexing type {}", typeName);
-                        repairIndex.restoreByTypeName(typeName, 500, 100);
-                        LOG.info("INDEX AUTO-REPAIR: Completed reindex for type {}", typeName);
-                    } catch (Exception e) {
-                        LOG.error("INDEX AUTO-REPAIR: Failed to reindex type {}", typeName, e);
-                    }
-                }
-            } catch (Exception e) {
-                LOG.error("INDEX AUTO-REPAIR: Async reindex failed", e);
-            }
-        }, "index-auto-repair");
-        reindexThread.setDaemon(true);
-        reindexThread.start();
     }
 
     public Set<String> getVertexIndexKeys() {
@@ -697,10 +608,28 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                                 }
 
                                 typeRegistry.addIndexFieldName(attribute.getVertexPropertyName(), indexFieldName);
-                                repairedAttributes.add(attribute);
 
-                                LOG.info("Auto-repaired missing index for attribute={}, indexFieldName={}",
-                                        attribute.getQualifiedName(), indexFieldName);
+                                // Resolve all entity types that inherit this attribute
+                                String definedInTypeName = attribute.getDefinedInType() != null
+                                        ? attribute.getDefinedInType().getTypeName() : "unknown";
+                                Set<String> affectedEntityTypes = new HashSet<>();
+                                for (AtlasEntityType entityType : typeRegistry.getAllEntityTypes()) {
+                                    if (entityType.getAllAttributes().containsKey(attribute.getName())) {
+                                        affectedEntityTypes.add(entityType.getTypeName());
+                                    }
+                                }
+
+                                LOG.warn("INDEX AUTO-REPAIR: Repaired missing property key for attribute={}, "
+                                        + "vertexPropertyName={}, indexFieldName={}, definedInType={}, "
+                                        + "affectedEntityTypes={}, repairTimestamp={}. "
+                                        + "Future writes will include this field in ES. "
+                                        + "Existing entities need manual repairIndex (Phase 2b).",
+                                        attribute.getQualifiedName(),
+                                        attribute.getVertexPropertyName(),
+                                        indexFieldName,
+                                        definedInTypeName,
+                                        affectedEntityTypes,
+                                        System.currentTimeMillis());
                             } else {
                                 LOG.error("CRITICAL: Failed to auto-repair index for attribute={}. "
                                         + "ES sync WILL BE BROKEN for this field.",
@@ -1244,56 +1173,6 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
 
             LOG.info("Created composite index for property {} of type {} and {}", propertyKey.getName(), propertyClass.getName(), systemPropertyKey);
         }
-    }
-
-    /**
-     * Checks if an attribute's type category is one that gets indexed in the mixed index.
-     * Covers primitives, enums, and arrays of primitives/enums — matching what
-     * createIndexForAttribute() creates vertex indices for.
-     */
-    private boolean isResolvableTypeCategory(AtlasAttribute attribute) {
-        TypeCategory typeCategory = attribute.getAttributeType().getTypeCategory();
-
-        if (TypeCategory.PRIMITIVE.equals(typeCategory) || TypeCategory.ENUM.equals(typeCategory)) {
-            return true;
-        }
-
-        if (TypeCategory.ARRAY.equals(typeCategory)) {
-            try {
-                AtlasType elementType = ((AtlasArrayType) attribute.getAttributeType()).getElementType();
-                TypeCategory elementCategory = elementType.getTypeCategory();
-                return TypeCategory.PRIMITIVE.equals(elementCategory) || TypeCategory.ENUM.equals(elementCategory);
-            } catch (Exception e) {
-                return false;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Returns the Java class to use for indexing this attribute.
-     * - Primitives: their primitive class (String.class, Long.class, etc.)
-     * - Enums: String.class (enums are indexed as strings)
-     * - Arrays of primitives: the element type's primitive class
-     * - Arrays of enums: String.class
-     */
-    private Class getIndexableClass(AtlasAttribute attribute) {
-        TypeCategory typeCategory = attribute.getAttributeType().getTypeCategory();
-
-        if (TypeCategory.ENUM.equals(typeCategory)) {
-            return String.class;
-        }
-
-        if (TypeCategory.ARRAY.equals(typeCategory)) {
-            AtlasType elementType = ((AtlasArrayType) attribute.getAttributeType()).getElementType();
-            if (TypeCategory.ENUM.equals(elementType.getTypeCategory())) {
-                return String.class;
-            }
-            return getPrimitiveClass(elementType.getTypeName());
-        }
-
-        return getPrimitiveClass(attribute.getTypeName());
     }
 
     private boolean isIndexApplicable(Class propertyClass, AtlasCardinality cardinality) {
