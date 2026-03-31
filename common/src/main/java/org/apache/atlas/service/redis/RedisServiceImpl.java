@@ -149,36 +149,6 @@ public class RedisServiceImpl extends AbstractRedisService {
     }
 
     /**
-     * Check if Redis is available for use.
-     * Triggers lazy initialization if not yet attempted.
-     */
-    @Override
-    public boolean isAvailable() {
-        if (!initialized) {
-            ensureInitialized();
-        }
-        return available;
-    }
-
-    /**
-     * Get the last connection error (for diagnostics).
-     */
-    public Exception getLastError() {
-        return lastError;
-    }
-
-    /**
-     * Attempt to reconnect if previously failed.
-     */
-    public void reconnect() {
-        synchronized (initLock) {
-            initialized = false;
-            available = false;
-            ensureInitialized();
-        }
-    }
-
-    /**
      * Test Redis connectivity with basic operations
      */
     private void testRedisConnectivity() throws Exception {
