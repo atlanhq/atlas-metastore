@@ -918,8 +918,8 @@
             "typeName": "AuthPolicy",
             "attributes":
             {
-                "name": "LINK_AI_MODEL_VERSION_TO_AI_MODEL",
-                "qualifiedName": "LINK_AI_MODEL_VERSION_TO_AI_MODEL",
+                "name": "LINK_AI_MODEL_TO_AI_MODEL_VERSION",
+                "qualifiedName": "LINK_AI_MODEL_TO_AI_MODEL_VERSION",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
