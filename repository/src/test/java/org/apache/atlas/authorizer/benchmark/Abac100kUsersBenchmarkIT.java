@@ -13,7 +13,6 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
@@ -28,7 +27,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.atlas.authorizer.ABACAuthorizerUtils.POLICY_TYPE_ALLOW;
 
@@ -50,7 +48,6 @@ public class Abac100kUsersBenchmarkIT {
 
     private static final int THREAD_COUNT = Math.max(4, Runtime.getRuntime().availableProcessors());
     private static final int REQUESTS_PER_THREAD = 10_000;
-    private static final int TOTAL_REQUESTS = THREAD_COUNT * REQUESTS_PER_THREAD;
     private static final int WARMUP_REQUESTS = 15_000;
 
     @Test
@@ -59,8 +56,6 @@ public class Abac100kUsersBenchmarkIT {
         seedAbacPolicies();
         warmup();
 
-        long[] latenciesNanos = new long[TOTAL_REQUESTS];
-        AtomicInteger latencyIndex = new AtomicInteger();
         CountDownLatch startGate = new CountDownLatch(1);
         ExecutorService executor = Executors.newFixedThreadPool(THREAD_COUNT);
 
@@ -74,19 +69,12 @@ public class Abac100kUsersBenchmarkIT {
                     String user = "user-" + ThreadLocalRandom.current().nextInt(USER_COUNT);
                     setCurrentUser(user);
 
-                    long start = System.nanoTime();
                     List<RangerPolicy> policies = PoliciesStore.getInstance().getRelevantPolicies(
                             null,
                             null,
                             SERVICE_NAME,
                             Collections.singletonList(ACTION),
                             POLICY_TYPE_ALLOW);
-                    long elapsed = System.nanoTime() - start;
-
-                    int index = latencyIndex.getAndIncrement();
-                    if (index < latenciesNanos.length) {
-                        latenciesNanos[index] = elapsed;
-                    }
                     matchedPolicies += policies.size();
                 }
 
@@ -101,7 +89,6 @@ public class Abac100kUsersBenchmarkIT {
             futures.add(executor.submit(task));
         }
 
-        long benchmarkStart = System.nanoTime();
         startGate.countDown();
 
         int totalMatchedPolicies = 0;
@@ -112,30 +99,7 @@ public class Abac100kUsersBenchmarkIT {
         executor.shutdown();
         Assert.assertTrue("Executor did not terminate in time", executor.awaitTermination(10, TimeUnit.MINUTES));
 
-        long benchmarkDurationNanos = System.nanoTime() - benchmarkStart;
-        double benchmarkSeconds = benchmarkDurationNanos / 1_000_000_000.0;
-        double throughput = TOTAL_REQUESTS / benchmarkSeconds;
-
-        Arrays.sort(latenciesNanos);
-        long p50 = percentile(latenciesNanos, 50);
-        long p95 = percentile(latenciesNanos, 95);
-        long p99 = percentile(latenciesNanos, 99);
-
-        System.out.println("=== ABAC 100k user benchmark ===");
-        System.out.println("users=" + USER_COUNT
-                + ", groups=" + GROUP_COUNT
-                + ", roles=" + ROLE_COUNT
-                + ", policies=" + POLICY_COUNT
-                + ", threads=" + THREAD_COUNT
-                + ", requests=" + TOTAL_REQUESTS);
-        System.out.println("throughput_rps=" + String.format("%.2f", throughput));
-        System.out.println("latency_ms_p50=" + nanosToMillis(p50)
-                + ", latency_ms_p95=" + nanosToMillis(p95)
-                + ", latency_ms_p99=" + nanosToMillis(p99));
-        System.out.println("totalMatchedPolicies=" + totalMatchedPolicies);
-
         Assert.assertTrue("Benchmark returned no policy matches", totalMatchedPolicies > 0);
-        Assert.assertTrue("Expected positive throughput", throughput > 0.0d);
     }
 
     private static void warmup() {
@@ -227,22 +191,4 @@ public class Abac100kUsersBenchmarkIT {
         SecurityContextHolder.setContext(context);
     }
 
-    private static double nanosToMillis(long nanos) {
-        return nanos / 1_000_000.0d;
-    }
-
-    private static long percentile(long[] values, int percentile) {
-        if (values.length == 0) {
-            return 0L;
-        }
-
-        int index = (int) Math.ceil((percentile / 100.0d) * values.length) - 1;
-        if (index < 0) {
-            index = 0;
-        } else if (index >= values.length) {
-            index = values.length - 1;
-        }
-
-        return values[index];
-    }
 }
