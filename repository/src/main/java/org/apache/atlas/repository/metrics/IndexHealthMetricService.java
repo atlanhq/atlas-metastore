@@ -43,8 +43,8 @@ import static org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry;
  * Audits JanusGraph mixed index health and exposes Prometheus metrics.
  *
  * For every indexable attribute (primitives, enums, arrays of primitives/enums),
- * checks whether the property key is registered in the vertex_index mixed index.
- * Missing registrations mean JanusGraph will never sync that attribute to ES.
+ * checks whether a property key is registered in the mixed index.
+ * Missing property keys mean JanusGraph will never sync that attribute to ES.
  *
  * Uses a single set of AtomicInteger fields that are registered once and updated
  * on each audit call. This avoids Micrometer's stale reference problem.
@@ -69,6 +69,7 @@ public class IndexHealthMetricService {
     private final AtlasTypeRegistry typeRegistry;
     private final String tenant;
 
+    // Single set of AtomicIntegers — registered once, updated on each audit
     private final AtomicInteger entityExpected = new AtomicInteger(0);
     private final AtomicInteger entityIndexed = new AtomicInteger(0);
     private final AtomicInteger entityMissing = new AtomicInteger(0);
@@ -83,7 +84,7 @@ public class IndexHealthMetricService {
     private final Map<String, AtomicInteger> perTypeMissing = new HashMap<>();
     private boolean gaugesRegistered = false;
     private volatile long lastAuditTimeMs = 0;
-    private static final long MIN_AUDIT_INTERVAL_MS = 60_000;
+    private static final long MIN_AUDIT_INTERVAL_MS = 60_000; // 1 minute throttle
 
     @Inject
     public IndexHealthMetricService(AtlasTypeRegistry typeRegistry) {
@@ -97,6 +98,11 @@ public class IndexHealthMetricService {
         this.tenant = (domainName != null) ? domainName : "default";
     }
 
+    /**
+     * Register gauges only once, using the same AtomicInteger references forever.
+     * Called on first audit — not in constructor — to avoid registration before
+     * the singleton is established.
+     */
     private synchronized void registerGaugesOnce() {
         if (gaugesRegistered) {
             return;
@@ -153,6 +159,7 @@ public class IndexHealthMetricService {
             return;
         }
 
+        // Throttle: skip if last audit was less than 1 minute ago (avoid overhead on rapid typedef changes)
         long now = System.currentTimeMillis();
         if (lastAuditTimeMs > 0 && (now - lastAuditTimeMs) < MIN_AUDIT_INTERVAL_MS) {
             LOG.debug("Skipping index health audit — last audit was {}ms ago (throttle: {}ms)",
@@ -163,6 +170,7 @@ public class IndexHealthMetricService {
 
         LOG.info("Starting index health audit...");
 
+        // Register gauges on first call — same AtomicInteger references used forever
         registerGaugesOnce();
 
         int totalExpected = 0, totalIndexed = 0, totalMissing = 0;
@@ -170,11 +178,17 @@ public class IndexHealthMetricService {
         int totalBmExpected = 0, totalBmIndexed = 0, totalBmMissing = 0;
         List<String> missingAttributes = new ArrayList<>();
 
+        // Get the mixed index field keys — this is what determines if an attribute is searchable in ES
         AtlasGraphIndex vertexIndex = managementSystem.getGraphIndex("vertex_index");
-        Set<AtlasPropertyKey> indexedFieldKeys = (vertexIndex != null)
-                ? new HashSet<>(vertexIndex.getFieldKeys())
-                : Collections.emptySet();
+        if (vertexIndex == null) {
+            LOG.error("INDEX HEALTH AUDIT: vertex_index not found in graph management. "
+                    + "Mixed index may not be initialized. Reporting UNHEALTHY.");
+            healthStatus.set(0);
+            return;
+        }
+        Set<AtlasPropertyKey> indexedFieldKeys = new HashSet<>(vertexIndex.getFieldKeys());
 
+        // Audit entity types
         for (AtlasEntityType entityType : typeRegistry.getAllEntityDefs()
                 .stream()
                 .map(def -> typeRegistry.getEntityTypeByName(def.getName()))
@@ -195,6 +209,8 @@ public class IndexHealthMetricService {
 
                 totalExpected++;
 
+                // Check mixed index registration — not just property key existence.
+                // A property key can exist in the schema but NOT be in the vertex_index.
                 AtlasPropertyKey propertyKey = managementSystem.getPropertyKey(attribute.getVertexPropertyName());
                 if (propertyKey != null && indexedFieldKeys.contains(propertyKey)) {
                     totalIndexed++;
@@ -210,9 +226,11 @@ public class IndexHealthMetricService {
                 }
             }
 
+            // Always update per-type gauge — reset to 0 if type is now fully indexed
             getOrCreatePerTypeGauge(typeName).set(typeMissingCount);
         }
 
+        // Audit business metadata types
         for (AtlasBusinessMetadataType bmType : typeRegistry.getAllBusinessMetadataDefs()
                 .stream()
                 .map(def -> typeRegistry.getBusinessMetadataTypeByName(def.getName()))
@@ -239,6 +257,7 @@ public class IndexHealthMetricService {
             }
         }
 
+        // Update gauge values — same AtomicInteger objects the gauges are bound to
         entityExpected.set(totalExpected);
         entityIndexed.set(totalIndexed);
         entityMissing.set(totalMissing);
@@ -251,6 +270,8 @@ public class IndexHealthMetricService {
 
         boolean isHealthy = (totalMissing + totalBmMissing) == 0;
 
+        // Guard against false positive: if type registry is empty/incomplete,
+        // expected=0 would make it look healthy when it's actually broken
         if (totalExpected == 0) {
             LOG.warn("INDEX HEALTH AUDIT: 0 entity attributes found — type registry may be empty. Reporting UNHEALTHY.");
             isHealthy = false;
@@ -267,17 +288,27 @@ public class IndexHealthMetricService {
         }
     }
 
+    /**
+     * Checks if an attribute is the type that Cedar indexes into the JanusGraph mixed index.
+     * Only these types get property keys registered in vertex_index:
+     * - Primitive types (string, int, long, boolean, etc.)
+     * - Enum types (indexed as String)
+     * - Array of primitive types (e.g., array<string>)
+     * - Array of enum types
+     *
+     * Map, struct, entity, relationship, and classification types are NOT indexed.
+     */
     private boolean isIndexedInMixedIndex(AtlasAttribute attribute) {
         TypeCategory typeCategory = attribute.getAttributeType().getTypeCategory();
 
-        if (typeCategory == TypeCategory.PRIMITIVE || typeCategory == TypeCategory.ENUM) {
+        if (TypeCategory.PRIMITIVE.equals(typeCategory) || TypeCategory.ENUM.equals(typeCategory)) {
             return true;
         }
 
-        if (typeCategory == TypeCategory.ARRAY) {
+        if (TypeCategory.ARRAY.equals(typeCategory)) {
             AtlasType elementType = ((org.apache.atlas.type.AtlasArrayType) attribute.getAttributeType()).getElementType();
             TypeCategory elementCategory = elementType.getTypeCategory();
-            return elementCategory == TypeCategory.PRIMITIVE || elementCategory == TypeCategory.ENUM;
+            return TypeCategory.PRIMITIVE.equals(elementCategory) || TypeCategory.ENUM.equals(elementCategory);
         }
 
         return false;
