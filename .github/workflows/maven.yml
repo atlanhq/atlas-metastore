@@ -29,6 +29,7 @@ on:
       - ms-664-fix-audit-search
       - hotfix-reindex-refresh
       - ms-696-tag-es-operations-redesign
+      - ms-864-keycloak-jwks-internal-url
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
