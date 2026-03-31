@@ -20,6 +20,7 @@ package org.apache.atlas.repository.store.graph.v2;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.RequestContext;
+import org.apache.atlas.discovery.EntityDiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.audit.EntityAuditEventV2;
 import org.apache.atlas.notification.task.AtlasDistributedTaskNotificationSender;
@@ -32,6 +33,9 @@ import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.model.Tag;
+import org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModels.PurgeContext;
+import org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModels.BatchWork;
+import org.apache.atlas.repository.store.graph.v2.purge.PurgeBatchCleanupService;
 import org.apache.atlas.repository.store.graph.v2.tags.PaginatedTagResult;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
@@ -90,6 +94,7 @@ class BulkPurgeServiceTest {
     @Mock private AtlasDistributedTaskNotificationSender mockTaskNotificationSender;
     @Mock private TaskManagement   mockTaskManagement;
     @Mock private AtlasTypeRegistry mockTypeRegistry;
+    @Mock private EntityDiscoveryService mockDiscovery;
     @Mock private AtlasVertex      mockConnectionVertex;
     @Mock private RestClient       mockEsClient;
 
@@ -106,7 +111,7 @@ class BulkPurgeServiceTest {
         when(mockGraphProvider.getBulkLoading()).thenReturn(mockBulkLoadingGraph);
 
         bulkPurgeService = new BulkPurgeService(
-                mockGraph, mockGraphProvider, mockRedisService, Set.of(mockAuditRepository), mockTaskNotificationSender, mockTaskManagement, mockTypeRegistry);
+                mockGraph, mockGraphProvider, mockRedisService, Set.of(mockAuditRepository), mockTaskNotificationSender, mockTaskManagement, mockTypeRegistry, mockDiscovery);
 
         // Inject the mock ES client directly — avoids thread-scoped MockedStatic issues
         bulkPurgeService.setEsClient(mockEsClient);
@@ -534,7 +539,7 @@ class BulkPurgeServiceTest {
 
     @Test
     void testPurgeContext_toStatusMap_containsAllFields() {
-        BulkPurgeService.PurgeContext ctx = new BulkPurgeService.PurgeContext(
+        PurgeContext ctx = new PurgeContext(
                 "req-123", "default/snowflake/1234567890", "CONNECTION", "admin",
                 "{\"query\":{\"prefix\":{\"__qualifiedNameHierarchy\":\"default/snowflake/1234567890/\"}}}", true, 0);
         ctx.status = "RUNNING";
@@ -569,7 +574,7 @@ class BulkPurgeServiceTest {
 
     @Test
     void testPurgeContext_toStatusMap_includesRemainingAfterCleanup() {
-        BulkPurgeService.PurgeContext ctx = new BulkPurgeService.PurgeContext(
+        PurgeContext ctx = new PurgeContext(
                 "req-verify", "key", "CONNECTION", "admin", "{}", false, 0);
         ctx.status = "COMPLETED";
         ctx.remainingAfterCleanup = 0;
@@ -580,7 +585,7 @@ class BulkPurgeServiceTest {
 
     @Test
     void testPurgeContext_toStatusMap_includesResubmitCount() {
-        BulkPurgeService.PurgeContext ctx = new BulkPurgeService.PurgeContext(
+        PurgeContext ctx = new PurgeContext(
                 "req-resub", "key", "CONNECTION", "admin", "{}", false, 0);
         ctx.status = "RUNNING";
         ctx.resubmitCount = 2;
@@ -591,7 +596,7 @@ class BulkPurgeServiceTest {
 
     @Test
     void testPurgeContext_toStatusMap_includesErrorWhenSet() {
-        BulkPurgeService.PurgeContext ctx = new BulkPurgeService.PurgeContext(
+        PurgeContext ctx = new PurgeContext(
                 "req-456", "key", "CONNECTION", "admin", "{}", false, 0);
         ctx.status = "FAILED";
         ctx.error = "Connection timeout";
@@ -603,7 +608,7 @@ class BulkPurgeServiceTest {
 
     @Test
     void testPurgeContext_toJson_producesValidJson() throws Exception {
-        BulkPurgeService.PurgeContext ctx = new BulkPurgeService.PurgeContext(
+        PurgeContext ctx = new PurgeContext(
                 "req-789", "key", "QUALIFIED_NAME_PREFIX", "admin", "{}", false, 0);
         ctx.status = "PENDING";
 
@@ -621,15 +626,15 @@ class BulkPurgeServiceTest {
 
     @Test
     void testBatchWork_poisonPill_isIdentifiable() {
-        assertSame(BulkPurgeService.BatchWork.POISON_PILL, BulkPurgeService.BatchWork.POISON_PILL);
-        assertEquals(-1, BulkPurgeService.BatchWork.POISON_PILL.batchIndex);
-        assertTrue(BulkPurgeService.BatchWork.POISON_PILL.vertexIds.isEmpty());
+        assertSame(BatchWork.POISON_PILL, BatchWork.POISON_PILL);
+        assertEquals(-1, BatchWork.POISON_PILL.batchIndex);
+        assertTrue(BatchWork.POISON_PILL.vertexIds.isEmpty());
     }
 
     @Test
     void testBatchWork_holdsVertexIds() {
         List<String> ids = Arrays.asList("v1", "v2", "v3");
-        BulkPurgeService.BatchWork work = new BulkPurgeService.BatchWork(ids, 5);
+        BatchWork work = new BatchWork(ids, 5);
 
         assertEquals(3, work.vertexIds.size());
         assertEquals(5, work.batchIndex);
@@ -801,30 +806,6 @@ class BulkPurgeServiceTest {
     // ======================== Tag V2 Propagation Cleanup Tests ========================
 
     @Test
-    void testPurgeContext_entitiesWithDirectTags_concurrentSafe() {
-        BulkPurgeService.PurgeContext ctx = new BulkPurgeService.PurgeContext(
-                "req-tags", "key", "CONNECTION", "admin", "{}", false, 0);
-
-        assertNotNull(ctx.entitiesWithDirectTags);
-        assertTrue(ctx.entitiesWithDirectTags.isEmpty());
-
-        // ConcurrentHashMap.newKeySet() supports concurrent access
-        ctx.entitiesWithDirectTags.add("vertex-1");
-        ctx.entitiesWithDirectTags.add("vertex-2");
-        ctx.entitiesWithDirectTags.add("vertex-1"); // duplicate
-        assertEquals(2, ctx.entitiesWithDirectTags.size());
-    }
-
-    @Test
-    void testCleanPropagatedTagsFromDeletedSources_skippedWhenNoDirectTags() throws Exception {
-        BulkPurgeService.PurgeContext ctx = new BulkPurgeService.PurgeContext(
-                "req-notags", "key", "CONNECTION", "admin", "{}", false, 0);
-
-        // entitiesWithDirectTags is empty — method should exit early
-        assertTrue(ctx.entitiesWithDirectTags.isEmpty());
-    }
-
-    @Test
     void testProcessBatch_collectsEntitiesWithDirectTags() throws Exception {
         mockedGraphUtils.when(() -> AtlasGraphUtilsV2.findByTypeAndUniquePropertyName(
                 eq(mockGraph), eq(Constants.CONNECTION_ENTITY_TYPE),
@@ -892,16 +873,6 @@ class BulkPurgeServiceTest {
     }
 
     // ======================== Relay Propagation + classificationText Tests ========================
-
-    @Test
-    void testTriggerRelayPropagationRefresh_skippedWhenNoExternalVertices() throws Exception {
-        BulkPurgeService.PurgeContext ctx = new BulkPurgeService.PurgeContext(
-                "req-norelay", "key", "CONNECTION", "admin", "{}", false, 0);
-
-        // No external lineage vertices — method should do nothing
-        assertTrue(ctx.externalLineageVertexIds.isEmpty());
-        // No exception = success
-    }
 
     @Test
     void testTriggerRelayPropagationRefresh_V2_createsTasksForAliveSource() throws Exception {
@@ -1107,10 +1078,11 @@ class BulkPurgeServiceTest {
         mockedGraphUtils.when(() -> AtlasGraphUtilsV2.setEncodedProperty(any(AtlasVertex.class), anyString(), any()))
                 .thenAnswer(inv -> null);
 
-        java.lang.reflect.Method method = BulkPurgeService.class.getDeclaredMethod(
+        PurgeBatchCleanupService cleanupService = bulkPurgeService.getCleanupService();
+        java.lang.reflect.Method method = PurgeBatchCleanupService.class.getDeclaredMethod(
                 "removePropagatedTraitFromVertex", AtlasVertex.class, String.class);
         method.setAccessible(true);
-        method.invoke(bulkPurgeService, vertex, "PII");
+        method.invoke(cleanupService, vertex, "PII");
 
         // Verify __propagatedTraitNames was cleared
         verify(vertex).removeProperty(Constants.PROPAGATED_TRAIT_NAMES_PROPERTY_KEY);
@@ -1297,7 +1269,7 @@ class BulkPurgeServiceTest {
 
     @Test
     void testPurgeContext_lastProgressTimestamp_updatedByBatch() throws Exception {
-        BulkPurgeService.PurgeContext ctx = new BulkPurgeService.PurgeContext(
+        PurgeContext ctx = new PurgeContext(
                 "req-stall", "key", "CONNECTION", "admin", "{}", false, 0);
 
         assertEquals(0L, ctx.lastProgressTimestamp.get());
@@ -1310,7 +1282,7 @@ class BulkPurgeServiceTest {
 
     @Test
     void testPurgeContext_toStatusMap_includesLastProgressTimestamp() {
-        BulkPurgeService.PurgeContext ctx = new BulkPurgeService.PurgeContext(
+        PurgeContext ctx = new PurgeContext(
                 "req-progress", "key", "CONNECTION", "admin", "{}", false, 0);
         ctx.status = "RUNNING";
         ctx.lastProgressTimestamp.set(12345L);
@@ -1321,7 +1293,7 @@ class BulkPurgeServiceTest {
 
     @Test
     void testPurgeContext_toStatusMap_includesStalled() {
-        BulkPurgeService.PurgeContext ctx = new BulkPurgeService.PurgeContext(
+        PurgeContext ctx = new PurgeContext(
                 "req-stalled", "key", "CONNECTION", "admin", "{}", false, 0);
         ctx.status = "RUNNING";
         ctx.stalled = true;
@@ -1413,7 +1385,7 @@ class BulkPurgeServiceTest {
 
     @Test
     void testPurgeContext_workerPoolAndFuturesFields() {
-        BulkPurgeService.PurgeContext ctx = new BulkPurgeService.PurgeContext(
+        PurgeContext ctx = new PurgeContext(
                 "req-pool", "key", "CONNECTION", "admin", "{}", false, 0);
 
         // Initially null

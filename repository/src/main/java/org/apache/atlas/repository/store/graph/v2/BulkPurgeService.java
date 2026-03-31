@@ -234,6 +234,16 @@ public class BulkPurgeService {
         this.tagDAOOverride = tagDAO;
     }
 
+    @VisibleForTesting
+    void checkAndRecoverOrphanedPurges() {
+        orphanRecovery.checkAndRecoverOrphanedPurges();
+    }
+
+    @VisibleForTesting
+    PurgeBatchCleanupService getCleanupService() {
+        return cleanupService;
+    }
+
     private TagDAO getTagDAO() {
         return tagDAOOverride != null ? tagDAOOverride : TagDAOCassandraImpl.getInstance();
     }
