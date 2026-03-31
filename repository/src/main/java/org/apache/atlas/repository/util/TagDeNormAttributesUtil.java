@@ -8,9 +8,11 @@ import org.apache.atlas.model.Tag;
 import org.apache.atlas.model.instance.AtlasClassification;
 import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.repository.graph.IFullTextMapper;
+import org.apache.atlas.repository.store.graph.v2.utils.TagAttributeMapper;
 import org.apache.atlas.type.AtlasClassificationType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.collections.MapUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -161,7 +163,8 @@ public class TagDeNormAttributesUtil {
      */
     public static Map<String, Object> computeAllDenormAttributes(List<Tag> tags,
                                                                 AtlasTypeRegistry typeRegistry,
-                                                                IFullTextMapper fullTextMapperV2) throws AtlasBaseException {
+                                                                IFullTextMapper fullTextMapperV2,
+                                                                TagAttributeMapper tagAttributeMapper) throws AtlasBaseException {
         Map<String, Object> deNormAttrs = new HashMap<>();
 
         String classificationTextKey = Strings.EMPTY;
@@ -178,6 +181,12 @@ public class TagDeNormAttributesUtil {
 
             for (Tag tag : tags) {
                 AtlasClassification classification = OBJECT_MAPPER.convertValue(tag.getTagMetaJson(), AtlasClassification.class);
+                // Normalize attributes to match mapClassificationsV2 behavior — ensures all
+                // type-defined struct attributes (e.g., tagAttachmentKey) are present even if
+                // missing from Cassandra JSON, preventing __classificationsText divergence.
+                if (MapUtils.isNotEmpty(classification.getAttributes()) && tagAttributeMapper != null) {
+                    classification = tagAttributeMapper.mapClassificationAttributes(classification);
+                }
                 allClassifications.add(classification);
 
                 if (tag.isPropagated()) {

@@ -6189,7 +6189,7 @@ public class EntityGraphMapper {
             Map<String, Map<String, Object>> deNormMap = new HashMap<>();
             for (String vertexId : snapshotMap.keySet()) {
                 List<Tag> tags = allTagsByVertex.getOrDefault(vertexId, Collections.emptyList());
-                deNormMap.put(vertexId, TagDeNormAttributesUtil.computeAllDenormAttributes(tags, typeRegistry, fullTextMapperV2));
+                deNormMap.put(vertexId, TagDeNormAttributesUtil.computeAllDenormAttributes(tags, typeRegistry, fullTextMapperV2, tagAttributeMapper));
             }
 
             ESConnector.TagDenormESWriteResult result;
