@@ -449,6 +449,8 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
         }
     }
 
+    private static final int ASYNC_READ_BATCH_SIZE = 50;
+
     @Override
     public Map<String, List<Tag>> getAllTagsByVertexIds(Collection<String> vertexIds) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getAllTagsByVertexIds");
@@ -457,25 +459,32 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
                 return Collections.emptyMap();
             }
 
-            // Fire all reads in parallel using async execution
-            Map<String, CompletionStage<AsyncResultSet>> futures = new LinkedHashMap<>();
-            for (String vertexId : vertexIds) {
-                int bucket = calculateBucket(vertexId);
-                BoundStatement bound = findAllTagDetailsForAssetStmt.bind(bucket, vertexId);
-                futures.put(vertexId, cassSession.executeAsync(bound));
-            }
-
-            // Collect results
             Map<String, List<Tag>> result = new HashMap<>();
-            for (Map.Entry<String, CompletionStage<AsyncResultSet>> entry : futures.entrySet()) {
-                String vertexId = entry.getKey();
-                try {
-                    AsyncResultSet asyncRs = entry.getValue().toCompletableFuture().join();
-                    List<Tag> tags = asyncResultSetToTags(vertexId, asyncRs);
-                    result.put(vertexId, tags);
-                } catch (Exception e) {
-                    LOG.error("Error in getAllTagsByVertexIds for vertexId={}", vertexId, e);
-                    throw new AtlasBaseException("Error batch-reading tags for vertexId=" + vertexId, e);
+            List<String> vertexIdList = new ArrayList<>(vertexIds);
+
+            // Process in sub-batches to bound concurrent Cassandra async reads
+            for (int i = 0; i < vertexIdList.size(); i += ASYNC_READ_BATCH_SIZE) {
+                List<String> batch = vertexIdList.subList(i, Math.min(i + ASYNC_READ_BATCH_SIZE, vertexIdList.size()));
+
+                // Fire async reads for this sub-batch
+                Map<String, CompletionStage<AsyncResultSet>> futures = new LinkedHashMap<>();
+                for (String vertexId : batch) {
+                    int bucket = calculateBucket(vertexId);
+                    BoundStatement bound = findAllTagDetailsForAssetStmt.bind(bucket, vertexId);
+                    futures.put(vertexId, cassSession.executeAsync(bound));
+                }
+
+                // Collect results for this sub-batch before firing the next
+                for (Map.Entry<String, CompletionStage<AsyncResultSet>> entry : futures.entrySet()) {
+                    String vertexId = entry.getKey();
+                    try {
+                        AsyncResultSet asyncRs = entry.getValue().toCompletableFuture().join();
+                        List<Tag> tags = asyncResultSetToTags(vertexId, asyncRs);
+                        result.put(vertexId, tags);
+                    } catch (Exception e) {
+                        LOG.error("Error in getAllTagsByVertexIds for vertexId={}", vertexId, e);
+                        throw new AtlasBaseException("Error batch-reading tags for vertexId=" + vertexId, e);
+                    }
                 }
             }
             return result;

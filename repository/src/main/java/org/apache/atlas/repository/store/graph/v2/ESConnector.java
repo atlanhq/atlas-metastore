@@ -75,16 +75,103 @@ public class ESConnector implements Closeable {
     }
 
     public static void writeTagProperties(Map<String, Map<String, Object>> entitiesMap) {
-        writeTagPropertiesWithResult(entitiesMap, false);
+        writeTagProperties(entitiesMap, false);
     }
 
+    /**
+     * Updates and writes tag properties for multiple entities to Elasticsearch index.
+     *
+     * This method processes the provided entities map to prepare an Elasticsearch bulk
+     * request for updating tag properties and denormalized attributes. The modifications
+     * include attributes specified in the {@code DENORM_ATTRS} field and a modification
+     * timestamp. The bulk request is then executed using a low-level client.
+     *
+     * @param entitiesMap A map where the keys represent the entity vertex IDs (as strings),
+     *                    and the values are maps containing the attributes to be updated
+     *                    for each entity.
+     * @param upsert A boolean flag that indicates whether the update operation should upsert
+     *               (create new doc if not found) the document in the Elasticsearch index.
+     */
     public static void writeTagProperties(Map<String, Map<String, Object>> entitiesMap, boolean upsert) {
-        writeTagPropertiesWithResult(entitiesMap, upsert);
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("writeTagPropertiesES");
+
+        try {
+            if (MapUtils.isEmpty(entitiesMap))
+                return;
+
+            StringBuilder bulkRequestBody = new StringBuilder();
+
+            for (String assetVertexId : entitiesMap.keySet()) {
+                Map<String, Object> entry = entitiesMap.get(assetVertexId);
+                Map<String, Object> toUpdate = new HashMap<>();
+
+                DENORM_ATTRS.stream().filter(entry::containsKey).forEach(x -> toUpdate.put(x, entry.get(x)));
+
+                long vertexId = Long.parseLong(assetVertexId);
+                String docId = LongEncoding.encode(vertexId);
+                bulkRequestBody.append("{\"update\":{\"_index\":\"janusgraph_vertex_index\",\"_id\":\"").append(docId).append("\" }}\n");
+
+                bulkRequestBody.append("{");
+                String attrsToUpdate = AtlasType.toJson(toUpdate);
+                bulkRequestBody.append("\"doc\":").append(attrsToUpdate);
+
+                if (upsert) {
+                    bulkRequestBody.append(",\"upsert\":").append(attrsToUpdate);
+                }
+
+                bulkRequestBody.append("}\n");
+            }
+
+            Request request = new Request("POST", "/_bulk");
+            request.setEntity(new StringEntity(bulkRequestBody.toString(), ContentType.APPLICATION_JSON));
+
+            int maxRetries = AtlasConfiguration.ES_MAX_RETRIES.getInt();
+            long retryDelay = AtlasConfiguration.ES_RETRY_DELAY_MS.getLong();
+            long initialRetryDelay = AtlasConfiguration.ES_RETRY_DELAY_MS.getLong();
+
+            for (int retryCount = 0; retryCount < maxRetries; retryCount++) {
+                try {
+                    Response response = lowLevelClient.performRequest(request); // Capture the response
+                    int statusCode = response.getStatusLine().getStatusCode();
+
+                    if (statusCode >= 200 && statusCode < 300) {
+                        // Check response body for partial failures if necessary
+                        return; // Success
+                    }
+
+                    // Add logic to retry on 5xx or throw on 4xx
+                    if (statusCode >= 500) {
+                        LOG.warn("Failed to update ES doc due to server error ({}). Retrying...", statusCode);
+                    } else {
+                        // Not a retryable error
+                        String responseBody = EntityUtils.toString(response.getEntity());
+                        throw new RuntimeException("Failed to update ES doc. Status: " + statusCode + ", Body: " + responseBody);
+                    }
+                } catch (IOException e) {
+                    LOG.warn("Failed to update ES doc for denorm attributes. Retrying... ({}/{})", retryCount + 1, maxRetries, e);
+                }
+
+                if (retryCount < maxRetries - 1) {
+                    try {
+                        long exponentialBackoffDelay = initialRetryDelay * (long) Math.pow(2, retryCount);
+                        Thread.sleep(exponentialBackoffDelay);
+                    } catch (InterruptedException interruptedException) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException("ES update interrupted during retry delay", interruptedException);
+                    }
+                }
+            }
+            // If the loop completes, all retries have failed. Throw an exception.
+            throw new RuntimeException("Failed to update ES doc for denorm attributes after " + maxRetries + " retries");
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
+        }
     }
 
     /**
      * Updates tag properties in ES and returns detailed result with success/failure per doc.
      * Parses the ES bulk response to detect partial failures.
+     * Used by the propagation flow (flushTagDenormToES) — NOT used by direct attachment paths.
      */
     public static TagDenormESWriteResult writeTagPropertiesWithResult(Map<String, Map<String, Object>> entitiesMap, boolean upsert) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("writeTagPropertiesES");

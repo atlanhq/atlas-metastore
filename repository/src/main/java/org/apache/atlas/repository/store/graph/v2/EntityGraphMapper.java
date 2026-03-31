@@ -6192,9 +6192,12 @@ public class EntityGraphMapper {
 
             return result;
         } catch (Exception e) {
-            // Total failure (Cassandra read failed, or ES completely down, or unexpected error).
-            // Emit ALL buffered vertex IDs to DLQ so they can be repaired later.
-            LOG.error("flushTagDenormToES failed for {} vertices, emitting all to DLQ", snapshotMap.size(), e);
+            // Total failure — no ES write succeeded in this flush.
+            // Cassandra read failure: no ES write attempted, all vertices need repair.
+            // Denorm computation failure: no ES write attempted, all vertices need repair.
+            // DLQ repair is idempotent, so emitting all vertices is safe even if some reads succeeded.
+            LOG.error("flushTagDenormToES failed for {} vertices ({}), emitting all to DLQ",
+                    snapshotMap.size(), e.getClass().getSimpleName(), e);
             try {
                 tagDenormDLQProducer.emitFailedVertices(new ArrayList<>(snapshotMap.keySet()), snapshotMap);
             } catch (Exception dlqError) {
