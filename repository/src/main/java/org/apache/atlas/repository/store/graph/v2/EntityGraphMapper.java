@@ -5647,12 +5647,16 @@ public class EntityGraphMapper {
                 originalClassification = tagDAO.findDirectTagByVertexIdAndTagTypeName(vertexIdForPropagations, tagTypeName, false);
 
             if (originalClassification == null) {
-                // Source's direct tag is gone — construct classification from the first propagated tag's metadata.
+                // Source's direct tag is gone — construct a minimal classification for denorm/notification.
                 // This handles orphaned propagations where the source tag was removed but cleanup didn't complete.
+                // Note: batchToDelete Tags from getPropagationsForAttachmentBatch don't have tagMetaJson,
+                // so we construct a minimal AtlasClassification with just the typeName.
                 if (!batchToDelete.isEmpty()) {
-                    LOG.warn("deleteClassificationPropagationV2(entityGuid={}, tagTypeName={}): source direct tag not found, using propagated tag metadata",
+                    LOG.warn("deleteClassificationPropagationV2(entityGuid={}, tagTypeName={}): source direct tag not found, constructing minimal classification",
                             sourceEntityGuid, tagTypeName);
-                    originalClassification = batchToDelete.get(0).toAtlasClassification();
+                    originalClassification = new AtlasClassification(tagTypeName);
+                    originalClassification.setEntityGuid(sourceEntityGuid);
+                    originalClassification.setPropagate(true);
                 } else {
                     LOG.warn("deleteClassificationPropagationV2(entityGuid={}, tagTypeName={}): no direct tag and no propagated tags found, nothing to delete",
                             sourceEntityGuid, tagTypeName);
