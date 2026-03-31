@@ -586,6 +586,9 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                         try {
                             Class primitiveClass = getPrimitiveClass(attribute.getTypeName());
                             AtlasCardinality cardinality = toAtlasCardinality(attribute.getAttributeDef().getCardinality());
+                            // Match createIndexForAttribute logic: isStringField only true
+                            // when the primitive class IS String AND indexType is STRING
+                            boolean repairIsStringField = (primitiveClass == String.class) && isStringField;
 
                             String indexFieldName = createVertexIndex(
                                     managementSystem,
@@ -595,7 +598,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                                     cardinality,
                                     attribute.getAttributeDef().getIsIndexable(),
                                     false,
-                                    isStringField,
+                                    repairIsStringField,
                                     attribute.getAttributeDef().getIndexTypeESConfig(),
                                     attribute.getAttributeDef().getIndexTypeESFields()
                             );
