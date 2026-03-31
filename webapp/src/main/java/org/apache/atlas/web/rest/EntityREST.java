@@ -97,6 +97,7 @@ public class EntityREST {
     public static final String PREFIX_ATTR_ = "attr_";
     private static final int HUNDRED_THOUSAND = 100000;
     private static final int TWO_MILLION = HUNDRED_THOUSAND * 10 * 2;
+    private static final int AUDIT_ENTITY_HEADER_BATCH_SIZE = 500;
     private static  final int  ENTITIES_ALLOWED_IN_BULK = AtlasConfiguration.ATLAS_BULK_API_MAX_ENTITIES_ALLOWED.getInt();
     private static final Set<String> ATTRS_WITH_TWO_MILLION_LIMIT = Arrays.stream(AtlasConfiguration.ATLAS_ENTITIES_ATTRIBUTE_ALLOWED_LARGE_ATTRIBUTES
             .getStringArray())
@@ -296,7 +297,7 @@ public class EntityREST {
             Map<String, Object> attributes = getAttributes(servletRequest);
 
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
-                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.getByUniqueAttributes(" + typeName + "," + attributes + ")");
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.getByUniqueAttributes(" + typeName + ", " + attributes + ")");
             }
 
             AtlasEntityType entityType = ensureEntityType(typeName);
@@ -1146,35 +1147,54 @@ public class EntityREST {
     private void scrubAndSetEntityAudits(EntityAuditSearchResult result, boolean suppressLogs, Set<String> attributes, boolean isCsaExportAgent) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("scrubEntityAudits");
         if (!isCsaExportAgent) { // avoid enriching asset attributes for csa adoption export workloads
-            for (EntityAuditEventV2 event : result.getEntityAudits()) {
-                try {
-                    AtlasSearchResult ret = new AtlasSearchResult();
-                    AtlasEntityWithExtInfo entityWithExtInfo = entitiesStore.getByIdWithoutAuthorization(event.getEntityId());
-                    AtlasEntityHeader entityHeader = new AtlasEntityHeader(entityWithExtInfo.getEntity());
-                    ret.addEntity(entityHeader);
-                    AtlasSearchResultScrubRequest request = new AtlasSearchResultScrubRequest(typeRegistry, ret);
-                    AtlasAuthorizationUtils.scrubSearchResults(request, suppressLogs);
-                    if (entityHeader.getScrubbed() != null && entityHeader.getScrubbed()) {
+            List<EntityAuditEventV2> auditEvents = result.getEntityAudits();
+
+            // Phase 1: Collect unique entity IDs and batch-fetch headers in chunked graph transactions
+            List<String> uniqueEntityIds = auditEvents.stream()
+                    .map(EntityAuditEventV2::getEntityId)
+                    .distinct()
+                    .collect(Collectors.toList());
+
+            Map<String, AtlasEntityHeader> entityHeaderCache = new HashMap<>();
+
+            for (int i = 0; i < uniqueEntityIds.size(); i += AUDIT_ENTITY_HEADER_BATCH_SIZE) {
+                List<String> batch = uniqueEntityIds.subList(i, Math.min(i + AUDIT_ENTITY_HEADER_BATCH_SIZE, uniqueEntityIds.size()));
+                entityHeaderCache.putAll(entitiesStore.getEntityHeadersByIdsWithoutAuthorization(batch, attributes));
+            }
+
+            // Phase 2: Batch-scrub all found entity headers in a single authorization call
+            AtlasSearchResult scrubResult = new AtlasSearchResult();
+            for (AtlasEntityHeader header : entityHeaderCache.values()) {
+                scrubResult.addEntity(header);
+            }
+            AtlasSearchResultScrubRequest scrubRequest = new AtlasSearchResultScrubRequest(typeRegistry, scrubResult);
+            AtlasAuthorizationUtils.scrubSearchResults(scrubRequest, suppressLogs);
+
+            // Phase 3: Apply scrubbed headers to each audit event
+            for (EntityAuditEventV2 event : auditEvents) {
+                String entityId = event.getEntityId();
+                AtlasEntityHeader cachedHeader = entityHeaderCache.get(entityId);
+
+                if (cachedHeader != null) {
+                    if (cachedHeader.getScrubbed() != null && cachedHeader.getScrubbed()) {
                         event.setDetail(null);
                     }
+                    AtlasEntityHeader entityHeader = new AtlasEntityHeader(cachedHeader);
                     Map<String, Object> entityAttrs = entityHeader.getAttributes();
                     if (attributes == null) entityAttrs.clear();
                     else entityAttrs.keySet().retainAll(attributes);
 
                     event.setEntityDetail(entityHeader);
-                } catch (AtlasBaseException e) {
-                    if (e.getAtlasErrorCode() == AtlasErrorCode.INSTANCE_GUID_NOT_FOUND) {
-                        try {
-                            AtlasEntityHeader entityHeader = event.getEntityHeader();
-                            AtlasSearchResult ret = new AtlasSearchResult();
-                            ret.addEntity(entityHeader);
-                            AtlasSearchResultScrubRequest request = new AtlasSearchResultScrubRequest(typeRegistry, ret);
-                            AtlasAuthorizationUtils.scrubSearchResults(request, suppressLogs);
-                            if (entityHeader.getScrubbed() != null && entityHeader.getScrubbed()) {
-                                event.setDetail(null);
-                            }
-                        } catch (AtlasBaseException abe) {
-                            throw abe;
+                } else {
+                    // Entity not found in graph — fall back to header from audit event (e.g. purged entity)
+                    AtlasEntityHeader entityHeader = event.getEntityHeader();
+                    if (entityHeader != null) {
+                        AtlasSearchResult fallbackResult = new AtlasSearchResult();
+                        fallbackResult.addEntity(entityHeader);
+                        AtlasSearchResultScrubRequest fallbackRequest = new AtlasSearchResultScrubRequest(typeRegistry, fallbackResult);
+                        AtlasAuthorizationUtils.scrubSearchResults(fallbackRequest, suppressLogs);
+                        if (entityHeader.getScrubbed() != null && entityHeader.getScrubbed()) {
+                            event.setDetail(null);
                         }
                     }
                 }
@@ -1994,6 +2014,79 @@ public class EntityREST {
 
         } catch (Exception e) {
             LOG.error("Exception while repairIndexByTypeName ", e);
+            throw new AtlasBaseException(e);
+        } finally {
+            AtlasPerfTracer.log(perf);
+        }
+    }
+
+    /**
+     * Starts an async repair job that scans ALL Cassandra vertices, finds entities
+     * matching the given connectionQualifiedName prefix, and reindexes them to ES.
+     * Returns immediately with the job status. Poll GET /repairindex/connection/status
+     * for progress.
+     */
+    @POST
+    @Path("/repairindex/connection")
+    public Map<String, Object> repairIndexByConnection(
+            @QueryParam("connectionQualifiedName") String connectionQualifiedName,
+            @QueryParam("fetchSize") @DefaultValue("1000") int fetchSize,
+            @QueryParam("batchSize") @DefaultValue("500") int batchSize) throws AtlasBaseException {
+
+        Servlets.validateQueryParamLength("connectionQualifiedName", connectionQualifiedName);
+
+        AtlasPerfTracer perf = null;
+
+        try {
+            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.repairIndexByConnection");
+            }
+
+            AtlasAuthorizationUtils.verifyAccess(new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_REPAIR_INDEX), "Admin Repair Index by Connection");
+
+            if (connectionQualifiedName == null || connectionQualifiedName.isEmpty()) {
+                throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "connectionQualifiedName is required");
+            }
+
+            LOG.info("Starting async ES repair for connection: {} (fetchSize={}, batchSize={})",
+                    connectionQualifiedName, fetchSize, batchSize);
+
+            return repairIndex.startReindexByQualifiedNamePrefix(connectionQualifiedName, fetchSize, batchSize);
+
+        } catch (Exception e) {
+            LOG.error("Exception while repairIndexByConnection for '{}'", connectionQualifiedName, e);
+            throw new AtlasBaseException(e);
+        } finally {
+            AtlasPerfTracer.log(perf);
+        }
+    }
+
+    /**
+     * Returns the status of the current/last connection repair job.
+     */
+    @GET
+    @Path("/repairindex/connection/status")
+    public Map<String, Object> repairIndexByConnectionStatus() throws AtlasBaseException {
+        AtlasPerfTracer perf = null;
+
+        try {
+            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.repairIndexByConnectionStatus");
+            }
+
+            AtlasAuthorizationUtils.verifyAccess(new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_REPAIR_INDEX), "Admin Repair Index Status");
+
+            Map<String, Object> status = repairIndex.getRepairConnectionJobStatus();
+            if (status == null) {
+                Map<String, Object> noJob = new LinkedHashMap<>();
+                noJob.put("status", "NO_JOB");
+                noJob.put("message", "No connection repair job has been started");
+                return noJob;
+            }
+            return status;
+
+        } catch (Exception e) {
+            LOG.error("Exception while checking repairIndexByConnection status", e);
             throw new AtlasBaseException(e);
         } finally {
             AtlasPerfTracer.log(perf);

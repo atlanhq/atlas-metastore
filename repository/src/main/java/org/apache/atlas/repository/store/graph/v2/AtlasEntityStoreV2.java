@@ -46,6 +46,7 @@ import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.graphdb.cassandra.CassandraGraph;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.atlas.repository.patches.PatchContext;
 import org.apache.atlas.repository.patches.ReIndexPatch;
@@ -71,6 +72,7 @@ import org.apache.atlas.repository.store.graph.v2.preprocessor.accesscontrol.Sta
 import org.apache.atlas.repository.store.graph.v2.preprocessor.contract.ContractPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.datamesh.DataDomainPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.datamesh.DataProductPreProcessor;
+import org.apache.atlas.repository.store.graph.v2.preprocessor.datamesh.DatasetPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.datamesh.StakeholderTitlePreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.glossary.CategoryPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.glossary.GlossaryPreProcessor;
@@ -406,6 +408,46 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     public AtlasEntityHeader getAtlasEntityHeaderWithoutAuthorization(String guid, String qualifiedName, String typeName) throws AtlasBaseException {
         return extractEntityHeader( guid,  qualifiedName,  typeName);
     }
+
+    @Override
+    @GraphTransaction
+    public Map<String, AtlasEntityHeader> getEntityHeadersByIdsWithoutAuthorization(List<String> guids, Set<String> attributes) throws AtlasBaseException {
+        Map<String, AtlasEntityHeader> ret = new HashMap<>();
+        Set<String> fetchAttributes = attributes != null ? attributes : Collections.emptySet();
+
+        for (String guid : guids) {
+            try {
+                AtlasVertex vertex = entityRetriever.getEntityVertex(guid);
+
+                Set<String> primitiveAttributes = fetchAttributes;
+                if (CollectionUtils.isNotEmpty(fetchAttributes)) {
+                    String typeName = vertex.getProperty(TYPE_NAME_PROPERTY_KEY, String.class);
+                    AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
+                    if (entityType != null) {
+                        primitiveAttributes = fetchAttributes.stream()
+                                .filter(attr -> {
+                                    AtlasAttribute attribute = entityType.getAttribute(attr);
+                                    return attribute != null && !attribute.isObjectRef();
+                                })
+                                .collect(Collectors.toSet());
+                    }
+                }
+
+                AtlasEntityHeader header = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex, primitiveAttributes);
+                if (header != null) {
+                    ret.put(guid, header);
+                }
+            } catch (AtlasBaseException e) {
+                if (e.getAtlasErrorCode() != AtlasErrorCode.INSTANCE_GUID_NOT_FOUND) {
+                    throw e;
+                }
+                LOG.warn("Entity not found for guid: {}, skipping", guid);
+            }
+        }
+
+        return ret;
+    }
+
 
     @Override
     @GraphTransaction
@@ -2391,6 +2433,10 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 preProcessors.add(new DataProductPreProcessor(typeRegistry, entityRetriever, graph, this));
                 break;
 
+            case DATASET_ENTITY_TYPE:
+                preProcessors.add(new DatasetPreProcessor(typeRegistry, entityRetriever, graph));
+                break;
+
             case QUERY_ENTITY_TYPE:
                 preProcessors.add(new QueryPreProcessor(typeRegistry, entityRetriever));
                 break;
@@ -3218,24 +3264,32 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("repairHasLineageForProcess");
 
         try {
-            // Get Gremlin traversal source for native graph operations
-            GraphTraversalSource g = ((AtlasJanusGraph) graph).getGraph().traversal();
+            boolean hasActiveInput;
+            boolean hasActiveOutput;
 
-            // Check for active input edges with active vertices using graph traversal
-            boolean hasActiveInput = g.V(processVertex.getId())
-                    .outE(PROCESS_INPUTS)
-                    .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
-                    .inV()
-                    .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
-                    .hasNext();
+            if (graph instanceof CassandraGraph) {
+                hasActiveInput = hasActiveEdgeWithActiveVertex(processVertex, PROCESS_INPUTS, AtlasEdgeDirection.OUT);
+                hasActiveOutput = hasActiveEdgeWithActiveVertex(processVertex, PROCESS_OUTPUTS, AtlasEdgeDirection.OUT);
+            } else {
+                // Get Gremlin traversal source for native graph operations
+                GraphTraversalSource g = ((AtlasJanusGraph) graph).getGraph().traversal();
 
-            // Check for active output edges with active vertices using graph traversal
-            boolean hasActiveOutput = g.V(processVertex.getId())
-                    .outE(PROCESS_OUTPUTS)
-                    .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
-                    .inV()
-                    .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
-                    .hasNext();
+                // Check for active input edges with active vertices using graph traversal
+                hasActiveInput = g.V(processVertex.getId())
+                        .outE(PROCESS_INPUTS)
+                        .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
+                        .inV()
+                        .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
+                        .hasNext();
+
+                // Check for active output edges with active vertices using graph traversal
+                hasActiveOutput = g.V(processVertex.getId())
+                        .outE(PROCESS_OUTPUTS)
+                        .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
+                        .inV()
+                        .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
+                        .hasNext();
+            }
 
             boolean shouldHaveLineage = hasActiveInput && hasActiveOutput;
             boolean currentHasLineage = getEntityHasLineage(processVertex);
@@ -3342,11 +3396,15 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
      */
     private Boolean checkIfAssetShouldHaveLineage(AtlasVertex assetVertex) {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("checkIfAssetShouldHaveLineage");
-        
+
         try {
+            if (graph instanceof CassandraGraph) {
+                return checkIfAssetShouldHaveLineageViaAtlasApi(assetVertex);
+            }
+
             // Get Gremlin traversal source for native graph operations
             GraphTraversalSource g = ((AtlasJanusGraph) graph).getGraph().traversal();
-            
+
             // Single unified query: Get all active edges connected to this asset that could indicate lineage
             // This replaces multiple separate queries with one comprehensive traversal
             return g.V(assetVertex.getId())
@@ -3374,13 +3432,70 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                         )
                     )
                     .hasNext(); // Early termination - returns true as soon as first valid lineage is found
-                    
+
         } catch (Exception e) {
             LOG.error("Failed to use optimized Gremlin traversal for lineage check, falling back to Atlas queries", e);
             return null;
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
+    }
+
+    /**
+     * Atlas API-based lineage check for non-JanusGraph backends.
+     * Finds active process vertices connected to the asset, then checks if they
+     * have both active inputs and active outputs (i.e., valid lineage).
+     */
+    private Boolean checkIfAssetShouldHaveLineageViaAtlasApi(AtlasVertex assetVertex) {
+        for (String edgeLabel : PROCESS_EDGE_LABELS) {
+            for (AtlasEdgeDirection dir : new AtlasEdgeDirection[]{AtlasEdgeDirection.IN, AtlasEdgeDirection.OUT}) {
+                Iterable<AtlasEdge> edges = assetVertex.getEdges(dir, edgeLabel);
+                for (AtlasEdge edge : edges) {
+                    String edgeState = edge.getProperty(STATE_PROPERTY_KEY, String.class);
+                    if (!ACTIVE_STATE_VALUE.equals(edgeState)) continue;
+
+                    AtlasVertex processVertex = (dir == AtlasEdgeDirection.OUT) ? edge.getInVertex() : edge.getOutVertex();
+                    if (processVertex == null) continue;
+
+                    String processState = processVertex.getProperty(STATE_PROPERTY_KEY, String.class);
+                    if (!ACTIVE_STATE_VALUE.equals(processState)) continue;
+
+                    // Short-circuit: process already has lineage flag
+                    Boolean processHasLineage = processVertex.getProperty(HAS_LINEAGE, Boolean.class);
+                    if (Boolean.TRUE.equals(processHasLineage)) {
+                        return true;
+                    }
+
+                    // Check if process has valid input/output structure
+                    if (hasActiveEdgeWithActiveVertex(processVertex, PROCESS_INPUTS, AtlasEdgeDirection.OUT)
+                            && hasActiveEdgeWithActiveVertex(processVertex, PROCESS_OUTPUTS, AtlasEdgeDirection.OUT)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Check if a vertex has at least one active edge (with given label and direction)
+     * whose other-end vertex is also active.
+     */
+    private boolean hasActiveEdgeWithActiveVertex(AtlasVertex vertex, String edgeLabel, AtlasEdgeDirection direction) {
+        Iterable<AtlasEdge> edges = vertex.getEdges(direction, edgeLabel);
+        for (AtlasEdge edge : edges) {
+            String edgeState = edge.getProperty(STATE_PROPERTY_KEY, String.class);
+            if (!ACTIVE_STATE_VALUE.equals(edgeState)) continue;
+
+            AtlasVertex otherVertex = (direction == AtlasEdgeDirection.OUT) ? edge.getInVertex() : edge.getOutVertex();
+            if (otherVertex != null) {
+                String otherState = otherVertex.getProperty(STATE_PROPERTY_KEY, String.class);
+                if (ACTIVE_STATE_VALUE.equals(otherState)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     public void repairHasLineageWithAtlasEdges(Set<AtlasEdge> inputOutputEdges) {

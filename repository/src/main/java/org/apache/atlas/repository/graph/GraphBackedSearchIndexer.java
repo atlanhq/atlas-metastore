@@ -97,6 +97,9 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
         }
     };
 
+    // Tracks property names for which we've already logged the "propertyKey is null" warning, to avoid log spam
+    private static final Set<String> loggedNullPropertyKeyWarnings = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     // Added for type lookup when indexing the new typedefs
     private final AtlasTypeRegistry typeRegistry;
     private final List<IndexChangeListener> indexChangeListeners = new ArrayList<>();
@@ -246,6 +249,14 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
 
         try {
             management = provider.get().getManagementSystem();
+
+            // Ensure property keys and mixed index entries exist for all entity attributes.
+            // For persistent-schema backends (JanusGraph) this is a no-op since the schema
+            // is loaded from disk. For in-memory-schema backends (CassandraGraph) this is
+            // required because property keys and fieldKeys are lost on restart.
+            for (AtlasBaseTypeDef typeDef : typeDefs) {
+                updateIndexForTypeDef(management, typeDef);
+            }
 
             //resolve index fields names
             resolveIndexFieldNames(management, changedTypeDefs);

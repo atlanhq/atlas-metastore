@@ -43,7 +43,7 @@ import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.graphdb.janus.JanusUtils;
+import org.apache.atlas.repository.store.graph.v2.LongEncodingUtil;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
 import org.apache.atlas.type.AtlasEntityType;
@@ -463,7 +463,7 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
     }
 
     private AtlasEdge createRelationship(AtlasVertex end1Vertex, AtlasVertex end2Vertex, AtlasRelationship relationship, boolean existingRelationshipCheck, boolean skipAuth) throws AtlasBaseException {
-        AtlasEdge ret;
+        AtlasEdge ret = null;
 
         try {
             validateRelationship(end1Vertex, end2Vertex, relationship);
@@ -481,7 +481,6 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
 
             AtlasRelationshipType relationType = typeRegistry.getRelationshipTypeByName(relationship.getTypeName());
 
-
             AtlasEntityHeader end1Entity = entityRetriever.toAtlasEntityHeaderWithClassifications(end1Vertex);
             AtlasEntityHeader end2Entity = entityRetriever.toAtlasEntityHeaderWithClassifications(end2Vertex);
 
@@ -489,7 +488,6 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
                 AtlasAuthorizationUtils.verifyAccess(new AtlasRelationshipAccessRequest(typeRegistry, AtlasPrivilege.RELATIONSHIP_ADD,
                         relationship.getTypeName(), end1Entity, end2Entity));
             }
-
 
             if (existingRelationshipCheck) {
                 ret = graphHelper.getOrCreateEdge(end1Vertex, end2Vertex, relationshipLabel);
@@ -979,7 +977,7 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
                         return esDocIdMapping;
                     }
 
-                    final String docId = JanusUtils.toLongEncoding(relationshipEndToVertexIdMap.get(atlasObjectId));
+                    final String docId = LongEncodingUtil.vertexIdToDocId(String.valueOf(relationshipEndToVertexIdMap.get(atlasObjectId)));
                     String guid = atlasObjectId.getGuid();
                     AtlasObjectId end1 = r.getEnd1();
                     AtlasObjectId end2 = r.getEnd2();

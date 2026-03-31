@@ -234,6 +234,6 @@ public abstract class AbstractNotification implements NotificationInterface {
             msgIdSuffix = new AtomicInteger(0);
         }
 
-        return nextMsgIdPrefix + "_" + Integer.toString(nextMsgIdSuffix);
+        return nextMsgIdPrefix + "_" + nextMsgIdSuffix;
     }
 }
