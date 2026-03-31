@@ -170,13 +170,7 @@ public class PoliciesStore {
     }
 
     private static final class ServicePolicyIndex {
-        private static final ServicePolicyIndex EMPTY = new ServicePolicyIndex(
-                Collections.emptyMap(),
-                Collections.emptyMap(),
-                Collections.emptyMap(),
-                Collections.emptyMap(),
-                Collections.emptyMap(),
-                Collections.emptyMap());
+        private static final ServicePolicyIndex EMPTY = new ServicePolicyIndex();
 
         private final Map<String, List<RangerPolicy>> policiesByAction;
         private final Map<String, List<RangerPolicy>> allowPoliciesByAction;
@@ -184,6 +178,15 @@ public class PoliciesStore {
         private final Map<String, PrincipalPolicyIndex> principalPoliciesByAction;
         private final Map<String, PrincipalPolicyIndex> allowPrincipalPoliciesByAction;
         private final Map<String, PrincipalPolicyIndex> denyPrincipalPoliciesByAction;
+
+        private ServicePolicyIndex() {
+            this.policiesByAction = Collections.emptyMap();
+            this.allowPoliciesByAction = Collections.emptyMap();
+            this.denyPoliciesByAction = Collections.emptyMap();
+            this.principalPoliciesByAction = Collections.emptyMap();
+            this.allowPrincipalPoliciesByAction = Collections.emptyMap();
+            this.denyPrincipalPoliciesByAction = Collections.emptyMap();
+        }
 
         private ServicePolicyIndex(Map<String, List<RangerPolicy>> policiesByAction,
                                    Map<String, List<RangerPolicy>> allowPoliciesByAction,
