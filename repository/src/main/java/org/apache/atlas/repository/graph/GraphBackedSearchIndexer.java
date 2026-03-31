@@ -580,6 +580,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                         // createVertexIndex() is idempotent: it checks getPropertyKey() first,
                         // creates only if missing, and checks getFieldKeys().contains() before
                         // adding to the mixed index.
+                        //
                         LOG.warn("resolveIndexFieldName(attribute={}): propertyKey is null — "
                                 + "attempting auto-repair for vertexPropertyName={}",
                                 attribute.getQualifiedName(), attribute.getVertexPropertyName());
