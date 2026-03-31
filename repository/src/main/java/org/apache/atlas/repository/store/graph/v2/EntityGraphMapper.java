@@ -4778,38 +4778,45 @@ public class EntityGraphMapper {
 
         Tag currentTag = tagDAO.findDirectTagByVertexIdAndTagTypeNameWithAssetMetadata(entityVertex.getIdForDisplay(), classificationName, false);
         if (Objects.isNull(currentTag)) {
-            // Not a direct tag — check if it's a propagated tag and create a delete propagation task
-            List<AtlasClassification> propagatedTags = tagDAO.findByVertexIdAndPropagated(entityVertex.getIdForDisplay());
-            AtlasClassification propagatedTag = propagatedTags.stream()
-                    .filter(c -> classificationName.equals(c.getTypeName()))
-                    .findFirst().orElse(null);
+            // Not a direct tag — check if it's a propagated tag and create delete propagation tasks for orphans
+            String vertexId = entityVertex.getIdForDisplay();
+            List<Tag> allTags = tagDAO.getAllTagsByVertexId(vertexId);
 
-            if (propagatedTag != null && StringUtils.isNotEmpty(propagatedTag.getEntityGuid())) {
-                // Find the source vertex to check if it still has the direct tag
-                AtlasVertex sourceVertex = AtlasGraphUtilsV2.findByGuid(this.graph, propagatedTag.getEntityGuid());
-                if (sourceVertex != null) {
-                    String sourceVertexId = sourceVertex.getIdForDisplay();
+            List<Tag> propagatedTagsForType = allTags.stream()
+                    .filter(t -> classificationName.equals(t.getTagTypeName()))
+                    .filter(t -> !vertexId.equals(t.getSourceVertexId()))
+                    .collect(Collectors.toList());
 
-                    // Only clean up if the source no longer has an active direct tag — i.e. this is an orphaned propagation
-                    AtlasClassification sourceDirectTag = tagDAO.findDirectTagByVertexIdAndTagTypeName(sourceVertexId, classificationName, false);
-                    if (sourceDirectTag == null) {
-                        String currentUser = RequestContext.getCurrentUser();
+            boolean createdTask = false;
+            for (Tag propagatedTag : propagatedTagsForType) {
+                String sourceVertexId = propagatedTag.getSourceVertexId();
 
-                        Map<String, Object> taskParams = new HashMap<>() {{
-                            put(PARAM_ENTITY_GUID, propagatedTag.getEntityGuid());
-                            put(PARAM_SOURCE_VERTEX_ID, sourceVertexId);
-                            put("newMode", true);
-                        }};
+                // Only clean up if the source no longer has an active direct tag — i.e. this is an orphaned propagation
+                AtlasClassification sourceDirectTag = tagDAO.findDirectTagByVertexIdAndTagTypeName(sourceVertexId, classificationName, false);
+                if (sourceDirectTag == null) {
+                    String sourceEntityGuid = propagatedTag.getTagMetaJson() != null
+                            ? (String) propagatedTag.getTagMetaJson().get("entityGuid") : null;
+                    String currentUser = RequestContext.getCurrentUser();
+                    String taskEntityGuid = StringUtils.isNotEmpty(sourceEntityGuid) ? sourceEntityGuid : entityGuid;
 
-                        LOG.info("Classification {} on entity {} is an orphaned propagation from {} (source has no direct tag), creating delete propagation task",
-                                classificationName, entityGuid, propagatedTag.getEntityGuid());
-                        taskManagement.createTaskV2(CLASSIFICATION_PROPAGATION_DELETE, currentUser, taskParams, classificationName, propagatedTag.getEntityGuid());
-                        return;
-                    } else {
-                        LOG.warn("Classification {} on entity {} is propagated from {} which still has the direct tag — cannot remove propagated tag directly",
-                                classificationName, entityGuid, propagatedTag.getEntityGuid());
-                    }
+                    Map<String, Object> taskParams = new HashMap<>() {{
+                        put(PARAM_ENTITY_GUID, taskEntityGuid);
+                        put(PARAM_SOURCE_VERTEX_ID, sourceVertexId);
+                        put("newMode", true);
+                    }};
+
+                    LOG.info("Classification {} on entity {} is an orphaned propagation from source vertex {}, creating delete propagation task",
+                            classificationName, entityGuid, sourceVertexId);
+                    taskManagement.createTaskV2(CLASSIFICATION_PROPAGATION_DELETE, currentUser, taskParams, classificationName, taskEntityGuid);
+                    createdTask = true;
+                } else {
+                    LOG.warn("Classification {} on entity {} is propagated from source vertex {} which still has the direct tag — cannot remove",
+                            classificationName, entityGuid, sourceVertexId);
                 }
+            }
+
+            if (createdTask) {
+                return;
             }
 
             LOG.error(AtlasErrorCode.CLASSIFICATION_NOT_FOUND.getFormattedErrorMessage(classificationName));
