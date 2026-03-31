@@ -4778,6 +4778,19 @@ public class EntityGraphMapper {
 
         Tag currentTag = tagDAO.findDirectTagByVertexIdAndTagTypeNameWithAssetMetadata(entityVertex.getIdForDisplay(), classificationName, false);
         if (Objects.isNull(currentTag)) {
+            // Not a direct tag — check if it's a propagated tag
+            List<AtlasClassification> propagatedTags = tagDAO.findByVertexIdAndPropagated(entityVertex.getIdForDisplay());
+            AtlasClassification propagatedTag = propagatedTags.stream()
+                    .filter(c -> classificationName.equals(c.getTypeName()))
+                    .findFirst().orElse(null);
+
+            if (propagatedTag != null && StringUtils.isNotEmpty(propagatedTag.getEntityGuid())) {
+                LOG.info("Classification {} on entity {} is propagated from {}, routing to deletePropagatedClassification",
+                        classificationName, entityGuid, propagatedTag.getEntityGuid());
+                deletePropagatedClassification(entityGuid, classificationName, propagatedTag.getEntityGuid());
+                return;
+            }
+
             LOG.error(AtlasErrorCode.CLASSIFICATION_NOT_FOUND.getFormattedErrorMessage(classificationName));
             // If a client is trying to delete this tag, it might be existing in ES but not in C*. Allow it to be cleaned in ES.
             addEsDeferredOperation(entityVertex, classificationName);
