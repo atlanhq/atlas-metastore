@@ -19,6 +19,7 @@ package org.apache.atlas.repository.store.graph.v2.purge;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
@@ -26,8 +27,8 @@ import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchDatabase;
-import org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModels.BatchWork;
-import org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModels.PurgeContext;
+import org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModel.BatchWork;
+import org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModel.PurgeContext;
 import org.apache.http.entity.ContentType;
 import org.apache.http.nio.entity.NStringEntity;
 import org.elasticsearch.client.Request;
@@ -43,17 +44,21 @@ import java.util.List;
 import java.util.concurrent.BlockingQueue;
 
 import static org.apache.atlas.repository.Constants.*;
-import static org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModels.MAPPER;
+import static org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModel.MAPPER;
 
 /**
- * All Elasticsearch I/O for the BulkPurge subsystem: scroll, reconciliation,
- * query builders, ES doc deletion, and ES-based entity lookups.
+ * All Elasticsearch I/O for the BulkPurge subsystem: PIT-based pagination,
+ * reconciliation, query builders, ES doc deletion, and ES-based entity lookups.
+ *
+ * <p>Uses Point-in-Time (PIT) + {@code search_after} instead of the deprecated
+ * scroll API. PIT is stateless on the client and more memory-efficient on ES.
  */
 public class PurgeESOperations {
     private static final Logger LOG = LoggerFactory.getLogger(PurgeESOperations.class);
 
-    private static final int ES_PAGE_SIZE          = 5000;
-    private static final int SCROLL_TIMEOUT_MINUTES = 30;
+    private static final int    ES_PAGE_SIZE           = 5000;
+    private static final int    PIT_KEEP_ALIVE_MINUTES = 30;
+    private static final String PIT_KEEP_ALIVE         = PIT_KEEP_ALIVE_MINUTES + "m";
 
     private final AtlasGraph graph;
     private final long esSettleWaitMs;
@@ -80,7 +85,7 @@ public class PurgeESOperations {
         this.esClient = client;
     }
 
-    // ======================== COUNT / SCROLL ========================
+    // ======================== COUNT ========================
 
     public long getEntityCount(String esQuery) throws Exception {
         RestClient client = getEsClient();
@@ -95,33 +100,71 @@ public class PurgeESOperations {
         return root.get("count").asLong();
     }
 
+    // ======================== PIT MANAGEMENT ========================
+
     /**
-     * Stream ES scroll results into the batch queue.
+     * Open a Point-in-Time (PIT) against the vertex index.
+     * @return PIT ID string
+     */
+    public String openPIT(RestClient client) throws Exception {
+        String endpoint = "/" + VERTEX_INDEX_NAME + "/_pit?keep_alive=" + PIT_KEEP_ALIVE;
+        Request request = new Request("POST", endpoint);
+
+        Response response = client.performRequest(request);
+        String responseBody = readResponseBody(response);
+        JsonNode root = MAPPER.readTree(responseBody);
+        return root.get("id").asText();
+    }
+
+    /**
+     * Close a Point-in-Time to free ES resources.
+     */
+    public void closePIT(RestClient client, String pitId) {
+        try {
+            if (pitId != null) {
+                Request request = new Request("DELETE", "/_pit");
+                String body = MAPPER.writeValueAsString(
+                        MAPPER.createObjectNode().put("id", pitId));
+                request.setEntity(new NStringEntity(body, ContentType.APPLICATION_JSON));
+                client.performRequest(request);
+            }
+        } catch (Exception e) {
+            LOG.warn("BulkPurge: Failed to close PIT", e);
+        }
+    }
+
+    // ======================== PIT-BASED STREAMING ========================
+
+    /**
+     * Stream ES results into the batch queue using PIT + search_after pagination.
      */
     public void streamESScrollIntoBatchQueue(PurgeContext ctx,
                                              BlockingQueue<BatchWork> batchQueue,
                                              int batchSize) throws Exception {
         RestClient client = getEsClient();
-        String scrollTimeout = SCROLL_TIMEOUT_MINUTES + "m";
-
-        String scrollQuery = buildScrollQuery(ctx.esQuery, ES_PAGE_SIZE);
-
-        String endpoint = "/" + VERTEX_INDEX_NAME + "/_search?scroll=" + scrollTimeout;
-        Request searchRequest = new Request("POST", endpoint);
-        searchRequest.setEntity(new NStringEntity(scrollQuery, ContentType.APPLICATION_JSON));
-
-        Response response = client.performRequest(searchRequest);
-        String responseBody = readResponseBody(response);
-        JsonNode root = MAPPER.readTree(responseBody);
-
-        String scrollId = root.get("_scroll_id").asText();
-        JsonNode hits = root.get("hits").get("hits");
-
-        List<String> currentBatch = new ArrayList<>(batchSize);
-        int batchIndex = 0;
+        String pitId = openPIT(client);
 
         try {
+            String searchQuery = buildPITSearchQuery(ctx.esQuery, ES_PAGE_SIZE, pitId, null);
+
+            Request searchRequest = new Request("POST", "/_search");
+            searchRequest.setEntity(new NStringEntity(searchQuery, ContentType.APPLICATION_JSON));
+
+            Response response = client.performRequest(searchRequest);
+            String responseBody = readResponseBody(response);
+            JsonNode root = MAPPER.readTree(responseBody);
+            JsonNode hits = root.get("hits").get("hits");
+
+            // Update PIT ID from response (ES may return a new one)
+            if (root.has("pit_id")) {
+                pitId = root.get("pit_id").asText();
+            }
+
+            List<String> currentBatch = new ArrayList<>(batchSize);
+            int batchIndex = 0;
+
             while (hits != null && hits.size() > 0 && !ctx.cancelRequested) {
+                JsonNode lastHit = null;
                 for (JsonNode hit : hits) {
                     if (ctx.cancelRequested) break;
 
@@ -133,43 +176,35 @@ public class PurgeESOperations {
                         batchQueue.put(new BatchWork(new ArrayList<>(currentBatch), batchIndex++));
                         currentBatch.clear();
                     }
+                    lastHit = hit;
                 }
 
-                if (ctx.cancelRequested) break;
+                if (ctx.cancelRequested || lastHit == null) break;
 
-                Request scrollRequest = new Request("POST", "/_search/scroll");
-                String scrollBody = MAPPER.writeValueAsString(
-                        MAPPER.createObjectNode()
-                                .put("scroll", scrollTimeout)
-                                .put("scroll_id", scrollId));
-                scrollRequest.setEntity(new NStringEntity(scrollBody, ContentType.APPLICATION_JSON));
+                // Extract sort values from last hit for search_after
+                JsonNode sortValues = lastHit.get("sort");
+                if (sortValues == null) break;
 
-                response = client.performRequest(scrollRequest);
+                searchQuery = buildPITSearchQuery(ctx.esQuery, ES_PAGE_SIZE, pitId, sortValues);
+
+                searchRequest = new Request("POST", "/_search");
+                searchRequest.setEntity(new NStringEntity(searchQuery, ContentType.APPLICATION_JSON));
+
+                response = client.performRequest(searchRequest);
                 responseBody = readResponseBody(response);
                 root = MAPPER.readTree(responseBody);
-                scrollId = root.get("_scroll_id").asText();
                 hits = root.get("hits").get("hits");
+
+                if (root.has("pit_id")) {
+                    pitId = root.get("pit_id").asText();
+                }
             }
 
             if (!currentBatch.isEmpty() && !ctx.cancelRequested) {
                 batchQueue.put(new BatchWork(new ArrayList<>(currentBatch), batchIndex));
             }
         } finally {
-            clearScroll(client, scrollId);
-        }
-    }
-
-    public void clearScroll(RestClient client, String scrollId) {
-        try {
-            if (scrollId != null) {
-                Request clearRequest = new Request("DELETE", "/_search/scroll");
-                String body = MAPPER.writeValueAsString(
-                        MAPPER.createObjectNode().put("scroll_id", scrollId));
-                clearRequest.setEntity(new NStringEntity(body, ContentType.APPLICATION_JSON));
-                client.performRequest(clearRequest);
-            }
-        } catch (Exception e) {
-            LOG.warn("BulkPurge: Failed to clear scroll", e);
+            closePIT(client, pitId);
         }
     }
 
@@ -177,7 +212,7 @@ public class PurgeESOperations {
 
     /**
      * Reconciliation-based ES cleanup. Waits for JanusGraph's ES index mutations
-     * to settle, then scrolls remaining docs and verifies each against JanusGraph.
+     * to settle, then paginates remaining docs and verifies each against JanusGraph.
      */
     public void reconcileESCleanup(PurgeContext ctx) {
         try {
@@ -206,24 +241,12 @@ public class PurgeESOperations {
     }
 
     /**
-     * Scroll remaining ES docs and for each:
+     * Paginate remaining ES docs using PIT + search_after and for each:
      * - If vertex is gone from graph: delete the ES doc (index lag orphan)
      * - If vertex still in graph: retry graph deletion, then delete ES doc
      */
     private void reconcileESOrphans(RestClient client, PurgeContext ctx) throws Exception {
-        String scrollTimeout = SCROLL_TIMEOUT_MINUTES + "m";
-        String scrollQuery = buildScrollQuery(ctx.esQuery, ES_PAGE_SIZE);
-
-        String endpoint = "/" + VERTEX_INDEX_NAME + "/_search?scroll=" + scrollTimeout;
-        Request searchRequest = new Request("POST", endpoint);
-        searchRequest.setEntity(new NStringEntity(scrollQuery, ContentType.APPLICATION_JSON));
-
-        Response response = client.performRequest(searchRequest);
-        String responseBody = readResponseBody(response);
-        JsonNode root = MAPPER.readTree(responseBody);
-
-        String scrollId = root.get("_scroll_id").asText();
-        JsonNode hits = root.get("hits").get("hits");
+        String pitId = openPIT(client);
 
         int totalOrphansDeleted = 0;
         int totalRetryDeleted = 0;
@@ -231,10 +254,26 @@ public class PurgeESOperations {
         int totalCheckErrors = 0;
 
         try {
+            String searchQuery = buildPITSearchQuery(ctx.esQuery, ES_PAGE_SIZE, pitId, null);
+
+            Request searchRequest = new Request("POST", "/_search");
+            searchRequest.setEntity(new NStringEntity(searchQuery, ContentType.APPLICATION_JSON));
+
+            Response response = client.performRequest(searchRequest);
+            String responseBody = readResponseBody(response);
+            JsonNode root = MAPPER.readTree(responseBody);
+            JsonNode hits = root.get("hits").get("hits");
+
+            if (root.has("pit_id")) {
+                pitId = root.get("pit_id").asText();
+            }
+
             while (hits != null && hits.size() > 0 && !ctx.cancelRequested) {
                 List<String> esDocIds = new ArrayList<>(hits.size());
+                JsonNode lastHit = null;
                 for (JsonNode hit : hits) {
                     esDocIds.add(hit.get("_id").asText());
+                    lastHit = hit;
                 }
 
                 List<String> orphanDocIds = new ArrayList<>();
@@ -268,23 +307,27 @@ public class PurgeESOperations {
                     totalRetryFailed += result[1];
                 }
 
-                if (ctx.cancelRequested) break;
+                if (ctx.cancelRequested || lastHit == null) break;
 
-                Request scrollRequest = new Request("POST", "/_search/scroll");
-                String scrollBody = MAPPER.writeValueAsString(
-                        MAPPER.createObjectNode()
-                                .put("scroll", scrollTimeout)
-                                .put("scroll_id", scrollId));
-                scrollRequest.setEntity(new NStringEntity(scrollBody, ContentType.APPLICATION_JSON));
+                JsonNode sortValues = lastHit.get("sort");
+                if (sortValues == null) break;
 
-                response = client.performRequest(scrollRequest);
+                searchQuery = buildPITSearchQuery(ctx.esQuery, ES_PAGE_SIZE, pitId, sortValues);
+
+                searchRequest = new Request("POST", "/_search");
+                searchRequest.setEntity(new NStringEntity(searchQuery, ContentType.APPLICATION_JSON));
+
+                response = client.performRequest(searchRequest);
                 responseBody = readResponseBody(response);
                 root = MAPPER.readTree(responseBody);
-                scrollId = root.get("_scroll_id").asText();
                 hits = root.get("hits").get("hits");
+
+                if (root.has("pit_id")) {
+                    pitId = root.get("pit_id").asText();
+                }
             }
         } finally {
-            clearScroll(client, scrollId);
+            closePIT(client, pitId);
         }
 
         refreshEsIndex(client);
@@ -573,17 +616,42 @@ public class PurgeESOperations {
         }
     }
 
-    public String buildScrollQuery(String esQuery, int pageSize) {
+    /**
+     * Build a search query for PIT + search_after pagination.
+     *
+     * @param esQuery      the base ES query (containing a "query" field)
+     * @param pageSize     number of hits per page
+     * @param pitId        the PIT ID
+     * @param searchAfter  sort values from the last hit of the previous page (null for first page)
+     */
+    public String buildPITSearchQuery(String esQuery, int pageSize, String pitId, JsonNode searchAfter) {
         try {
             JsonNode queryNode = MAPPER.readTree(esQuery);
-            ObjectNode scrollQuery = MAPPER.createObjectNode();
-            scrollQuery.set("query", queryNode.get("query"));
-            scrollQuery.put("size", pageSize);
-            scrollQuery.put("_source", false);
-            scrollQuery.put("track_total_hits", true);
-            return MAPPER.writeValueAsString(scrollQuery);
+            ObjectNode searchQuery = MAPPER.createObjectNode();
+            searchQuery.set("query", queryNode.get("query"));
+            searchQuery.put("size", pageSize);
+            searchQuery.put("_source", false);
+            searchQuery.put("track_total_hits", true);
+
+            // PIT configuration
+            ObjectNode pitNode = MAPPER.createObjectNode();
+            pitNode.put("id", pitId);
+            pitNode.put("keep_alive", PIT_KEEP_ALIVE);
+            searchQuery.set("pit", pitNode);
+
+            // Sort by _shard_doc for efficient PIT pagination (no real sort cost)
+            ArrayNode sortArray = MAPPER.createArrayNode();
+            sortArray.add(MAPPER.createObjectNode().put("_shard_doc", "asc"));
+            searchQuery.set("sort", sortArray);
+
+            // search_after for subsequent pages
+            if (searchAfter != null) {
+                searchQuery.set("search_after", searchAfter);
+            }
+
+            return MAPPER.writeValueAsString(searchQuery);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to build scroll query", e);
+            throw new RuntimeException("Failed to build PIT search query", e);
         }
     }
 

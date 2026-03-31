@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * Data classes and shared constants for the BulkPurge subsystem.
  * All inner classes are DTOs with no behavior beyond serialization helpers.
  */
-public final class BulkPurgeModels {
+public final class BulkPurgeModel {
 
     // Shared constants used across the purge subsystem
     public static final String REDIS_KEY_PREFIX        = "bulk_purge:";
@@ -41,7 +41,7 @@ public final class BulkPurgeModels {
 
     public static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private BulkPurgeModels() {} // Utility class — no instances
+    private BulkPurgeModel() {} // Utility class — no instances
 
     // ======================== PURGE CONTEXT ========================
 

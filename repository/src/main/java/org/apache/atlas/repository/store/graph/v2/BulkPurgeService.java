@@ -32,8 +32,8 @@ import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModels;
-import org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModels.*;
+import org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModel;
+import org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModel.*;
 import org.apache.atlas.repository.store.graph.v2.purge.PurgeBatchCleanupService;
 import org.apache.atlas.repository.store.graph.v2.purge.PurgeESOperations;
 import org.apache.atlas.repository.store.graph.v2.purge.PurgeOrphanRecovery;
@@ -61,7 +61,7 @@ import java.util.concurrent.*;
 import org.apache.atlas.discovery.EntityDiscoveryService;
 
 import static org.apache.atlas.repository.Constants.*;
-import static org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModels.*;
+import static org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModel.*;
 import static org.apache.atlas.type.Constants.HAS_LINEAGE;
 
 /**
@@ -295,7 +295,7 @@ public class BulkPurgeService {
         String redisValue = redisService.getValue("bulk_purge_request:" + requestId);
         if (redisValue != null) {
             try {
-                Map<String, Object> status = BulkPurgeModels.MAPPER.readValue(redisValue, Map.class);
+                Map<String, Object> status = BulkPurgeModel.MAPPER.readValue(redisValue, Map.class);
                 status.put("source", "redis");
                 status.put("respondingPod", HOSTNAME);
                 return status;
@@ -329,7 +329,7 @@ public class BulkPurgeService {
         }
 
         try {
-            JsonNode status = BulkPurgeModels.MAPPER.readTree(redisValue);
+            JsonNode status = BulkPurgeModel.MAPPER.readTree(redisValue);
             String purgeKey = status.has("purgeKey") ? status.get("purgeKey").asText() : null;
             if (purgeKey == null) {
                 return false;
@@ -378,7 +378,7 @@ public class BulkPurgeService {
         String existingStatus = redisService.getValue(redisKey);
         if (existingStatus != null) {
             try {
-                JsonNode statusNode = BulkPurgeModels.MAPPER.readTree(existingStatus);
+                JsonNode statusNode = BulkPurgeModel.MAPPER.readTree(existingStatus);
                 String status = statusNode.has("status") ? statusNode.get("status").asText() : "";
                 if ("RUNNING".equals(status)) {
                     long lastHeartbeat = statusNode.has("lastHeartbeat") ? statusNode.get("lastHeartbeat").asLong() : 0;
@@ -757,6 +757,10 @@ public class BulkPurgeService {
                 if (vertex == null) continue;
 
                 String typeName = vertex.getProperty(ENTITY_TYPE_PROPERTY_KEY, String.class);
+                if (typeName == null) {
+                    typeName = ""; // guard against null — type-specific branches will safely skip
+                }
+
                 String guid = vertex.getProperty(GUID_PROPERTY_KEY, String.class);
 
                 Boolean vertexHasLineage = vertex.getProperty(HAS_LINEAGE, Boolean.class);
@@ -1141,7 +1145,7 @@ public class BulkPurgeService {
         try {
             long duration = System.currentTimeMillis() - startTime;
 
-            com.fasterxml.jackson.databind.node.ObjectNode detailsNode = BulkPurgeModels.MAPPER.createObjectNode();
+            com.fasterxml.jackson.databind.node.ObjectNode detailsNode = BulkPurgeModel.MAPPER.createObjectNode();
             detailsNode.put("purgeKey", ctx.purgeKey);
             detailsNode.put("purgeMode", ctx.purgeMode);
             detailsNode.put("totalDeleted", ctx.totalDeleted.get());

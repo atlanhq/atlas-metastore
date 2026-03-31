@@ -30,7 +30,7 @@ import org.apache.atlas.repository.store.aliasstore.ESAliasStore;
 import org.apache.atlas.repository.store.aliasstore.IndexAliasStore;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
-import org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModels.*;
+import org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModel.*;
 import org.apache.atlas.repository.store.graph.v2.tags.PaginatedTagResult;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;

@@ -21,7 +21,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.atlas.AtlasConfiguration;
-import org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModels.PurgeContext;
+import org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModel.PurgeContext;
 import org.apache.atlas.service.redis.RedisService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,7 +31,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.ConcurrentHashMap;
 
-import static org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModels.*;
+import static org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModel.*;
 
 /**
  * Orphan checker background thread + Redis status management for the BulkPurge subsystem.
