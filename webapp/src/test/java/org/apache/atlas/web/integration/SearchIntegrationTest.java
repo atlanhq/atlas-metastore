@@ -56,11 +56,7 @@ public class SearchIntegrationTest extends AtlasInProcessBaseIT {
 
     private static final Logger LOG = LoggerFactory.getLogger(SearchIntegrationTest.class);
 
-    // Increased from 60s to 120s to accommodate self-healing schema repairs during startup.
-    // On a fresh test environment, resolveIndexFieldName auto-repairs missing property keys
-    // which adds schema mutations to the management commit — ES needs more time to stabilize.
-    // This does not affect production where few/zero keys are typically missing.
-    private static final int MAX_WAIT_SECONDS = 120;
+    private static final int MAX_WAIT_SECONDS = 60;
     private final long testId = System.currentTimeMillis();
     private final String searchPrefix = "searchtest" + testId;
 

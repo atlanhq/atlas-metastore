@@ -107,6 +107,14 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
     private Set<String> vertexIndexKeys      = new HashSet<>();
     private IndexHealthMetricService indexHealthMetricService;
 
+    // Self-healing guard: only auto-repair missing property keys on established schemas.
+    // On a fresh environment, null property keys are normal — they haven't been created yet.
+    // The self-healing createVertexIndex() adds schema mutations to the management commit
+    // which can overwhelm ES on small environments.
+    // Production tenants with Cedar models loaded have 2000+ field keys.
+    // Fresh/test environments have 30-50 during initial setup.
+    private static final int MIN_FIELD_KEYS_FOR_SELF_HEALING = 100;
+
     public static boolean isValidSearchWeight(int searchWeight) {
         if (searchWeight != -1 ) {
             if (searchWeight < 1 || searchWeight > 10) {
@@ -581,6 +589,17 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                         // creates only if missing, and checks getFieldKeys().contains() before
                         // adding to the mixed index.
                         //
+                        // Guard: only self-heal on established schemas where null property key
+                        // indicates a Cedar push failure, not fresh typedef loading.
+                        AtlasGraphIndex vertexIdx = managementSystem.getGraphIndex(Constants.VERTEX_INDEX);
+                        int fieldKeyCount = (vertexIdx != null) ? vertexIdx.getFieldKeys().size() : 0;
+
+                        if (fieldKeyCount < MIN_FIELD_KEYS_FOR_SELF_HEALING) {
+                            LOG.warn("resolveIndexFieldName(attribute={}): propertyKey is null for vertexPropertyName={}. "
+                                    + "Skipping self-healing (schema has {} field keys, threshold: {})",
+                                    attribute.getQualifiedName(), attribute.getVertexPropertyName(),
+                                    fieldKeyCount, MIN_FIELD_KEYS_FOR_SELF_HEALING);
+                        } else {
                         LOG.warn("resolveIndexFieldName(attribute={}): propertyKey is null — "
                                 + "attempting auto-repair for vertexPropertyName={}",
                                 attribute.getQualifiedName(), attribute.getVertexPropertyName());
@@ -616,10 +635,16 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                                 // Resolve all entity types that inherit this attribute
                                 String definedInTypeName = attribute.getDefinedInType() != null
                                         ? attribute.getDefinedInType().getTypeName() : "unknown";
+                                // Use vertex property name for matching to avoid false positives
+                                // from unqualified short names (e.g., "score" matching across unrelated types)
+                                String repairedVertexPropertyName = attribute.getVertexPropertyName();
                                 Set<String> affectedEntityTypes = new HashSet<>();
                                 for (AtlasEntityType entityType : typeRegistry.getAllEntityTypes()) {
-                                    if (entityType.getAllAttributes().containsKey(attribute.getName())) {
-                                        affectedEntityTypes.add(entityType.getTypeName());
+                                    for (AtlasAttribute entityAttr : entityType.getAllAttributes().values()) {
+                                        if (repairedVertexPropertyName.equals(entityAttr.getVertexPropertyName())) {
+                                            affectedEntityTypes.add(entityType.getTypeName());
+                                            break;
+                                        }
                                     }
                                 }
 
@@ -643,6 +668,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                             LOG.error("CRITICAL: Auto-repair threw exception for attribute={}",
                                     attribute.getQualifiedName(), repairEx);
                         }
+                        } // end self-healing guard
                     }
                 }
             }
