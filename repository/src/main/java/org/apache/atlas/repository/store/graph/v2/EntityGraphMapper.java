@@ -6192,16 +6192,6 @@ public class EntityGraphMapper {
                 deNormMap.put(vertexId, TagDeNormAttributesUtil.computeAllDenormAttributes(tags, typeRegistry, fullTextMapperV2));
             }
 
-            // Populate ESDeferredOperations so EntityNotificationListenerV2 can merge
-            // denorm attrs into notification payloads (backward compat)
-            for (Map.Entry<String, Map<String, Object>> entry : deNormMap.entrySet()) {
-                Map<String, Map<String, Object>> payload = new HashMap<>();
-                payload.put(entry.getKey(), entry.getValue());
-                RequestContext.get().addESDeferredOperation(
-                        new ESDeferredOperation(ESDeferredOperation.OperationType.TAG_DENORM_FOR_ADD_CLASSIFICATIONS,
-                                entry.getKey(), payload));
-            }
-
             ESConnector.TagDenormESWriteResult result;
             if (MapUtils.isNotEmpty(deNormMap)) {
                 result = ESConnector.writeTagPropertiesWithResult(deNormMap, false);
