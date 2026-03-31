@@ -1,0 +1,96 @@
+# Tag Reconciler Seed Job
+#
+# One-time K8s Job to populate tags.tag_change_log from existing tags.tags_by_id.
+# Run this once per tenant before enabling the reconciler.
+#
+# Usage:
+#   kubectl apply -f tag-reconciler-seed-job.yaml -n atlas
+#
+# Monitor:
+#   kubectl logs -f job/tag-reconciler-seed -n atlas
+#
+# Cleanup:
+#   kubectl delete job tag-reconciler-seed -n atlas
+#
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tag-reconciler-seed
+  namespace: atlas
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: seed
+        image: cassandra:4.1
+        command: ["bash", "-c"]
+        args:
+        - |
+          set -e
+          CQLSH_HOST="${CASSANDRA_HOST:-atlas-cassandra-0.atlas-cassandra.atlas.svc.cluster.local}"
+          echo "=== Tag Reconciler Seed ==="
+          echo "Cassandra host: $CQLSH_HOST"
+          echo ""
+
+          # Step 1: Create the change log table (idempotent)
+          echo "Step 1: Ensuring tag_change_log table exists..."
+          cqlsh "$CQLSH_HOST" -e "
+            CREATE TABLE IF NOT EXISTS tags.tag_change_log (
+              day_bucket text,
+              created_at timestamp,
+              vertex_id text,
+              tag_type_name text,
+              operation text,
+              PRIMARY KEY ((day_bucket), created_at, vertex_id)
+            ) WITH CLUSTERING ORDER BY (created_at ASC, vertex_id ASC)
+              AND compaction = {'class': 'TimeWindowCompactionStrategy', 'compaction_window_unit': 'DAYS', 'compaction_window_size': '1'}
+              AND default_time_to_live = 604800;"
+          echo "Done."
+
+          # Step 2: Export vertex IDs from tags_by_id
+          echo ""
+          echo "Step 2: Exporting vertex IDs from tags.tags_by_id..."
+          cqlsh "$CQLSH_HOST" -e "COPY tags.tags_by_id (id) TO '/tmp/raw_ids.csv';"
+          RAW_COUNT=$(wc -l < /tmp/raw_ids.csv)
+          echo "Exported $RAW_COUNT rows."
+
+          # Step 3: Deduplicate and prepare for load
+          echo ""
+          echo "Step 3: Deduplicating vertex IDs..."
+          sort -u /tmp/raw_ids.csv > /tmp/unique_ids.csv
+          UNIQUE_COUNT=$(wc -l < /tmp/unique_ids.csv)
+          echo "Unique vertex IDs: $UNIQUE_COUNT"
+
+          # Step 4: Generate change log CSV with today's date and current epoch ms
+          echo ""
+          echo "Step 4: Generating change log CSV..."
+          DAY_BUCKET=$(date -u +%Y-%m-%d)
+          EPOCH_MS=$(date -u +%s)000
+
+          awk -v d="$DAY_BUCKET" -v ts="$EPOCH_MS" '{print d "," ts "," $1 ",,SEED"}' /tmp/unique_ids.csv > /tmp/change_log.csv
+          echo "Generated $(wc -l < /tmp/change_log.csv) change log entries."
+
+          # Step 5: Load into tag_change_log
+          echo ""
+          echo "Step 5: Loading into tags.tag_change_log..."
+          cqlsh "$CQLSH_HOST" -e "COPY tags.tag_change_log (day_bucket, created_at, vertex_id, tag_type_name, operation) FROM '/tmp/change_log.csv';"
+
+          echo ""
+          echo "=== Seed complete ==="
+          echo "Day bucket: $DAY_BUCKET"
+          echo "Vertices seeded: $UNIQUE_COUNT"
+          echo ""
+          echo "Next steps:"
+          echo "  1. Enable the reconciler:"
+          echo "     cqlsh $CQLSH_HOST -e \"INSERT INTO config_store.configs (app_name, config_key, config_value, updated_by, last_updated) VALUES ('atlas', 'TAG_RECONCILER_ENABLED', 'true', 'admin', toTimestamp(now()));\""
+          echo "  2. Monitor progress in atlas logs: grep 'TagReconciler' atlas.log"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"

@@ -114,6 +114,11 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
     // Health check prepared statement
     private final PreparedStatement healthCheckStmt;
 
+    // Change log for reconciliation
+    private static final String CHANGE_LOG_TABLE_NAME = "tag_change_log";
+    private final PreparedStatement insertChangeLogStmt;
+    private final PreparedStatement readChangeLogStmt;
+
 
     private TagDAOCassandraImpl() throws AtlasBaseException {
         try {
@@ -188,6 +193,16 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
             // === Health check statement ===
             healthCheckStmt = prepare("SELECT release_version FROM system.local");
 
+            // === Change log statements ===
+            insertChangeLogStmt = prepare(String.format(
+                    "INSERT INTO %s.%s (day_bucket, created_at, vertex_id, tag_type_name, operation) VALUES (?, ?, ?, ?, ?)",
+                    KEYSPACE, CHANGE_LOG_TABLE_NAME));
+
+            readChangeLogStmt = prepare(String.format(
+                    "SELECT day_bucket, created_at, vertex_id, tag_type_name, operation FROM %s.%s " +
+                            "WHERE day_bucket = ? AND (created_at, vertex_id) > (?, ?)",
+                    KEYSPACE, CHANGE_LOG_TABLE_NAME));
+
         } catch (Exception e) {
             LOG.error("Failed to initialize TagDAO", e);
             throw new AtlasBaseException("Failed to initialize TagDAO", e);
@@ -240,6 +255,21 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
                 KEYSPACE, PROPAGATED_TAGS_TABLE_NAME);
         executeWithRetry(SimpleStatement.builder(createPropagatedTagsTable).setConsistencyLevel(DefaultConsistencyLevel.ALL).build());
         LOG.info("Ensured table {}.{} exists with SizeTieredCompactionStrategy and hard deletes", KEYSPACE, PROPAGATED_TAGS_TABLE_NAME);
+
+        String createChangeLogTable = String.format(
+                "CREATE TABLE IF NOT EXISTS %s.%s (" +
+                        "day_bucket text, " +
+                        "created_at timestamp, " +
+                        "vertex_id text, " +
+                        "tag_type_name text, " +
+                        "operation text, " +
+                        "PRIMARY KEY ((day_bucket), created_at, vertex_id)" +
+                        ") WITH CLUSTERING ORDER BY (created_at ASC, vertex_id ASC) " +
+                        "AND compaction = {'class': 'TimeWindowCompactionStrategy', 'compaction_window_unit': 'DAYS', 'compaction_window_size': '1'} " +
+                        "AND default_time_to_live = 604800;",
+                KEYSPACE, CHANGE_LOG_TABLE_NAME);
+        executeWithRetry(SimpleStatement.builder(createChangeLogTable).setConsistencyLevel(DefaultConsistencyLevel.ALL).build());
+        LOG.info("Ensured table {}.{} exists with 7-day TTL", KEYSPACE, CHANGE_LOG_TABLE_NAME);
     }
 
     @Override
@@ -914,6 +944,47 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
         } catch (Exception e) {
             LOG.warn("Cassandra health check failed due to unexpected error: {}", e.getMessage(), e);
             return false;
+        }
+    }
+
+    @Override
+    public void logTagChange(String vertexId, String tagTypeName, String operation) throws AtlasBaseException {
+        try {
+            String dayBucket = java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString();
+            java.time.Instant now = java.time.Instant.now();
+            BoundStatement bound = insertChangeLogStmt.bind(dayBucket, now, vertexId,
+                    tagTypeName != null ? tagTypeName : "", operation != null ? operation : "");
+            executeWithRetry(bound);
+        } catch (Exception e) {
+            // Log but don't throw — change log is best-effort, must not break tag operations
+            LOG.warn("Failed to log tag change for vertex={}, tag={}, op={}", vertexId, tagTypeName, operation, e);
+        }
+    }
+
+    @Override
+    public List<TagChangeLogEntry> readChangeLog(String dayBucket, long afterTimestamp, String afterVertexId, int pageSize) throws AtlasBaseException {
+        try {
+            java.time.Instant afterInstant = java.time.Instant.ofEpochMilli(afterTimestamp);
+            BoundStatement bound = readChangeLogStmt.bind(dayBucket, afterInstant, afterVertexId != null ? afterVertexId : "")
+                    .setPageSize(pageSize);
+            ResultSet rs = executeWithRetry(bound);
+            List<TagChangeLogEntry> entries = new ArrayList<>();
+            int count = 0;
+            for (Row row : rs) {
+                if (count >= pageSize) break;
+                entries.add(new TagChangeLogEntry(
+                        row.getString("day_bucket"),
+                        row.getInstant("created_at").toEpochMilli(),
+                        row.getString("vertex_id"),
+                        row.getString("tag_type_name"),
+                        row.getString("operation")
+                ));
+                count++;
+            }
+            return entries;
+        } catch (Exception e) {
+            LOG.error("Failed to read change log for dayBucket={}", dayBucket, e);
+            throw new AtlasBaseException("Failed to read change log", e);
         }
     }
 
