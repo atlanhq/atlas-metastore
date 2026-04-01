@@ -135,6 +135,7 @@ public class ESOutboxProcessor {
         if (!leaseManager.tryAcquire("es-outbox-processor", LEASE_TTL_SECONDS)) {
             return; // Another pod holds the lease
         }
+        long pollStartMs = System.currentTimeMillis();
         try {
             int batchSize = drainMode ? DRAIN_BATCH_SIZE : IDLE_BATCH_SIZE;
             List<ESOutboxRepository.OutboxEntry> entries = outboxRepository.getPendingEntries(batchSize);
@@ -143,6 +144,7 @@ public class ESOutboxProcessor {
                 consecutiveEmptyPolls++;
                 if (drainMode && consecutiveEmptyPolls >= EMPTY_POLLS_BEFORE_IDLE) {
                     drainMode = false;
+                    updateDrainModeMetric(false);
                     LOG.info("ESOutboxProcessor: PENDING drained, switching to idle mode (poll every {}s)",
                             IDLE_POLL_SECONDS);
                 }
@@ -153,6 +155,7 @@ public class ESOutboxProcessor {
             consecutiveEmptyPolls = 0;
             if (!drainMode) {
                 drainMode = true;
+                updateDrainModeMetric(true);
                 LOG.info("ESOutboxProcessor: PENDING entries detected, switching to drain mode " +
                         "(poll every {}s, batch size {})", DRAIN_POLL_SECONDS, DRAIN_BATCH_SIZE);
             }
@@ -176,6 +179,7 @@ public class ESOutboxProcessor {
                 // Exhausted: hit max attempts → mark FAILED, remove from batch
                 if (entry.attemptCount >= ESOutboxRepository.MAX_ATTEMPTS) {
                     outboxRepository.markFailed(entry.vertexId, entry.attemptCount);
+                    recordOutboxMetric("exhausted");
                     LOG.error("ESOutboxProcessor: marking vertex '{}' as FAILED after {} attempts",
                             entry.vertexId, entry.attemptCount);
                     continue;
@@ -187,6 +191,7 @@ public class ESOutboxProcessor {
                 // First attempt (attemptCount=0) has no backoff — retried immediately.
                 if (entry.attemptCount > 0 && !isBackoffElapsed(entry)) {
                     skippedBackoff++;
+                    recordOutboxMetric("backoff_skipped");
                     continue;
                 }
 
@@ -194,6 +199,7 @@ public class ESOutboxProcessor {
                 if (!appendToBulk(bulkBody, entry, indexName)) {
                     // Poison pill: malformed JSON or missing data — mark FAILED immediately
                     outboxRepository.markFailed(entry.vertexId, entry.attemptCount);
+                    recordOutboxMetric("poison_pill");
                     LOG.error("ESOutboxProcessor: marking vertex '{}' as FAILED (poison pill: invalid entry data)",
                             entry.vertexId);
                     continue;
@@ -229,17 +235,20 @@ public class ESOutboxProcessor {
                             }
                         }
                         outboxRepository.batchMarkDone(succeededIds);
+                        for (int i = 0; i < succeededIds.size(); i++) recordOutboxMetric("success");
                         for (String failedId : failedIds) {
                             ESOutboxRepository.OutboxEntry entry = entryMap.get(failedId);
                             if (entry != null) {
                                 outboxRepository.incrementAttempt(failedId, entry.attemptCount + 1);
                             }
+                            recordOutboxMetric("failed");
                         }
                         LOG.info("ESOutboxProcessor: {} succeeded, {} failed (will retry)",
                                 succeededIds.size(), failedIds.size());
                     } else {
                         // All succeeded
                         outboxRepository.batchMarkDone(new ArrayList<>(entryMap.keySet()));
+                        for (int i = 0; i < entryMap.size(); i++) recordOutboxMetric("success");
                         LOG.info("ESOutboxProcessor: all {} entries synced to ES", entryMap.size());
                     }
                 } else {
@@ -262,6 +271,40 @@ public class ESOutboxProcessor {
             LOG.error("ESOutboxProcessor: unexpected error during processing", e);
         } finally {
             leaseManager.release("es-outbox-processor");
+            recordOutboxPollDuration(pollStartMs);
+        }
+    }
+
+    private void recordOutboxMetric(String result) {
+        try {
+            CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
+            if (metrics != null) {
+                metrics.recordOutboxProcessed(result);
+            }
+        } catch (Throwable t) {
+            // non-fatal
+        }
+    }
+
+    private void recordOutboxPollDuration(long startMs) {
+        try {
+            CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
+            if (metrics != null) {
+                metrics.recordOutboxPollDuration(System.currentTimeMillis() - startMs);
+            }
+        } catch (Throwable t) {
+            // non-fatal
+        }
+    }
+
+    private void updateDrainModeMetric(boolean drain) {
+        try {
+            CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
+            if (metrics != null) {
+                metrics.setOutboxDrainMode(drain);
+            }
+        } catch (Throwable t) {
+            // non-fatal
         }
     }
 

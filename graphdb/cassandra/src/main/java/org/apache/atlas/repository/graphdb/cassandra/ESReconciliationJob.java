@@ -65,11 +65,17 @@ public class ESReconciliationJob implements Runnable {
     public void run() {
         if (!leaseManager.tryAcquire(LEASE_NAME, LEASE_TTL_SECONDS)) {
             LOG.info("ESReconciliationJob: another pod holds the lease, skipping");
+            recordJobMetric("skipped_lease", 0);
             return;
         }
 
+        long startMs = System.currentTimeMillis();
         try {
             runAudit();
+            recordJobMetric("success", startMs);
+        } catch (Exception e) {
+            recordJobMetric("failed", startMs);
+            throw e;
         } finally {
             leaseManager.release(LEASE_NAME);
         }
@@ -163,6 +169,17 @@ public class ESReconciliationJob implements Runnable {
                             "phase2: sampled {} GUIDs, {} missing from ES, {} reindexed (miss rate: {})",
                     elapsed, failedDrained, totalSampled, totalMissing, totalReindexed,
                     String.format("%.2f%%", missRate * 100));
+
+            // Record reconciliation metrics
+            try {
+                CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
+                if (metrics != null) {
+                    metrics.recordReconciliation(elapsed, failedDrained,
+                            totalSampled, totalMissing, totalReindexed, missRate);
+                }
+            } catch (Throwable t) {
+                LOG.debug("Failed to record reconciliation metrics: {}", t.getMessage());
+            }
 
         } catch (Exception e) {
             LOG.error("ESReconciliationJob: failed", e);
@@ -341,6 +358,18 @@ public class ESReconciliationJob implements Runnable {
         } catch (Exception e) {
             LOG.error("ESReconciliationJob: reindex failed for {} GUIDs: {}", guids.size(), e.getMessage());
             return 0;
+        }
+    }
+
+    private void recordJobMetric(String result, long startMs) {
+        try {
+            CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
+            if (metrics != null) {
+                long durationMs = startMs > 0 ? System.currentTimeMillis() - startMs : 0;
+                metrics.recordJobRun(LEASE_NAME, result, durationMs);
+            }
+        } catch (Throwable t) {
+            LOG.debug("Failed to record job metric: {}", t.getMessage());
         }
     }
 }

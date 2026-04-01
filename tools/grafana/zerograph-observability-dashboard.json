@@ -1,0 +1,522 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "ZeroGraph (CassandraGraph) operational observability — write path, ES sync, outbox, data integrity, background jobs. Companion to the ring deployment dashboard.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [
+    {
+      "icon": "external link",
+      "title": "Ring Deployment Health",
+      "type": "link",
+      "url": "/d/atlas-ring-deployment-health"
+    },
+    {
+      "icon": "external link",
+      "title": "Atlas Metastore",
+      "type": "link",
+      "url": "/d/atlas-metastore-service"
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "panels": [],
+      "title": "ZeroGraph Overview",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Commit success rate over the last hour",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "decimals": 2,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 99 },
+              { "color": "green", "value": 99.9 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 1 },
+      "id": 10,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "editorMode": "code",
+          "expr": "100 * sum(rate(cg_commit_total{status=\"success\", clusterName=~\"$tenant\"}[1h])) / clamp_min(sum(rate(cg_commit_total{clusterName=~\"$tenant\"}[1h])), 1)",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Commit Success Rate",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "ES sync success rate — how often the synchronous sync succeeds without falling back to outbox",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "decimals": 2,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 99 },
+              { "color": "green", "value": 99.9 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 1 },
+      "id": 11,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "editorMode": "code",
+          "expr": "100 * sum(rate(cg_es_sync_total{result=\"sync_success\", clusterName=~\"$tenant\"}[1h])) / clamp_min(sum(rate(cg_es_sync_total{clusterName=~\"$tenant\"}[1h])), 1)",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "ES Sync Success Rate",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Current number of PENDING entries in the ES outbox",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 8, "y": 1 },
+      "id": 12,
+      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "editorMode": "code",
+          "expr": "sum(cg_outbox_pending{clusterName=~\"$tenant\"})",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Outbox Pending",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Number of FAILED outbox entries — requires manual investigation",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 12, "y": 1 },
+      "id": 13,
+      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "editorMode": "code",
+          "expr": "sum(cg_outbox_failed{clusterName=~\"$tenant\"})",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Outbox Failed",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "ES reconciliation miss rate — fraction of sampled GUIDs missing from ES",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "decimals": 2,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 1 },
+      "id": 14,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "editorMode": "code",
+          "expr": "100 * cg_reconciliation_miss_rate{clusterName=~\"$tenant\"}",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Reconciliation Miss Rate",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Absolute difference between Cassandra vertex count and ES doc count",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 1 },
+      "id": 15,
+      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "editorMode": "code",
+          "expr": "sum(cg_vertex_count_drift{clusterName=~\"$tenant\"})",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "C*↔ES Vertex Drift",
+      "type": "stat"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "id": 100,
+      "panels": [],
+      "title": "Write Path (commit)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 10 }, "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 7 },
+      "id": 101,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_commit_total{status=\"success\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "success", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_commit_total{status=\"failure\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "failure", "refId": "B" }
+      ],
+      "title": "Commits/sec",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 10 }, "unit": "s" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 7 },
+      "id": 102,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.50, sum(rate(cg_commit_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p50", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.95, sum(rate(cg_commit_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p95", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.99, sum(rate(cg_commit_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p99", "refId": "C" }
+      ],
+      "title": "Commit Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 30, "stacking": { "mode": "normal" } }, "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 7 },
+      "id": 103,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_vertices_written_total{op=\"create\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "vertices created", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_vertices_written_total{op=\"update\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "vertices updated", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_edges_written_total{op=\"create\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "edges created", "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_claim_conflicts_total{clusterName=~\"$tenant\"}[5m]))", "legendFormat": "claim conflicts", "refId": "D" }
+      ],
+      "title": "Write Throughput",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 },
+      "id": 200,
+      "panels": [],
+      "title": "ES Sync & Outbox Health",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 30, "stacking": { "mode": "normal" } }, "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
+      "id": 201,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_es_sync_total{result=\"sync_success\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "sync success", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_es_sync_total{result=\"outbox_fallback\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "outbox fallback", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_es_sync_total{result=\"permanent_failure\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "permanent failure", "refId": "C" }
+      ],
+      "title": "ES Sync Outcome",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 10 } } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 16 },
+      "id": 202,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(cg_outbox_pending{clusterName=~\"$tenant\"})", "legendFormat": "pending", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(cg_outbox_failed{clusterName=~\"$tenant\"})", "legendFormat": "failed", "refId": "B" }
+      ],
+      "title": "Outbox Queue Depth",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 30, "stacking": { "mode": "normal" } }, "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
+      "id": 203,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_outbox_processed_total{result=\"success\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "success", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_outbox_processed_total{result=\"failed\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "failed", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_outbox_processed_total{result=\"exhausted\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "exhausted", "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_outbox_processed_total{result=\"poison_pill\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "poison pill", "refId": "D" }
+      ],
+      "title": "Outbox Processing",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+      "id": 300,
+      "panels": [],
+      "title": "Data Integrity & Consistency",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 10 } } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 25 },
+      "id": 301,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(cg_vertex_count_drift{clusterName=~\"$tenant\"})", "legendFormat": "drift", "refId": "A" }
+      ],
+      "title": "Cassandra↔ES Vertex Count Drift",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 10 }, "unit": "percentunit" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 25 },
+      "id": 302,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "cg_reconciliation_miss_rate{clusterName=~\"$tenant\"}", "legendFormat": "miss rate", "refId": "A" }
+      ],
+      "title": "Reconciliation Miss Rate Over Time",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 10 }, "unit": "short" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 25 },
+      "id": 303,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(increase(cg_orphan_edges_found_total{clusterName=~\"$tenant\"}[1h]))", "legendFormat": "found", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(increase(cg_orphan_edges_deleted_total{clusterName=~\"$tenant\"}[1h]))", "legendFormat": "deleted", "refId": "B" }
+      ],
+      "title": "Orphan Edges (per hour)",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 33 },
+      "id": 400,
+      "panels": [],
+      "title": "Background Jobs",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 30, "stacking": { "mode": "normal" } }, "unit": "short" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 34 },
+      "id": 401,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(increase(cg_job_run_total{result=\"success\", clusterName=~\"$tenant\"}[6h])) by (job)", "legendFormat": "{{job}} success", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(increase(cg_job_run_total{result=\"failed\", clusterName=~\"$tenant\"}[6h])) by (job)", "legendFormat": "{{job}} failed", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(increase(cg_job_run_total{result=\"skipped_lease\", clusterName=~\"$tenant\"}[6h])) by (job)", "legendFormat": "{{job}} skipped (lease)", "refId": "C" }
+      ],
+      "title": "Background Job Runs (6h window)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 10 }, "unit": "s" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 34 },
+      "id": 402,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.99, sum(rate(cg_job_duration_seconds_bucket{clusterName=~\"$tenant\"}[6h])) by (le, job))", "legendFormat": "{{job}} p99", "refId": "A" }
+      ],
+      "title": "Background Job Duration (p99)",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 42 },
+      "id": 500,
+      "panels": [],
+      "title": "ES Sync Details",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 10 }, "unit": "s" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 43 },
+      "id": 501,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.50, sum(rate(cg_es_sync_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p50", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.95, sum(rate(cg_es_sync_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p95", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.99, sum(rate(cg_es_sync_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p99", "refId": "C" }
+      ],
+      "title": "ES Sync Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 10 }, "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 43 },
+      "id": 502,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_es_sync_retry_total{clusterName=~\"$tenant\"}[5m])) by (attempt)", "legendFormat": "attempt {{attempt}}", "refId": "A" }
+      ],
+      "title": "ES Sync Retries",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 30, "stacking": { "mode": "normal" } }, "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 43 },
+      "id": 503,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_es_bulk_items_total{status=\"success\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "success", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_es_bulk_items_total{status=\"retryable\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "retryable", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_es_bulk_items_total{status=\"permanent\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "permanent", "refId": "C" }
+      ],
+      "title": "ES Bulk Item Results",
+      "type": "timeseries"
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["atlas", "zerograph", "cassandra-graph", "observability"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "default", "value": "default" },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "current": { "selected": false, "text": ".*", "value": ".*" },
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "definition": "label_values(cg_commit_total, clusterName)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Tenant",
+        "multi": true,
+        "name": "tenant",
+        "options": [],
+        "query": { "qryType": 1, "query": "label_values(cg_commit_total, clusterName)" },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "ZeroGraph Operational Observability",
+  "uid": "zerograph-operational-observability",
+  "version": 1
+}
