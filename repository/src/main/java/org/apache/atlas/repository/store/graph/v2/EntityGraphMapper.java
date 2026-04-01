@@ -18,6 +18,8 @@
 package org.apache.atlas.repository.store.graph.v2;
 
 import com.google.common.annotations.VisibleForTesting;
+import io.micrometer.core.instrument.Counter;
+import org.apache.atlas.service.metrics.MetricUtils;
 
 import java.util.*;
 import java.util.regex.Matcher;
@@ -213,6 +215,8 @@ public class EntityGraphMapper {
     private final TagDAO                    tagDAO;
     private final TagAttributeMapper        tagAttributeMapper;
     private final TagDenormDLQProducer      tagDenormDLQProducer;
+    private Counter tagDenormEsFlushSuccess;
+    private Counter tagDenormEsFlushFailure;
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_GLOSSARY, TYPE_CATEGORY, TYPE_TERM, TYPE_PRODUCT, TYPE_DOMAIN));
     public static final Set<String> CLASSIFICATION_ADD_EXCLUDE_LIST = new HashSet<>(Arrays.asList(ATLAS_GLOSSARY_ENTITY_TYPE, ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE, DATA_DOMAIN_ENTITY_TYPE));
 
@@ -239,6 +243,28 @@ public class EntityGraphMapper {
         this.tagDAO = TagDAOCassandraImpl.getInstance();
         this.tagAttributeMapper = tagAttributeMapper;
         this.tagDenormDLQProducer = tagDenormDLQProducer;
+
+        try {
+            io.micrometer.core.instrument.MeterRegistry registry = MetricUtils.getMeterRegistry();
+            this.tagDenormEsFlushSuccess = Counter.builder("tag.denorm.es.flush.success")
+                    .description("Successful tag denorm ES flush count (vertices)")
+                    .register(registry);
+            this.tagDenormEsFlushFailure = Counter.builder("tag.denorm.es.flush.failure")
+                    .description("Failed tag denorm ES flush count (vertices)")
+                    .register(registry);
+        } catch (Exception e) {
+            LOG.warn("Failed to register tag denorm ES flush metrics", e);
+        }
+    }
+
+    private static void incrementCounter(Counter counter, double amount) {
+        if (counter != null) {
+            try {
+                counter.increment(amount);
+            } catch (Exception e) {
+                LOG.warn("Failed to increment Prometheus counter", e);
+            }
+        }
     }
 
     @VisibleForTesting
@@ -6192,8 +6218,10 @@ public class EntityGraphMapper {
 
             // Accumulate counts for task-level observability
             RequestContext.get().addTagDenormEsSuccessCount(result.getSuccessCount());
+            incrementCounter(tagDenormEsFlushSuccess, result.getSuccessCount());
             if (result.hasFailures()) {
                 RequestContext.get().addTagDenormEsFailureCount(result.getFailedVertexIds().size());
+                incrementCounter(tagDenormEsFlushFailure, result.getFailedVertexIds().size());
                 // Emit partially failed vertex IDs + GUIDs to DLQ for later repair
                 tagDenormDLQProducer.emitFailedVertices(result.getFailedVertexIds(), snapshotMap);
             }
@@ -6212,6 +6240,7 @@ public class EntityGraphMapper {
                 LOG.error("Failed to emit to DLQ as well. Vertices needing repair: {}", snapshotMap.keySet(), dlqError);
             }
             RequestContext.get().addTagDenormEsFailureCount(snapshotMap.size());
+            incrementCounter(tagDenormEsFlushFailure, snapshotMap.size());
             return ESConnector.TagDenormESWriteResult.allFailed(snapshotMap.keySet());
         } finally {
             // Always clear the buffer, even on exception (idempotent — DLQ handles recovery)
