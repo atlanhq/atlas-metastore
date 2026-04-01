@@ -90,3 +90,6 @@ distro/solr/*.tgz
 **/bin
 *.local.md
 *.tgz
+
+
+**/creds.yaml  
