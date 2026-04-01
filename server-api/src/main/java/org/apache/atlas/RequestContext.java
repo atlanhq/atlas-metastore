@@ -206,7 +206,7 @@ public class RequestContext {
         deletedClassificationAndVertices.clear();
         addedClassificationAndVertices.clear();
         esDeferredOperations.clear();
-        verticesNeedingTagDenorm.clear();
+        clearVerticesNeedingTagDenorm();
         tagDenormEsSuccessCount = 0;
         tagDenormEsFailureCount = 0;
         this.cassandraTagOperations.clear();

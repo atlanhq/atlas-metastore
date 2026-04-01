@@ -102,6 +102,71 @@ public class TagDeNormAttributesUtil {
         return deNormAttrs;
     }
 
+    /**
+     * @deprecated Replaced by {@link #computeAllDenormAttributes} which reads from Cassandra
+     *             and computes all 5 denorm fields in a single pass.
+     */
+    @Deprecated
+    public static Map<String, Object> getPropagatedAttributesForNoTags() {
+        Map<String, Object> deNormAttrs = new HashMap<>();
+
+        deNormAttrs.put(CLASSIFICATION_TEXT_KEY, FULL_TEXT_DELIMITER);
+        deNormAttrs.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, List.of());
+        deNormAttrs.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, CLASSIFICATION_NAME_DELIMITER);
+
+        return deNormAttrs;
+    }
+
+    /**
+     * @deprecated Replaced by {@link #computeAllDenormAttributes} which reads from Cassandra
+     *             and computes all 5 denorm fields in a single pass.
+     */
+    @Deprecated
+    public static Map<String, Object> getPropagatedAttributesForTags(AtlasClassification propagatedTag,
+                                                                     List<AtlasClassification> finalTags,
+                                                                     List<AtlasClassification> finalPropagatedTags,
+                                                                     AtlasTypeRegistry typeRegistry,
+                                                                     IFullTextMapper fullTextMapperV2,
+                                                                     boolean isDelete) throws AtlasBaseException {
+        Map<String, Object> deNormAttrs = new HashMap<>();
+
+        if (CollectionUtils.isNotEmpty(finalTags))
+            deNormAttrs.put(CLASSIFICATION_TEXT_KEY, getClassificationTextKey(finalTags, typeRegistry, fullTextMapperV2));
+
+        updateDenormAttributesForPropagatedTags(propagatedTag, finalPropagatedTags, deNormAttrs, isDelete);
+
+        return deNormAttrs;
+    }
+
+    /**
+     * Helper for deprecated {@link #getPropagatedAttributesForTags}. Will be removed alongside it.
+     */
+    private static void updateDenormAttributesForPropagatedTags(AtlasClassification propagatedTag,
+                                                                  List<AtlasClassification> finalPropagatedTags,
+                                                                  Map<String, Object> deNormAttrs,
+                                                                  boolean isDelete) {
+        List<String> propTraits = finalPropagatedTags.stream()
+                .map(AtlasStruct::getTypeName)
+                .collect(Collectors.toList());
+
+        if (CollectionUtils.isNotEmpty(propTraits)) {
+            deNormAttrs.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, propTraits);
+
+            StringBuilder finalTagNames = new StringBuilder();
+            propTraits.forEach(tagName -> finalTagNames.append(CLASSIFICATION_NAME_DELIMITER).append(tagName));
+
+            deNormAttrs.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, finalTagNames.toString());
+        } else {
+            if (isDelete) {
+                deNormAttrs.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, Collections.emptyList());
+                deNormAttrs.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, CLASSIFICATION_NAME_DELIMITER);
+            } else {
+                deNormAttrs.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, Collections.singletonList(propagatedTag.getTypeName()));
+                deNormAttrs.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, CLASSIFICATION_NAME_DELIMITER + propagatedTag.getTypeName());
+            }
+        }
+    }
+
     public static Map<String, Object> getAllAttributesForAllTagsForRepair(String sourceAssetGuid,
                                                                         List<AtlasClassification> currentTags,
                                                                         AtlasTypeRegistry typeRegistry,

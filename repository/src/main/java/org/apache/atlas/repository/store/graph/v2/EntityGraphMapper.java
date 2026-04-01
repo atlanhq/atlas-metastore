@@ -4584,11 +4584,7 @@ public class EntityGraphMapper {
                 for (Map.Entry<String, Map<String, Object>> entry : assetMinAttrsMap.entrySet()) {
                     RequestContext.get().addVertexNeedingTagDenorm(entry.getKey(), (String) entry.getValue().get(GUID_PROPERTY_KEY));
                 }
-                try {
-                    flushTagDenormToES();
-                } catch (Exception e) {
-                    LOG.error("flushTagDenormToES failed during propagation add, DLQ handles recovery", e);
-                }
+                safeFlushTagDenormToES("propagation add");
                 
                 // Convert vertices to entities before async notification (prevent transaction closure issues)
                 try {
@@ -5644,12 +5640,7 @@ public class EntityGraphMapper {
                 deletePropagations(batchToDelete);
 
                 // Buffer vertex IDs for full-snapshot ES denorm, then flush per chunk (delete already happened above)
-                bufferTagDenormForTags(batchToDelete);
-                try {
-                    flushTagDenormToES();
-                } catch (Exception e) {
-                    LOG.error("flushTagDenormToES failed during propagation delete, DLQ handles recovery", e);
-                }
+                bufferAndFlushTagDenormToES(batchToDelete, "propagation delete");
 
                 Set<AtlasVertex> vertices = graph.getVertices(vertexIds.toArray(new String[0]));
 
@@ -6251,6 +6242,32 @@ public class EntityGraphMapper {
         }
     }
 
+    /**
+     * Wrapper around {@link #flushTagDenormToES()} that catches exceptions and logs them.
+     * DLQ handles recovery, so callers should not fail on flush errors.
+     *
+     * @param operation human-readable label for log context (e.g. "propagation add")
+     */
+    void safeFlushTagDenormToES(String operation) {
+        try {
+            flushTagDenormToES();
+        } catch (Exception e) {
+            LOG.error("flushTagDenormToES failed during {}, DLQ handles recovery", operation, e);
+        }
+    }
+
+    /**
+     * Buffers tag denorm updates for the given tags, then flushes to ES.
+     * Exceptions during flush are logged but not rethrown — DLQ handles recovery.
+     *
+     * @param tags      the tags whose vertices need ES denorm sync
+     * @param operation human-readable label for log context (e.g. "propagation delete")
+     */
+    private void bufferAndFlushTagDenormToES(List<Tag> tags, String operation) {
+        bufferTagDenormForTags(tags);
+        safeFlushTagDenormToES(operation);
+    }
+
     private void updateLabels(AtlasVertex vertex, Set<String> labels) {
         if (CollectionUtils.isNotEmpty(labels)) {
             AtlasGraphUtilsV2.setEncodedProperty(vertex, LABELS_PROPERTY_KEY, getLabelString(labels));
@@ -6724,12 +6741,7 @@ public class EntityGraphMapper {
                 tagDAO.putPropagatedTags(sourceEntityVertex.getIdForDisplay(), tagTypeName, new HashSet<>(vertexIds), assetMinAttrsMap, originalClassification);
 
                 // Buffer vertex IDs for full-snapshot ES denorm, then flush per chunk (update already happened above)
-                bufferTagDenormForTags(batchToUpdate);
-                try {
-                    flushTagDenormToES();
-                } catch (Exception e) {
-                    LOG.error("flushTagDenormToES failed during propagation update, DLQ handles recovery", e);
-                }
+                bufferAndFlushTagDenormToES(batchToUpdate, "propagation update");
 
                 //new bulk method to fetch in batches
                 Set<AtlasVertex> propagtedVertices = graph.getVertices(vertexIds.toArray(new String[0]));
@@ -6957,12 +6969,7 @@ public class EntityGraphMapper {
                 .toList();
 
         // Buffer vertex IDs for full-snapshot ES denorm, then flush per chunk (delete already happened above)
-        bufferTagDenormForTags(tagsToDelete);
-        try {
-            flushTagDenormToES();
-        } catch (Exception e) {
-            LOG.error("flushTagDenormToES failed during propagation refresh delete, DLQ handles recovery", e);
-        }
+        bufferAndFlushTagDenormToES(tagsToDelete, "propagation refresh delete");
 
         Set<AtlasVertex> vertices = graph.getVertices(vertexIdsToDelete.toArray(new String[0]));
         if (!vertices.isEmpty()) {

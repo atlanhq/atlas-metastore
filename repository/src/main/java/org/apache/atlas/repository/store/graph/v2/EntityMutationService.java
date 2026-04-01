@@ -405,11 +405,7 @@ public class EntityMutationService {
                 }
             }
             // Flush any remaining buffered propagation denorms (no-op when buffer is empty)
-            try {
-                entityGraphMapper.flushTagDenormToES();
-            } catch (Exception e) {
-                LOG.error("Failed to flush tag denorm to ES", e);
-            }
+            entityGraphMapper.safeFlushTagDenormToES("post-processing");
         }
     }
 
