@@ -124,10 +124,15 @@ public class ESReconciliationJob implements Runnable {
                     String propsJson = row.getString("properties");
                     if (vertexId == null || propsJson == null) continue;
 
-                    // Extract __guid from properties, skip soft-deleted vertices
+                    // Extract __guid from properties, skip soft-deleted and non-entity vertices.
+                    // Only entity vertices (those with __typeName) are indexed to ES.
+                    // TypeDef, system, and internal vertices have no __typeName and are
+                    // expected to be absent from ES — counting them as "missing" produces
+                    // a misleading miss rate.
                     String guid = extractGuid(propsJson);
                     if (guid == null) continue;
                     if (isDeleted(propsJson)) continue;
+                    if (!isEntityVertex(propsJson)) continue;
 
                     guidBatch.add(guid);
                     guidToVertexId.put(guid, vertexId);
@@ -196,6 +201,16 @@ public class ESReconciliationJob implements Runnable {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * Returns true if the vertex is an entity (has __typeName property).
+     * Only entity vertices are indexed to ES. TypeDef vertices, system vertices,
+     * and internal vertices do not have __typeName and should be excluded from
+     * the reconciliation sample to avoid false-positive miss rates.
+     */
+    private boolean isEntityVertex(String propsJson) {
+        return propsJson.contains("__typeName");
     }
 
     @SuppressWarnings("unchecked")
