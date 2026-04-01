@@ -1,7 +1,7 @@
 ---
 description: Schedule and monitor a JanusGraph -> Cassandra (Zero Graph) migration for an Atlas tenant
 argument-hint: <vcluster-name>
-allowed-tools: [Bash, Read, AskUserQuestion]
+allowed-tools: [Bash, Read, Grep, Glob, Task, AskUserQuestion, Skill]
 ---
 
 # Migrate Tenant to Zero Graph (Cassandra Backend)
