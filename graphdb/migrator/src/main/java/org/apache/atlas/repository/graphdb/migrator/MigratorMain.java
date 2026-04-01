@@ -736,7 +736,7 @@ public class MigratorMain {
 
             LOG.info("Log levels set: Cassandra driver=WARN, JanusGraph/Gremlin=INFO ");
         } catch (Exception e) {
-            LOG.debug("Could not set Cassandra driver log level (non-fatal): {}", e.getMessage());
+            LOG.debug("Could not set Cassandra driver log level(non-fatal): {}", e.getMessage());
         }
     }
 }
