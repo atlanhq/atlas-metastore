@@ -3709,15 +3709,25 @@ public class EntityGraphMapper {
         // This ensures the entity cached in RequestContext includes attributes like
         // connectorName — even if they weren't in the update request payload.
         // Only primitive and enum types are fetched to keep the read lightweight.
-        Set<String> primitiveAttrs = new HashSet<>();
+        //
+        // MS-695: Also include attributes with includeInNotification=true or isUnique=true,
+        // regardless of their type category (array, struct, map, etc.).
+        // Without this, CDC notification events are missing non-primitive attributes that
+        // downstream consumers (e.g. DQ alerts, Heracles) depend on.
+        Set<String> attrsToLoad = new HashSet<>();
         for (Map.Entry<String, AtlasAttribute> entry : entityType.getAllAttributes().entrySet()) {
             TypeCategory typeCategory = entry.getValue().getAttributeType().getTypeCategory();
             if (typeCategory == PRIMITIVE || typeCategory == TypeCategory.ENUM) {
-                primitiveAttrs.add(entry.getKey());
+                attrsToLoad.add(entry.getKey());
+            }
+
+            AtlasAttributeDef attrDef = entry.getValue().getAttributeDef();
+            if (attrDef.getIncludeInNotification() || attrDef.getIsUnique()) {
+                attrsToLoad.add(entry.getKey());
             }
         }
 
-        AtlasEntityHeader header = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex, primitiveAttrs);
+        AtlasEntityHeader header = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex, attrsToLoad);
 
         if (entity.getClassifications() == null) {
             entity.setClassifications(header.getClassifications());
