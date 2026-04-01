@@ -92,4 +92,3 @@ distro/solr/*.tgz
 *.tgz
 
 
-**/creds.yaml  
