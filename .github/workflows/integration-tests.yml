@@ -182,3 +182,24 @@ jobs:
         run: |
           echo "Integration tests failed with exit code ${{ steps.tests.outputs.exit_code }}"
           exit 1
+
+  # Rollup job that provides a single status check for branch protection
+  # and pr-label-release workflow to consume
+  integration-tests-status:
+    name: integration-tests
+    needs: [integration-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check matrix job results
+        run: |
+          if [[ "${{ needs.integration-tests.result }}" == "success" ]]; then
+            echo "All integration tests passed"
+            exit 0
+          elif [[ "${{ needs.integration-tests.result }}" == "skipped" ]]; then
+            echo "Integration tests were skipped"
+            exit 0
+          else
+            echo "Integration tests failed or were cancelled"
+            exit 1
+          fi
