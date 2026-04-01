@@ -55,7 +55,7 @@ import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_IS
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_RESOURCES;
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_PURPOSE_CLASSIFICATIONS;
 import static org.apache.atlas.repository.util.AccessControlUtils.REL_ATTR_POLICIES;
-import static org.apache.atlas.repository.util.AccessControlUtils.getESAliasName;
+import static org.apache.atlas.repository.util.AccessControlUtils.getESAliasIndexName;
 import static org.apache.atlas.repository.util.AccessControlUtils.getIsAccessControlEnabled;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPurposeTags;
 import static org.apache.atlas.repository.util.AccessControlUtils.getTenantId;
@@ -236,6 +236,6 @@ public class PurposePreProcessor extends AccessControlPreProcessor {
         }
 
         //delete ES alias
-        aliasStore.deleteAlias(getESAliasName(purpose));
+        aliasStore.deleteAlias(getESAliasIndexName(purpose));
     }
 }

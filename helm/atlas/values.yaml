@@ -28,6 +28,12 @@ global:
     dedicated:
       enabled: false  # Creates dedicated Cassandra and Elasticsearch StatefulSets
       active: false   # Uses dedicated resources in configmap
+  # Graph backend mode: "janus" (default, JanusGraph) or "cassandra" (Cassandra+ES direct)
+  graphBackend: "janus"
+  # CassandraGraph ID strategy: "legacy" (UUID) or "deterministic" (SHA-256 of type+QN)
+  graphIdStrategy: "legacy"
+  # CassandraGraph entity claim dedup via LWT (requires cassandra backend)
+  graphClaimEnabled: false
     
 Namespace: atlas
 sentry_flag: disable
@@ -599,7 +605,33 @@ atlas:
   entity:
     # Skip mapping of optional attributes that are absent from payload, have no default value
     # Improves write performance by reducing unnecessary attribute processing
-    skip_optional_attributes: false
+    skip_optional_attributes: true
+
+# Migration Pod configuration (JanusGraph -> Cassandra)
+# Enable this to create a dedicated migration Pod with higher resources.
+# The Pod uses the same Atlas image (migrator JAR is pre-installed).
+# Pod stays in Completed state after migration for log inspection and debugging.
+# Trigger: helm upgrade with migration.enabled=true. Delete pod manually when done.
+migration:
+  enabled: false
+  mode: ""               # "" (full), "--fresh", "--es-only", "--validate-only"
+  idStrategy: "legacy"   # "legacy" or "deterministic"
+  claimEnabled: false     # LWT dedup claims during migration
+  scannerThreads: 16
+  writerThreads: 8
+  esBulkSize: 1000
+  jvmHeap: "4g"                     # -Xmx for migrator JVM
+  jvmMinHeap: "2g"                  # -Xms for migrator JVM
+  sourceConsistency: "ONE"          # Cassandra read consistency (ONE = fast scans)
+  targetConsistency: "LOCAL_QUORUM" # Cassandra write consistency (LOCAL_QUORUM = durable)
+  postCompletionSleepSeconds: 3600  # Pod stays Running for this long after migration for inspection
+  resources:
+    requests:
+      cpu: "4"
+      memory: "8Gi"
+    limits:
+      cpu: "4"
+      memory: "8Gi"
 
 cassandra:
 
