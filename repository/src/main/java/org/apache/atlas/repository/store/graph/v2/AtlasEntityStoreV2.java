@@ -2482,7 +2482,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 break;
 
             case STAKEHOLDER_TITLE_ENTITY_TYPE:
-                preProcessors.add(new StakeholderTitlePreProcessor(graph, typeRegistry, entityRetriever));
+                preProcessors.add(new StakeholderTitlePreProcessor(graph, typeRegistry, entityRetriever, this));
                 break;
         }
 
@@ -3235,6 +3235,15 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
           AtlasVertex entityVertex = graph.getVertex(vertexId);
           if (entityVertex == null) {
               LOG.warn("repairHasLineageByIdsWithTypes: Vertex not found for id: {}", vertexId);
+              continue;
+          }
+
+          // MS-903 / LH-1262: skip lineage recalculation for deleted entities.
+          // When an entity is deleted, its lineage edges are removed, triggering a distributed
+          // hasLineage recalculation task. But emitting an ENTITY_UPDATE for a deleted entity
+          // causes consumers to resurrect it. Check vertex state and skip if deleted.
+          if (GraphHelper.getStatus(entityVertex) == Status.DELETED) {
+              LOG.info("repairHasLineageByIdsWithTypes: Skipping deleted entity for vertexId: {}", vertexId);
               continue;
           }
 
