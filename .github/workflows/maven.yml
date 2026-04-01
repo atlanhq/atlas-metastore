@@ -34,6 +34,7 @@ on:
       - hotfix-reindex-refresh
       - nb-switchable-graph-provider
       - ms-864-keycloak-jwks-internal-url
+      - ring-zerograph-pov-1
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
