@@ -92,3 +92,5 @@ distro/solr/*.tgz
 *.tgz
 
 
+# Credentials
+**/creds.yaml
