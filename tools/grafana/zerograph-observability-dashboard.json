@@ -67,7 +67,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "100 * sum(rate(cg_commit_total{status=\"success\", clusterName=~\"$tenant\"}[1h])) / clamp_min(sum(rate(cg_commit_total{clusterName=~\"$tenant\"}[1h])), 1)",
+          "expr": "100 * sum(rate(atlas_metastore_cg_commit_total{status=\"success\", clusterName=~\"$tenant\"}[1h])) / clamp_min(sum(rate(atlas_metastore_cg_commit_total{clusterName=~\"$tenant\"}[1h])), 1)",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -103,7 +103,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "100 * sum(rate(cg_es_sync_total{result=\"sync_success\", clusterName=~\"$tenant\"}[1h])) / clamp_min(sum(rate(cg_es_sync_total{clusterName=~\"$tenant\"}[1h])), 1)",
+          "expr": "100 * sum(rate(atlas_metastore_cg_es_sync_total{result=\"sync_success\", clusterName=~\"$tenant\"}[1h])) / clamp_min(sum(rate(atlas_metastore_cg_es_sync_total{clusterName=~\"$tenant\"}[1h])), 1)",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -135,7 +135,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "sum(cg_outbox_pending{clusterName=~\"$tenant\"})",
+          "expr": "sum(atlas_metastore_cg_outbox_pending{clusterName=~\"$tenant\"})",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -166,7 +166,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "sum(cg_outbox_failed{clusterName=~\"$tenant\"})",
+          "expr": "sum(atlas_metastore_cg_outbox_failed{clusterName=~\"$tenant\"})",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -202,7 +202,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "100 * cg_reconciliation_miss_rate{clusterName=~\"$tenant\"}",
+          "expr": "100 * atlas_metastore_cg_reconciliation_miss_rate{clusterName=~\"$tenant\"}",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -234,7 +234,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "sum(cg_vertex_count_drift{clusterName=~\"$tenant\"})",
+          "expr": "sum(atlas_metastore_cg_vertex_count_drift{clusterName=~\"$tenant\"})",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -259,8 +259,8 @@
       "id": 101,
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_commit_total{status=\"success\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "success", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_commit_total{status=\"failure\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "failure", "refId": "B" }
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_commit_total{status=\"success\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "success", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_commit_total{status=\"failure\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "failure", "refId": "B" }
       ],
       "title": "Commits/sec",
       "type": "timeseries"
@@ -272,9 +272,9 @@
       "id": 102,
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.50, sum(rate(cg_commit_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p50", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.95, sum(rate(cg_commit_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p95", "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.99, sum(rate(cg_commit_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p99", "refId": "C" }
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.50, sum(rate(atlas_metastore_cg_commit_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p50", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.95, sum(rate(atlas_metastore_cg_commit_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p95", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.99, sum(rate(atlas_metastore_cg_commit_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p99", "refId": "C" }
       ],
       "title": "Commit Latency",
       "type": "timeseries"
@@ -286,10 +286,10 @@
       "id": 103,
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_vertices_written_total{op=\"create\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "vertices created", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_vertices_written_total{op=\"update\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "vertices updated", "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_edges_written_total{op=\"create\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "edges created", "refId": "C" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_claim_conflicts_total{clusterName=~\"$tenant\"}[5m]))", "legendFormat": "claim conflicts", "refId": "D" }
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_vertices_written_total{op=\"create\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "vertices created", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_vertices_written_total{op=\"update\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "vertices updated", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_edges_written_total{op=\"create\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "edges created", "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_claim_conflicts_total{clusterName=~\"$tenant\"}[5m]))", "legendFormat": "claim conflicts", "refId": "D" }
       ],
       "title": "Write Throughput",
       "type": "timeseries"
@@ -310,9 +310,9 @@
       "id": 201,
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_es_sync_total{result=\"sync_success\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "sync success", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_es_sync_total{result=\"outbox_fallback\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "outbox fallback", "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_es_sync_total{result=\"permanent_failure\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "permanent failure", "refId": "C" }
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_es_sync_total{result=\"sync_success\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "sync success", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_es_sync_total{result=\"outbox_fallback\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "outbox fallback", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_es_sync_total{result=\"permanent_failure\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "permanent failure", "refId": "C" }
       ],
       "title": "ES Sync Outcome",
       "type": "timeseries"
@@ -324,8 +324,8 @@
       "id": 202,
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(cg_outbox_pending{clusterName=~\"$tenant\"})", "legendFormat": "pending", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(cg_outbox_failed{clusterName=~\"$tenant\"})", "legendFormat": "failed", "refId": "B" }
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(atlas_metastore_cg_outbox_pending{clusterName=~\"$tenant\"})", "legendFormat": "pending", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(atlas_metastore_cg_outbox_failed{clusterName=~\"$tenant\"})", "legendFormat": "failed", "refId": "B" }
       ],
       "title": "Outbox Queue Depth",
       "type": "timeseries"
@@ -337,10 +337,10 @@
       "id": 203,
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_outbox_processed_total{result=\"success\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "success", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_outbox_processed_total{result=\"failed\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "failed", "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_outbox_processed_total{result=\"exhausted\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "exhausted", "refId": "C" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_outbox_processed_total{result=\"poison_pill\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "poison pill", "refId": "D" }
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_outbox_processed_total{result=\"success\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "success", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_outbox_processed_total{result=\"failed\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "failed", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_outbox_processed_total{result=\"exhausted\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "exhausted", "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_outbox_processed_total{result=\"poison_pill\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "poison pill", "refId": "D" }
       ],
       "title": "Outbox Processing",
       "type": "timeseries"
@@ -361,7 +361,7 @@
       "id": 301,
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(cg_vertex_count_drift{clusterName=~\"$tenant\"})", "legendFormat": "drift", "refId": "A" }
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(atlas_metastore_cg_vertex_count_drift{clusterName=~\"$tenant\"})", "legendFormat": "drift", "refId": "A" }
       ],
       "title": "Cassandra↔ES Vertex Count Drift",
       "type": "timeseries"
@@ -373,7 +373,7 @@
       "id": 302,
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "cg_reconciliation_miss_rate{clusterName=~\"$tenant\"}", "legendFormat": "miss rate", "refId": "A" }
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "atlas_metastore_cg_reconciliation_miss_rate{clusterName=~\"$tenant\"}", "legendFormat": "miss rate", "refId": "A" }
       ],
       "title": "Reconciliation Miss Rate Over Time",
       "type": "timeseries"
@@ -385,8 +385,8 @@
       "id": 303,
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(increase(cg_orphan_edges_found_total{clusterName=~\"$tenant\"}[1h]))", "legendFormat": "found", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(increase(cg_orphan_edges_deleted_total{clusterName=~\"$tenant\"}[1h]))", "legendFormat": "deleted", "refId": "B" }
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(increase(atlas_metastore_cg_orphan_edges_found_total{clusterName=~\"$tenant\"}[1h]))", "legendFormat": "found", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(increase(atlas_metastore_cg_orphan_edges_deleted_total{clusterName=~\"$tenant\"}[1h]))", "legendFormat": "deleted", "refId": "B" }
       ],
       "title": "Orphan Edges (per hour)",
       "type": "timeseries"
@@ -407,9 +407,9 @@
       "id": 401,
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(increase(cg_job_run_total{result=\"success\", clusterName=~\"$tenant\"}[6h])) by (job)", "legendFormat": "{{job}} success", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(increase(cg_job_run_total{result=\"failed\", clusterName=~\"$tenant\"}[6h])) by (job)", "legendFormat": "{{job}} failed", "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(increase(cg_job_run_total{result=\"skipped_lease\", clusterName=~\"$tenant\"}[6h])) by (job)", "legendFormat": "{{job}} skipped (lease)", "refId": "C" }
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(increase(atlas_metastore_cg_job_run_total{result=\"success\", clusterName=~\"$tenant\"}[6h])) by (job)", "legendFormat": "{{job}} success", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(increase(atlas_metastore_cg_job_run_total{result=\"failed\", clusterName=~\"$tenant\"}[6h])) by (job)", "legendFormat": "{{job}} failed", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(increase(atlas_metastore_cg_job_run_total{result=\"skipped_lease\", clusterName=~\"$tenant\"}[6h])) by (job)", "legendFormat": "{{job}} skipped (lease)", "refId": "C" }
       ],
       "title": "Background Job Runs (6h window)",
       "type": "timeseries"
@@ -421,7 +421,7 @@
       "id": 402,
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.99, sum(rate(cg_job_duration_seconds_bucket{clusterName=~\"$tenant\"}[6h])) by (le, job))", "legendFormat": "{{job}} p99", "refId": "A" }
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.99, sum(rate(atlas_metastore_cg_job_duration_seconds_bucket{clusterName=~\"$tenant\"}[6h])) by (le, job))", "legendFormat": "{{job}} p99", "refId": "A" }
       ],
       "title": "Background Job Duration (p99)",
       "type": "timeseries"
@@ -442,9 +442,9 @@
       "id": 501,
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.50, sum(rate(cg_es_sync_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p50", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.95, sum(rate(cg_es_sync_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p95", "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.99, sum(rate(cg_es_sync_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p99", "refId": "C" }
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.50, sum(rate(atlas_metastore_cg_es_sync_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p50", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.95, sum(rate(atlas_metastore_cg_es_sync_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p95", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.99, sum(rate(atlas_metastore_cg_es_sync_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p99", "refId": "C" }
       ],
       "title": "ES Sync Latency",
       "type": "timeseries"
@@ -456,7 +456,7 @@
       "id": 502,
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_es_sync_retry_total{clusterName=~\"$tenant\"}[5m])) by (attempt)", "legendFormat": "attempt {{attempt}}", "refId": "A" }
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_es_sync_retry_total{clusterName=~\"$tenant\"}[5m])) by (attempt)", "legendFormat": "attempt {{attempt}}", "refId": "A" }
       ],
       "title": "ES Sync Retries",
       "type": "timeseries"
@@ -468,9 +468,9 @@
       "id": 503,
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_es_bulk_items_total{status=\"success\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "success", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_es_bulk_items_total{status=\"retryable\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "retryable", "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(cg_es_bulk_items_total{status=\"permanent\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "permanent", "refId": "C" }
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_es_bulk_items_total{status=\"success\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "success", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_es_bulk_items_total{status=\"retryable\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "retryable", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_es_bulk_items_total{status=\"permanent\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "permanent", "refId": "C" }
       ],
       "title": "ES Bulk Item Results",
       "type": "timeseries"
@@ -497,14 +497,14 @@
       {
         "current": { "selected": false, "text": ".*", "value": ".*" },
         "datasource": { "type": "prometheus", "uid": "${datasource}" },
-        "definition": "label_values(cg_commit_total, clusterName)",
+        "definition": "label_values(atlas_metastore_cg_commit_total, clusterName)",
         "hide": 0,
         "includeAll": true,
         "label": "Tenant",
         "multi": true,
         "name": "tenant",
         "options": [],
-        "query": { "qryType": 1, "query": "label_values(cg_commit_total, clusterName)" },
+        "query": { "qryType": 1, "query": "label_values(atlas_metastore_cg_commit_total, clusterName)" },
         "refresh": 2,
         "regex": "",
         "skipUrlSync": false,
