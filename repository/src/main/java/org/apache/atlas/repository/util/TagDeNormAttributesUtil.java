@@ -138,35 +138,6 @@ public class TagDeNormAttributesUtil {
         return deNormAttrs;
     }
 
-    /**
-     * Helper for deprecated {@link #getPropagatedAttributesForTags}. Will be removed alongside it.
-     */
-    private static void updateDenormAttributesForPropagatedTags(AtlasClassification propagatedTag,
-                                                                  List<AtlasClassification> finalPropagatedTags,
-                                                                  Map<String, Object> deNormAttrs,
-                                                                  boolean isDelete) {
-        List<String> propTraits = finalPropagatedTags.stream()
-                .map(AtlasStruct::getTypeName)
-                .collect(Collectors.toList());
-
-        if (CollectionUtils.isNotEmpty(propTraits)) {
-            deNormAttrs.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, propTraits);
-
-            StringBuilder finalTagNames = new StringBuilder();
-            propTraits.forEach(tagName -> finalTagNames.append(CLASSIFICATION_NAME_DELIMITER).append(tagName));
-
-            deNormAttrs.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, finalTagNames.toString());
-        } else {
-            if (isDelete) {
-                deNormAttrs.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, Collections.emptyList());
-                deNormAttrs.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, CLASSIFICATION_NAME_DELIMITER);
-            } else {
-                deNormAttrs.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, Collections.singletonList(propagatedTag.getTypeName()));
-                deNormAttrs.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, CLASSIFICATION_NAME_DELIMITER + propagatedTag.getTypeName());
-            }
-        }
-    }
-
     public static Map<String, Object> getAllAttributesForAllTagsForRepair(String sourceAssetGuid,
                                                                         List<AtlasClassification> currentTags,
                                                                         AtlasTypeRegistry typeRegistry,
@@ -216,6 +187,35 @@ public class TagDeNormAttributesUtil {
         deNormAttrs.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, propagatedClassificationNamesKey);
 
         return deNormAttrs;
+    }
+
+    /**
+     * Helper for deprecated {@link #getPropagatedAttributesForTags}. Will be removed alongside it.
+     */
+    private static void updateDenormAttributesForPropagatedTags(AtlasClassification propagatedTag,
+                                                                  List<AtlasClassification> finalPropagatedTags,
+                                                                  Map<String, Object> deNormAttrs,
+                                                                  boolean isDelete) {
+        List<String> propTraits = finalPropagatedTags.stream()
+                .map(AtlasStruct::getTypeName)
+                .collect(Collectors.toList());
+
+        if (CollectionUtils.isNotEmpty(propTraits)) {
+            deNormAttrs.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, propTraits);
+
+            StringBuilder finalTagNames = new StringBuilder();
+            propTraits.forEach(tagName -> finalTagNames.append(CLASSIFICATION_NAME_DELIMITER).append(tagName));
+
+            deNormAttrs.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, finalTagNames.toString());
+        } else {
+            if (isDelete) {
+                deNormAttrs.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, Collections.emptyList());
+                deNormAttrs.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, CLASSIFICATION_NAME_DELIMITER);
+            } else {
+                deNormAttrs.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, Collections.singletonList(propagatedTag.getTypeName()));
+                deNormAttrs.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, CLASSIFICATION_NAME_DELIMITER + propagatedTag.getTypeName());
+            }
+        }
     }
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
