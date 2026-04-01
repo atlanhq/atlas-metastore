@@ -67,7 +67,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "100 * sum(rate(atlas_metastore_cg_commit_total{status=\"success\", clusterName=~\"$tenant\"}[1h])) / clamp_min(sum(rate(atlas_metastore_cg_commit_total{clusterName=~\"$tenant\"}[1h])), 1)",
+          "expr": "100 * sum(rate(atlas_metastore_cg_commit_total{status=\"success\", clusterName=~\"$tenant\"}[1h])) / (sum(rate(atlas_metastore_cg_commit_total{clusterName=~\"$tenant\"}[1h])) > 0)",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -103,7 +103,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "100 * sum(rate(atlas_metastore_cg_es_sync_total{result=\"sync_success\", clusterName=~\"$tenant\"}[1h])) / clamp_min(sum(rate(atlas_metastore_cg_es_sync_total{clusterName=~\"$tenant\"}[1h])), 1)",
+          "expr": "100 * sum(rate(atlas_metastore_cg_es_sync_total{result=\"sync_success\", clusterName=~\"$tenant\"}[1h])) / (sum(rate(atlas_metastore_cg_es_sync_total{clusterName=~\"$tenant\"}[1h])) > 0)",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -213,7 +213,7 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "description": "Absolute difference between Cassandra vertex count and ES doc count",
+      "description": "Outbox pending + failed entries — entities written to Cassandra but not yet synced to ES. If > 0, search results may be stale.",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },

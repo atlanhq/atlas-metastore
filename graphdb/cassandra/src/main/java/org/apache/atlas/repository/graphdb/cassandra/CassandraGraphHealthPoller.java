@@ -4,16 +4,9 @@ import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.cql.ResultSet;
 import com.datastax.oss.driver.api.core.cql.Row;
 import com.datastax.oss.driver.api.core.cql.SimpleStatement;
-import org.apache.atlas.repository.Constants;
-import org.apache.atlas.repository.graphdb.elasticsearch.AtlasElasticsearchDatabase;
-import org.apache.http.util.EntityUtils;
-import org.elasticsearch.client.Request;
-import org.elasticsearch.client.Response;
-import org.elasticsearch.client.RestClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -104,58 +97,25 @@ public class CassandraGraphHealthPoller {
         }
     }
 
-    @SuppressWarnings("unchecked")
+    /**
+     * Sets vertex count drift as the sum of outbox PENDING + FAILED entries.
+     * These represent entities written to Cassandra but not yet (or failed to be)
+     * synced to ES. This is the actionable drift metric — if it's > 0, search
+     * results may be stale.
+     *
+     * We don't compare total C* vertex count vs ES doc count because C* includes
+     * TypeDef/system vertices (~thousands) that are never indexed to ES, causing
+     * a permanent false-positive drift.
+     */
     private void pollVertexCountDrift(CassandraGraphMetrics metrics) {
-        // Get Cassandra vertex count (estimated — uses system table for speed)
-        long cassandraCount = estimateCassandraVertexCount();
-        if (cassandraCount < 0) return;
-
-        // Get ES doc count
-        long esCount = getESDocCount();
-        if (esCount < 0) return;
-
-        long drift = Math.abs(cassandraCount - esCount);
+        int pending = countOutboxByStatus("PENDING");
+        int failed = countOutboxByStatus("FAILED");
+        long drift = pending + failed;
         metrics.setVertexCountDrift(drift);
 
-        if (drift > 100) {
-            LOG.warn("Health poller: vertex count drift detected — Cassandra={}, ES={}, drift={}",
-                    cassandraCount, esCount, drift);
+        if (drift > 0) {
+            LOG.info("Health poller: vertex sync drift={} (pending={}, failed={})", drift, pending, failed);
         }
     }
 
-    private long estimateCassandraVertexCount() {
-        try {
-            // Use the vertices table count. For large tables, this is expensive.
-            // In production, consider using system.size_estimates instead.
-            // For now, use a token-range sampling approach for speed.
-            ResultSet rs = session.execute("SELECT COUNT(*) FROM vertices");
-            Row row = rs.one();
-            return row != null ? row.getLong(0) : -1;
-        } catch (Exception e) {
-            LOG.debug("Health poller: failed to count Cassandra vertices: {}", e.getMessage());
-            return -1;
-        }
-    }
-
-    private long getESDocCount() {
-        try {
-            RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
-            if (client == null) return -1;
-
-            String indexName = Constants.VERTEX_INDEX_NAME;
-            Request req = new Request("GET", "/" + indexName + "/_count");
-            Response resp = client.performRequest(req);
-            String body = EntityUtils.toString(resp.getEntity());
-
-            // Parse {"count":12345,"_shards":{...}}
-            Map<String, Object> parsed = org.apache.atlas.type.AtlasType.fromJson(body, Map.class);
-            if (parsed != null && parsed.get("count") instanceof Number) {
-                return ((Number) parsed.get("count")).longValue();
-            }
-            return -1;
-        } catch (Exception e) {
-            LOG.debug("Health poller: failed to get ES doc count: {}", e.getMessage());
-            return -1;
-        }
-    }
 }
