@@ -130,7 +130,7 @@ public class ESConnector implements Closeable {
             if (MapUtils.isEmpty(entitiesMap))
                 return;
 
-            // Track docId → vertexId mapping for failure reporting.
+            // Track docId → vertexId mapping for failure reporting
             Map<String, String> docIdToVertexId = new LinkedHashMap<>();
             StringBuilder bulkRequestBody = buildBulkBody(entitiesMap, docIdToVertexId, null, upsert);
 
