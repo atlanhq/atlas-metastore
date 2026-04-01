@@ -250,13 +250,11 @@ public class DiscoveryREST {
             if (enableSearchLogging && parameters.isSaveSearchLog() && !shouldSkipSearchLog(parameters)) {
                 final AtlasSearchResult logResult = result;
                 final long duration = endTime - startTime;
-                CompletableFuture.runAsync(() -> {
-                    try {
-                        logSearchLog(parameters, logResult, servletRequest, duration);
-                    } catch (Exception e) {
-                        LOG.warn("Async search log failed", e);
-                    }
-                });
+                try {
+                    logSearchLog(parameters, logResult, servletRequest, duration);
+                } catch (Exception e) {
+                    LOG.warn("Async search log failed", e);
+                }
             }
 
             return result;
