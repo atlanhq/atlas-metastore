@@ -17,7 +17,6 @@
  */
 package org.apache.atlas.web.rest;
 
-import java.util.concurrent.CompletableFuture;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
