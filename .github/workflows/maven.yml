@@ -38,6 +38,7 @@ on:
       - migration_edge_chunking
       - merge-migrator-into-sgp
       - ms-864-keycloak-jwks-internal-url
+      - ms-911-add-observability
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
