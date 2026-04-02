@@ -4797,6 +4797,47 @@ public class EntityGraphMapper {
 
         Tag currentTag = tagDAO.findDirectTagByVertexIdAndTagTypeNameWithAssetMetadata(entityVertex.getIdForDisplay(), classificationName, false);
         if (Objects.isNull(currentTag)) {
+            // Not a direct tag — check if it's a propagated tag and create delete propagation tasks for orphans
+            String vertexId = entityVertex.getIdForDisplay();
+            List<Tag> allTags = tagDAO.getAllTagsByVertexId(vertexId);
+
+            List<Tag> propagatedTagsForType = allTags.stream()
+                    .filter(t -> classificationName.equals(t.getTagTypeName()))
+                    .filter(t -> !vertexId.equals(t.getSourceVertexId()))
+                    .collect(Collectors.toList());
+
+            boolean createdTask = false;
+            for (Tag propagatedTag : propagatedTagsForType) {
+                String sourceVertexId = propagatedTag.getSourceVertexId();
+
+                // Only clean up if the source no longer has an active direct tag — i.e. this is an orphaned propagation
+                AtlasClassification sourceDirectTag = tagDAO.findDirectTagByVertexIdAndTagTypeName(sourceVertexId, classificationName, false);
+                if (sourceDirectTag == null) {
+                    String sourceEntityGuid = propagatedTag.getTagMetaJson() != null
+                            ? (String) propagatedTag.getTagMetaJson().get("entityGuid") : null;
+                    String currentUser = RequestContext.getCurrentUser();
+                    String taskEntityGuid = StringUtils.isNotEmpty(sourceEntityGuid) ? sourceEntityGuid : entityGuid;
+
+                    Map<String, Object> taskParams = new HashMap<>() {{
+                        put(PARAM_ENTITY_GUID, taskEntityGuid);
+                        put(PARAM_SOURCE_VERTEX_ID, sourceVertexId);
+                        put("newMode", true);
+                    }};
+
+                    LOG.info("Classification {} on entity {} is an orphaned propagation from source vertex {}, creating delete propagation task",
+                            classificationName, entityGuid, sourceVertexId);
+                    taskManagement.createTaskV2(CLASSIFICATION_PROPAGATION_DELETE, currentUser, taskParams, classificationName, taskEntityGuid);
+                    createdTask = true;
+                } else {
+                    LOG.warn("Classification {} on entity {} is propagated from source vertex {} which still has the direct tag — cannot remove",
+                            classificationName, entityGuid, sourceVertexId);
+                }
+            }
+
+            if (createdTask) {
+                return;
+            }
+
             LOG.error(AtlasErrorCode.CLASSIFICATION_NOT_FOUND.getFormattedErrorMessage(classificationName));
             // If a client is trying to delete this tag, it might be existing in ES but not in C*. Allow it to be cleaned in ES.
             addEsDeferredOperation(entityVertex, classificationName);
@@ -5625,8 +5666,21 @@ public class EntityGraphMapper {
                 originalClassification = tagDAO.findDirectTagByVertexIdAndTagTypeName(vertexIdForPropagations, tagTypeName, false);
 
             if (originalClassification == null) {
-                LOG.error("propagateClassification(entityGuid={}, tagTypeName={}): classification vertex not found", sourceEntityGuid, tagTypeName);
-                throw new AtlasBaseException(String.format("propagateClassification(entityGuid=%s, tagTypeName=%s): classification vertex not found", sourceEntityGuid, tagTypeName));
+                // Source's direct tag is gone — construct a minimal classification for denorm/notification.
+                // This handles orphaned propagations where the source tag was removed but cleanup didn't complete.
+                // Note: batchToDelete Tags from getPropagationsForAttachmentBatch don't have tagMetaJson,
+                // so we construct a minimal AtlasClassification with just the typeName.
+                if (!batchToDelete.isEmpty()) {
+                    LOG.warn("deleteClassificationPropagationV2(entityGuid={}, tagTypeName={}): source direct tag not found, constructing minimal classification",
+                            sourceEntityGuid, tagTypeName);
+                    originalClassification = new AtlasClassification(tagTypeName);
+                    originalClassification.setEntityGuid(sourceEntityGuid);
+                    originalClassification.setPropagate(true);
+                } else {
+                    LOG.warn("deleteClassificationPropagationV2(entityGuid={}, tagTypeName={}): no direct tag and no propagated tags found, nothing to delete",
+                            sourceEntityGuid, tagTypeName);
+                    return 0;
+                }
             }
 
             while (!batchToDelete.isEmpty()) {
@@ -7175,3 +7229,4 @@ public class EntityGraphMapper {
     }
 
 }
+

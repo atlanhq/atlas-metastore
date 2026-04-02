@@ -33,6 +33,7 @@ on:
       - ms-664-fix-audit-search
       - hotfix-reindex-refresh
       - ms-864-keycloak-jwks-internal-url
+      - ms-907-fix-propagated-tag-removal
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
