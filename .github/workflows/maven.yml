@@ -33,6 +33,7 @@ on:
       - ms-664-fix-audit-search
       - hotfix-reindex-refresh
       - ms-864-keycloak-jwks-internal-url
+      - hitesh/ms-752-fix
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
