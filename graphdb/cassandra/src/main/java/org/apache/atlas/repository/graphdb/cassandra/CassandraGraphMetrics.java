@@ -38,6 +38,7 @@ public class CassandraGraphMetrics {
     private final AtomicInteger outboxFailed = new AtomicInteger(0);
     private final AtomicLong vertexCountDrift = new AtomicLong(0);
     private final AtomicInteger outboxDrainMode = new AtomicInteger(0);
+    private final AtomicLong reconciliationMissRateBps = new AtomicLong(0); // basis points (missRate * 10000)
 
     private CassandraGraphMetrics(MeterRegistry registry) {
         this.registry = registry;
@@ -141,10 +142,9 @@ public class CassandraGraphMetrics {
         if (missing > 0)       getCounter("reconciliation_missing_total").increment(missing);
         if (reindexed > 0)     getCounter("reconciliation_reindexed_total").increment(reindexed);
 
-        // Update miss rate gauge — always set, even if 0
-        Gauge.builder(PREFIX + "reconciliation_miss_rate", () -> missRate)
-                .description("ES reconciliation miss rate (fraction of sampled GUIDs missing from ES)")
-                .register(registry);
+        // Update miss rate gauge — stored as basis points (missRate * 10000) in AtomicLong
+        // to avoid floating-point atomics. Gauge reads it back as a fraction.
+        reconciliationMissRateBps.set((long) (missRate * 10000));
     }
 
     public void recordOrphanEdgeScan(long durationMs, int scanned, int found, int deleted) {
@@ -189,6 +189,11 @@ public class CassandraGraphMetrics {
 
         Gauge.builder(PREFIX + "vertex_count_drift", vertexCountDrift, AtomicLong::get)
                 .description("Absolute difference between Cassandra vertex count and ES doc count")
+                .register(registry);
+
+        Gauge.builder(PREFIX + "reconciliation_miss_rate", reconciliationMissRateBps,
+                        v -> v.get() / 10000.0)
+                .description("ES reconciliation miss rate (fraction of sampled GUIDs missing from ES)")
                 .register(registry);
     }
 
