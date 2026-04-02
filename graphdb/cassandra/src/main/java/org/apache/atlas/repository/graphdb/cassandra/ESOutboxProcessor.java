@@ -256,7 +256,7 @@ public class ESOutboxProcessor {
                             if (entry != null) {
                                 outboxRepository.markFailed(permId, entry.attemptCount);
                             }
-                            recordOutboxMetric("exhausted");
+                            recordOutboxMetric("permanent");
                         }
 
                         LOG.info("ESOutboxProcessor: {} succeeded, {} retryable, {} permanent failures",
