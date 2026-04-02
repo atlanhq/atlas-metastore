@@ -77,5 +77,34 @@ public interface TagDAO {
      * @throws AtlasBaseException If an error occurs during retrieval
      */
     Map<String, List<AtlasClassification>> getAllClassificationsForVertices(Collection<String> vertexIds) throws AtlasBaseException;
+
+    /**
+     * Logs a tag change to the change log table for reconciliation.
+     */
+    void logTagChange(String vertexId, String tagTypeName, String operation) throws AtlasBaseException;
+
+    /**
+     * Reads a page of change log entries for a given day bucket, starting after the given position.
+     */
+    List<TagChangeLogEntry> readChangeLog(String dayBucket, long afterTimestamp, String afterVertexId, int pageSize) throws AtlasBaseException;
+
+    /**
+     * A change log entry.
+     */
+    class TagChangeLogEntry {
+        public final String dayBucket;
+        public final long   createdAt;
+        public final String vertexId;
+        public final String tagTypeName;
+        public final String operation;
+
+        public TagChangeLogEntry(String dayBucket, long createdAt, String vertexId, String tagTypeName, String operation) {
+            this.dayBucket   = dayBucket;
+            this.createdAt   = createdAt;
+            this.vertexId    = vertexId;
+            this.tagTypeName = tagTypeName;
+            this.operation   = operation;
+        }
+    }
 }
 

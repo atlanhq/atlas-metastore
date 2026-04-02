@@ -41,7 +41,11 @@ public enum ConfigKey {
     DELETE_BATCH_ENABLED("atlas.delete.batch.enabled", "false"),
 
     // Async ingestion flag - when enabled, write operations also publish to Kafka for shadow consumer
-    ENABLE_ASYNC_INGESTION("ENABLE_ASYNC_INGESTION", "false");
+    ENABLE_ASYNC_INGESTION("ENABLE_ASYNC_INGESTION", "false"),
+
+    // Tag reconciliation service — syncs Cassandra tags to ES and cleans up orphaned propagations
+    TAG_RECONCILER_ENABLED("TAG_RECONCILER_ENABLED", "false"),
+    TAG_RECONCILER_STATE("TAG_RECONCILER_STATE", null);
 
     private final String key;
     private final String defaultValue;
