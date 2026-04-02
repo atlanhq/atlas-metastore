@@ -1161,8 +1161,20 @@ public class EntityGraphRetriever {
     private Set<String> collectEdgeLabelsToProcess(VertexEdgePropertiesCache cache,
                                                    Set<String> vertexIds,
                                                    Set<String> attributes) {
+        return collectEdgeLabelsWithDirection(cache, vertexIds, attributes).keySet();
+    }
+
+    /**
+     * Collects edge labels with their relationship direction. Each label maps to the
+     * direction from which the edge should be queried (IN, OUT, or BOTH), enabling
+     * the edge fetch layer to query only the correct Cassandra table per label instead
+     * of always querying both edges_out and edges_in.
+     */
+    private Map<String, AtlasEdgeDirection> collectEdgeLabelsWithDirection(VertexEdgePropertiesCache cache,
+                                                                           Set<String> vertexIds,
+                                                                           Set<String> attributes) {
         if (attributes == null || attributes.isEmpty()) {
-            return Collections.emptySet();
+            return Collections.emptyMap();
         }
 
         Set<String> typeNames = vertexIds.stream()
@@ -1170,8 +1182,7 @@ public class EntityGraphRetriever {
                 .filter(StringUtils::isNotEmpty)
                 .collect(Collectors.toSet());
 
-        // Collect edge labels from relationship attributes
-        Set<String> edgeLabels = new HashSet<>();
+        Map<String, AtlasEdgeDirection> edgeLabelDirections = new HashMap<>();
 
         for (String typeName : typeNames) {
             AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
@@ -1180,16 +1191,16 @@ public class EntityGraphRetriever {
             }
 
             for (String attribute : attributes) {
-                processRelationshipAttribute(entityType, attribute, edgeLabels);
+                processRelationshipAttribute(entityType, attribute, edgeLabelDirections);
             }
         }
 
-        return edgeLabels;
+        return edgeLabelDirections;
     }
 
     private void processRelationshipAttribute(AtlasEntityType entityType,
                                               String attribute,
-                                              Set<String> edgeLabels) {
+                                              Map<String, AtlasEdgeDirection> edgeLabelDirections) {
 
         RequestContext context = RequestContext.get();
         if (!entityType.getRelationshipAttributes().containsKey(attribute)) {
@@ -1202,9 +1213,26 @@ public class EntityGraphRetriever {
                     CollectionUtils.isEmpty(context.getRelationAttrsForSearch())) {
                 return;
             }
-            edgeLabels.add(atlasAttribute.getRelationshipEdgeLabel());
+            String label = atlasAttribute.getRelationshipEdgeLabel();
+            AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection relDirection = atlasAttribute.getRelationshipEdgeDirection();
+            AtlasEdgeDirection direction = toAtlasEdgeDirection(relDirection);
+
+            // If the same label is seen from multiple types with different directions, use BOTH
+            edgeLabelDirections.merge(label, direction, (existing, incoming) ->
+                    existing == incoming ? existing : AtlasEdgeDirection.BOTH);
         } else {
             LOG.debug("Ignoring non-relationship type attribute: {}", attribute);
+        }
+    }
+
+    private static AtlasEdgeDirection toAtlasEdgeDirection(AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection relDirection) {
+        if (relDirection == null) {
+            return AtlasEdgeDirection.BOTH;
+        }
+        switch (relDirection) {
+            case IN:  return AtlasEdgeDirection.IN;
+            case OUT: return AtlasEdgeDirection.OUT;
+            default:  return AtlasEdgeDirection.BOTH;
         }
     }
 
@@ -1291,6 +1319,11 @@ public class EntityGraphRetriever {
     }
 
     public List<Map<String, Object>> getConnectedRelationEdges(Set<String> vertexIds, Set<String> edgeLabels, int relationAttrsSize) {
+        return getConnectedRelationEdges(vertexIds, edgeLabels.stream().collect(
+                Collectors.toMap(l -> l, l -> AtlasEdgeDirection.BOTH)), relationAttrsSize);
+    }
+
+    public List<Map<String, Object>> getConnectedRelationEdges(Set<String> vertexIds, Map<String, AtlasEdgeDirection> edgeLabelDirections, int relationAttrsSize) {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("getConnectedRelationEdges");
         try {
             if (CollectionUtils.isEmpty(vertexIds)) {
@@ -1298,9 +1331,10 @@ public class EntityGraphRetriever {
             }
 
             if (graph instanceof CassandraGraph) {
-                return getEdgeInfoMapsViaAtlasApi(vertexIds, edgeLabels, relationAttrsSize);
+                return getEdgeInfoMapsViaAtlasApi(vertexIds, edgeLabelDirections, relationAttrsSize);
             }
 
+            Set<String> edgeLabels = edgeLabelDirections.keySet();
             GraphTraversal<Edge, Map<String, Object>> edgeTraversal =
                     ((AtlasJanusGraph) graph).V(vertexIds)
                             .bothE();
@@ -1328,6 +1362,12 @@ public class EntityGraphRetriever {
 
     public List<Map<String, Object>> getConnectedRelationEdgesVertexBatching(
             Set<String> vertexIds, Set<String> edgeLabels, int relationAttrsSize) {
+        return getConnectedRelationEdgesVertexBatching(vertexIds, edgeLabels.stream().collect(
+                Collectors.toMap(l -> l, l -> AtlasEdgeDirection.BOTH)), relationAttrsSize);
+    }
+
+    public List<Map<String, Object>> getConnectedRelationEdgesVertexBatching(
+            Set<String> vertexIds, Map<String, AtlasEdgeDirection> edgeLabelDirections, int relationAttrsSize) {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("getConnectedRelationEdgesVertexBatching");
         try {
             if (CollectionUtils.isEmpty(vertexIds)) {
@@ -1335,9 +1375,10 @@ public class EntityGraphRetriever {
             }
 
             if (graph instanceof CassandraGraph) {
-                return getEdgeInfoMapsViaAtlasApiBatched(vertexIds, edgeLabels, relationAttrsSize);
+                return getEdgeInfoMapsViaAtlasApiBatched(vertexIds, edgeLabelDirections, relationAttrsSize);
             }
 
+            Set<String> edgeLabels = edgeLabelDirections.keySet();
             List<Map<String, Object>> allResults = new ArrayList<>();
             List<String> vertexIdList = new ArrayList<>(vertexIds);
             int vertexBatchSize = AtlasConfiguration.ATLAS_INDEXSEARCH_EDGE_BULK_FETCH_BATCH_SIZE.getInt(); // Process 100 vertices at a time
@@ -1383,11 +1424,12 @@ public class EntityGraphRetriever {
      * Uses graph.getEdgesForVertices() bulk API and filters by state/relationship GUID.
      */
     @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> getEdgeInfoMapsViaAtlasApi(Set<String> vertexIds, Set<String> edgeLabels, int limitPerLabel) {
+    private List<Map<String, Object>> getEdgeInfoMapsViaAtlasApi(Set<String> vertexIds, Map<String, AtlasEdgeDirection> edgeLabelDirections, int limitPerLabel) {
         List<Map<String, Object>> results = new ArrayList<>();
         Set<String> seenEdgeIds = new HashSet<>();
 
-        Map<String, List<AtlasEdge>> allEdgesMap = (Map) graph.getEdgesForVertices(vertexIds, edgeLabels, limitPerLabel);
+        Map<String, List<AtlasEdge>> allEdgesMap = (Map) ((CassandraGraph) graph)
+                .getEdgesForVerticesDirectionAware(vertexIds, edgeLabelDirections, limitPerLabel);
 
         for (String vertexId : vertexIds) {
             List<AtlasEdge> edges = allEdgesMap.getOrDefault(vertexId, Collections.emptyList());
@@ -1422,7 +1464,7 @@ public class EntityGraphRetriever {
     /**
      * Batched version of getEdgeInfoMapsViaAtlasApi for processing large vertex sets.
      */
-    private List<Map<String, Object>> getEdgeInfoMapsViaAtlasApiBatched(Set<String> vertexIds, Set<String> edgeLabels, int relationAttrsSize) {
+    private List<Map<String, Object>> getEdgeInfoMapsViaAtlasApiBatched(Set<String> vertexIds, Map<String, AtlasEdgeDirection> edgeLabelDirections, int relationAttrsSize) {
         List<Map<String, Object>> allResults = new ArrayList<>();
         List<String> vertexIdList = new ArrayList<>(vertexIds);
         int vertexBatchSize = AtlasConfiguration.ATLAS_INDEXSEARCH_EDGE_BULK_FETCH_BATCH_SIZE.getInt();
@@ -1431,7 +1473,7 @@ public class EntityGraphRetriever {
             int end = Math.min(i + vertexBatchSize, vertexIdList.size());
             List<String> vertexBatch = vertexIdList.subList(i, end);
 
-            List<Map<String, Object>> batchResults = getEdgeInfoMapsViaAtlasApi(new LinkedHashSet<>(vertexBatch), edgeLabels, relationAttrsSize);
+            List<Map<String, Object>> batchResults = getEdgeInfoMapsViaAtlasApi(new LinkedHashSet<>(vertexBatch), edgeLabelDirections, relationAttrsSize);
             allResults.addAll(batchResults);
 
             LOG.debug("Processed vertex batch {}-{} of {}, found {} edges",
@@ -1472,15 +1514,16 @@ public class EntityGraphRetriever {
            }
            vertexEdgePropertyCache.addVertices(vertexCache.getValue1());
 
-           Set<String> edgeLabelsToProcess = collectEdgeLabelsToProcess(vertexEdgePropertyCache, vertexIds, attributes);
+           Map<String, AtlasEdgeDirection> edgeLabelDirections = collectEdgeLabelsWithDirection(vertexEdgePropertyCache, vertexIds, attributes);
+           Set<String> edgeLabelsToProcess = edgeLabelDirections.keySet();
 
            Set<String> vertexIdsToProcess = new HashSet<>();
            if (!CollectionUtils.isEmpty(edgeLabelsToProcess)) {
                List<Map<String, Object>> relationEdges;
                if (AtlasConfiguration.ATLAS_INDEXSEARCH_EDGE_BULK_FETCH_ENABLE.getBoolean()) {
-                   relationEdges = getConnectedRelationEdgesVertexBatching(vertexIds, edgeLabelsToProcess, relationAttrsSize);
+                   relationEdges = getConnectedRelationEdgesVertexBatching(vertexIds, edgeLabelDirections, relationAttrsSize);
                } else {
-                   relationEdges = getConnectedRelationEdges(vertexIds, edgeLabelsToProcess, relationAttrsSize);
+                   relationEdges = getConnectedRelationEdges(vertexIds, edgeLabelDirections, relationAttrsSize);
                }
 
 

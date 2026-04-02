@@ -1,5 +1,10 @@
 {
   "properties": {
+    "__qualifiedNameHierarchy": {
+      "type": "text",
+      "analyzer": "atlan_path_analyzer",
+      "search_analyzer": "keyword"
+    },
     "relationshipList": {
       "type": "nested",
       "properties": {

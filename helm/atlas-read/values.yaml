@@ -15,9 +15,9 @@ multiarch:
 # Declare variables to be passed into your templates.
 global:
   # Graph backend mode: "janus" (default, JanusGraph) or "cassandra" (Cassandra+ES direct)
-  graphBackend: "janus"
+  graphBackend: "cassandra"
   # CassandraGraph ID strategy: "legacy" (UUID) or "deterministic" (SHA-256 of type+QN)
-  graphIdStrategy: "legacy"
+  graphIdStrategy: "deterministic"
   # CassandraGraph entity claim dedup via LWT (requires cassandra backend)
   graphClaimEnabled: false
   Tier_Type: ""
