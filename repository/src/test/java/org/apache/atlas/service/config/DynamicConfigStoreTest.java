@@ -20,10 +20,6 @@ import static org.mockito.Mockito.*;
 /**
  * Unit tests for DynamicConfigStore.
  *
- * These tests specifically target the two production incidents:
- * 1. MS-579/MS-580: Flag inversion bug where isTagV2Enabled() returned !value
- * 2. Empty Cassandra on activation: Tenants that missed Phase 1 got empty config stores
- *
  * The tests verify:
  * - Flag helper methods return correct boolean values in activated mode
  * - Empty/partial Cassandra rows trigger recovery seeding from defaults

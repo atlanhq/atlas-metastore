@@ -44,6 +44,7 @@ import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.graphdb.cassandra.CassandraGraph;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.AtlasRelationshipStoreV2;
@@ -67,7 +68,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSo
 import org.apache.tinkerpop.gremlin.structure.Direction;
 import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
-import org.janusgraph.util.encoding.LongEncoding;
+import org.apache.atlas.repository.store.graph.v2.LongEncodingUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -165,9 +166,37 @@ public abstract class DeleteHandlerV1 {
             for (GraphHelper.VertexInfo vertexInfo : getOwnedVertices(instanceVertex)) {
                 AtlasEntityHeader entityHeader = vertexInfo.getEntity();
 
-                if (requestContext.isPurgeRequested()) {
-                    entityHeader.setClassifications(
-                            entityRetriever.handleGetAllClassifications(vertexInfo.getVertex()));
+                // MS-903 / LH-969: Enrich the ENTITY_DELETE notification with classification and BM data
+                // so downstream consumers can cascade-delete derived state from a single event.
+                // Data is loaded into BOTH the entity header (for the notification entity fields)
+                // AND the diff entity (for mutatedDetails), ensuring consumers have access via
+                // either path. All loads are wrapped in try-catch — a notification missing enrichment
+                // data is acceptable; a blocked delete is not.
+                try {
+                    List<AtlasClassification> classifications =
+                            entityRetriever.handleGetAllClassifications(vertexInfo.getVertex());
+                    if (CollectionUtils.isNotEmpty(classifications)) {
+                        entityHeader.setClassifications(classifications);
+
+                        // Also store in diff entity for mutatedDetails
+                        AtlasEntity diffEntity = entityRetriever.getOrInitializeDiffEntity(vertexInfo.getVertex());
+                        diffEntity.setClassifications(classifications);
+                    }
+                } catch (Exception e) {
+                    LOG.warn("Failed to load classifications for entity {} during delete — notification will lack classification data",
+                            entityHeader.getGuid(), e);
+                }
+
+                try {
+                    Map<String, Map<String, Object>> businessMetadata =
+                            entityRetriever.getBusinessMetadata(vertexInfo.getVertex());
+                    if (MapUtils.isNotEmpty(businessMetadata)) {
+                        AtlasEntity diffEntity = entityRetriever.getOrInitializeDiffEntity(vertexInfo.getVertex());
+                        diffEntity.setBusinessAttributes(businessMetadata);
+                    }
+                } catch (Exception e) {
+                    LOG.warn("Failed to load business metadata for entity {} during delete — notification will lack BM data",
+                            entityHeader.getGuid(), e);
                 }
 
                 requestContext.recordEntityDelete(entityHeader);
@@ -309,7 +338,7 @@ public abstract class DeleteHandlerV1 {
 
             AtlasEntityHeader entity = entityRetriever.toAtlasEntityHeader(vertex, attributes);
             entity.setVertexId(vertex.getIdForDisplay());
-            entity.setDocId(LongEncoding.encode(Long.parseLong(vertex.getIdForDisplay())));
+            entity.setDocId(LongEncodingUtil.vertexIdToDocId(vertex.getIdForDisplay()));
             entity.setSuperTypeNames(entityType.getAllSuperTypes());
             vertexInfoMap.put(guid, new GraphHelper.VertexInfo(entity, vertex));
 
@@ -499,7 +528,7 @@ public abstract class DeleteHandlerV1 {
                             AtlasGraphUtilsV2.setEncodedProperty(referencedVertex, MODIFICATION_TIMESTAMP_PROPERTY_KEY, requestContext.getRequestTime());
                             AtlasGraphUtilsV2.setEncodedProperty(referencedVertex, MODIFIED_BY_KEY, requestContext.getUser());
 
-                            requestContext.recordEntityUpdate(entityRetriever.toAtlasEntityHeader(referencedVertex));
+                            requestContext.recordEntityUpdateForRelationshipChange(entityRetriever.toAtlasEntityHeader(referencedVertex));
                         }
 
                         // Cache differential entity with removed relationship info for mutatedDetails in notifications
@@ -521,7 +550,7 @@ public abstract class DeleteHandlerV1 {
                             AtlasGraphUtilsV2.setEncodedProperty(referencedVertex, MODIFICATION_TIMESTAMP_PROPERTY_KEY, requestContext.getRequestTime());
                             AtlasGraphUtilsV2.setEncodedProperty(referencedVertex, MODIFIED_BY_KEY, requestContext.getUser());
 
-                            requestContext.recordEntityUpdate(entityRetriever.toAtlasEntityHeader(referencedVertex));
+                            requestContext.recordEntityUpdateForRelationshipChange(entityRetriever.toAtlasEntityHeader(referencedVertex));
                         }
 
                         // Cache differential entity with removed relationship info for mutatedDetails in notifications
@@ -1040,7 +1069,7 @@ public abstract class DeleteHandlerV1 {
         String typeName           = AtlasGraphUtilsV2.getTypeName(edge.getOutVertex());
 
         if (typeName == null) {
-            LOG.warn("getAttributeForEdge: skipping orphaned edge with null typeName on OUT vertex; edgeLabel={}", edge.getLabel());
+            LOG.warn("getAttributeForEdge: skipping orphaned edge with null typeName on OUT vertex; edgeId={}, edgeLabel={}", edge.getId(), edge.getLabel());
             return null;
         }
 
@@ -1285,7 +1314,7 @@ public abstract class DeleteHandlerV1 {
                         if (attribute != null) {
                             deleteEdgeBetweenVertices(outVertex, inVertex, attribute);
                         } else {
-                            LOG.warn("Skipping deleteEdgeBetweenVertices for orphaned edge with null attribute; edgeLabel={}", edge.getLabel());
+                            LOG.warn("Skipping deleteEdgeBetweenVertices for orphaned edge with null attribute; edgeId={}, edgeLabel={}", edge.getId(), edge.getLabel());
                         }
                     }
                 }
@@ -2214,6 +2243,11 @@ public abstract class DeleteHandlerV1 {
      * @return True if active lineage exists in the specified direction
      */
     private boolean hasActiveLineageDirection(AtlasVertex assetVertex, AtlasEdge currentEdge, Direction direction) {
+        if (graph instanceof CassandraGraph) {
+            AtlasEdgeDirection atlasDir = direction.equals(Direction.OUT) ? AtlasEdgeDirection.OUT : AtlasEdgeDirection.IN;
+            return hasActiveLineageDirectionViaAtlasApi(assetVertex, currentEdge, atlasDir);
+        }
+
         GraphTraversalSource g = ((AtlasJanusGraph) graph).getGraph().traversal();
         GraphTraversal<Vertex, Edge> traversal;
 
@@ -2247,5 +2281,36 @@ public abstract class DeleteHandlerV1 {
                     // Check if this edge has lineage
                     return Boolean.TRUE.equals(edge.get(HAS_LINEAGE));
                 });
+    }
+
+    /**
+     * Atlas API-based lineage direction check for non-JanusGraph backends.
+     * Iterates edges and checks the source vertex's HAS_LINEAGE property.
+     */
+    private boolean hasActiveLineageDirectionViaAtlasApi(AtlasVertex assetVertex, AtlasEdge currentEdge, AtlasEdgeDirection direction) {
+        Set<String> deletedEdgeIds = RequestContext.get().getDeletedEdgesIdsForResetHasLineage();
+
+        Iterable<AtlasEdge> edges = assetVertex.getEdges(direction);
+        for (AtlasEdge edge : edges) {
+            String state = edge.getProperty(STATE_PROPERTY_KEY, String.class);
+            if (!ACTIVE_STATE_VALUE.equals(state)) {
+                continue;
+            }
+
+            String edgeIdStr = edge.getIdForDisplay();
+            if (deletedEdgeIds.contains(edgeIdStr) || currentEdge.getIdForDisplay().equals(edgeIdStr)) {
+                continue;
+            }
+
+            // Check the outgoing vertex's HAS_LINEAGE property
+            AtlasVertex outVertex = edge.getOutVertex();
+            if (outVertex != null) {
+                Boolean hasLineage = outVertex.getProperty(HAS_LINEAGE, Boolean.class);
+                if (Boolean.TRUE.equals(hasLineage)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }

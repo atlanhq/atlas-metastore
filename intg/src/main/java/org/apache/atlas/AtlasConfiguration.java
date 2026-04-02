@@ -183,18 +183,32 @@ public enum AtlasConfiguration {
     ES_MAX_RETRIES("atlas.es.max.retries", 5),
     ES_RETRY_DELAY_MS("atlas.es.retry.delay.ms", 1000),
 
+    // Entity audit: async retry with backoff, then publish to Kafka DLQ if still failing (main request never fails)
+    ENTITY_AUDIT_DLQ_ENABLED("atlas.entity.audit.dlq.enabled", true),
+    ENTITY_AUDIT_DLQ_QUEUE_CAPACITY("atlas.entity.audit.dlq.queue.capacity", 10000),
+    ENTITY_AUDIT_DLQ_MAX_RETRIES("atlas.entity.audit.dlq.max.retries", 3),
+    ENTITY_AUDIT_DLQ_BACKOFF_BASE_MS("atlas.entity.audit.dlq.backoff.base.ms", 1000),
+    ENTITY_AUDIT_DLQ_BACKOFF_MAX_MS("atlas.entity.audit.dlq.backoff.max.ms", 60000),
+    ENTITY_AUDIT_DLQ_TOPIC("atlas.entity.audit.dlq.topic", "ENTITY_AUDIT_DLQ"),
+    ENTITY_AUDIT_DLQ_PUBLISH_TO_KAFKA_ENABLED("atlas.entity.audit.dlq.publish.to.kafka.enabled", true),
 
     MIN_EDGES_SUPER_VERTEX("atlas.jg.super.vertex.min.edge.count", 100),
 
     // Task resource management configuration
-    TASK_MEMORY_THRESHOLD_PERCENT("atlas.tasks.memory.threshold.percent", 75),
+    TASK_MEMORY_THRESHOLD_PERCENT("atlas.tasks.memory.threshold.percent", 85),
     TASK_HIGH_MEMORY_PAUSE_MS("atlas.tasks.high.memory.pause.ms", 2000),
     TASK_MAX_RETRY_ATTEMPTS("atlas.tasks.max.retry.attempts", 3),
 
     // Batch sizes for various delete operations
     DELETE_BATCH_LOOKUP_SIZE("atlas.delete.batch.lookup.size", 500),
     DELETE_UNIQUEATTR_BATCH_SIZE("atlas.delete.uniqueattr.batch.size", 200),
-    DELETE_OWNED_BATCH_SIZE("atlas.delete.owned.batch.size", 100);
+    DELETE_OWNED_BATCH_SIZE("atlas.delete.owned.batch.size", 100),
+
+    // Bulk purge configuration (tunable per environment)
+    BULK_PURGE_BATCH_SIZE("atlas.bulk.purge.batch.size", 500),
+    BULK_PURGE_WORKER_COUNT("atlas.bulk.purge.worker.count", 4),
+    BULK_PURGE_REDIS_TTL_SECONDS("atlas.bulk.purge.redis.ttl.seconds", 86400),
+    BULK_PURGE_ORPHAN_CHECK_ENABLED("atlas.bulk.purge.orphan.check.enabled", true);
 
     private static final Configuration APPLICATION_PROPERTIES;
 

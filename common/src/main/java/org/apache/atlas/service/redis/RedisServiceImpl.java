@@ -47,6 +47,9 @@ public class RedisServiceImpl extends AbstractRedisService {
                 Thread.sleep(BACKGROUND_INIT_DELAY_MS);  // Wait for other services to start
                 ensureInitialized();
                 LOG.info("Background Redis initialization successful");
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                LOG.info("Background Redis initialization interrupted during startup delay");
             } catch (Exception e) {
                 LOG.warn("Background Redis initialization failed - will retry on first use: {}", e.getMessage());
             }
@@ -144,27 +147,27 @@ public class RedisServiceImpl extends AbstractRedisService {
             ensureInitialized();
         }
     }
-    
+
     /**
      * Test Redis connectivity with basic operations
      */
     private void testRedisConnectivity() throws Exception {
         String testKey = "atlas:startup:connectivity:test:" + System.currentTimeMillis();
         String testValue = "connectivity-test";
-        
+
         try {
             // Test cache client
             LOG.debug("Testing Redis cache client connectivity");
             redisCacheClient.getBucket(testKey).set(testValue);
             String retrievedValue = (String) redisCacheClient.getBucket(testKey).get();
-            
+
             if (!testValue.equals(retrievedValue)) {
                 throw new RuntimeException("Redis cache client connectivity test failed - value mismatch");
             }
-            
+
             redisCacheClient.getBucket(testKey).delete();
             LOG.debug("Redis connectivity test completed successfully");
-            
+
         } catch (Exception e) {
             MetricUtils.recordRedisConnectionFailure();
             throw new Exception("Redis connectivity test failed", e);

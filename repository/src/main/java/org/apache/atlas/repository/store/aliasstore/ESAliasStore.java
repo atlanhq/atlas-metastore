@@ -57,13 +57,14 @@ import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PE
 import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_SUB_DOMAIN;
 import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_AI_APP;
 import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_AI_MODEL;
+import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_AI_MODEL_VERSION;
 import static org.apache.atlas.repository.util.AccessControlUtils.RESOURCES_ENTITY_TYPE;
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_SERVICE_NAME;
 import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_SUB_CATEGORY_METADATA;
 import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_SERVICE_NAME_ABAC;
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_FILTER_CRITERIA;
 import static org.apache.atlas.repository.util.AccessControlUtils.getConnectionQualifiedNameFromPolicyAssets;
-import static org.apache.atlas.repository.util.AccessControlUtils.getESAliasName;
+import static org.apache.atlas.repository.util.AccessControlUtils.getESAliasIndexName;
 import static org.apache.atlas.repository.util.AccessControlUtils.getIsAllowPolicy;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPolicies;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPolicyActions;
@@ -300,7 +301,7 @@ public class ESAliasStore implements IndexAliasStore {
                         mustMap.add(mapOf("term", mapOf("__typeName.keyword", "DataProduct")));
                         clauseList.add(mapOf("bool", mapOf("must", mustMap)));
                     }
-                } else if (policyActions.contains(ACCESS_READ_PERSONA_AI_APP) || policyActions.contains(ACCESS_READ_PERSONA_AI_MODEL)) {
+                } else if (policyActions.contains(ACCESS_READ_PERSONA_AI_APP) || policyActions.contains(ACCESS_READ_PERSONA_AI_MODEL) || policyActions.contains(ACCESS_READ_PERSONA_AI_MODEL_VERSION)) {
                     // access is given across the resource as per entity-type for AI asset
                     List<String> resources = getPolicyResources(policy);
                     List<String> typeResources = getFilteredPolicyResources(resources, RESOURCES_ENTITY_TYPE);
@@ -391,7 +392,7 @@ public class ESAliasStore implements IndexAliasStore {
     }
 
     private String getAliasName(AtlasEntity entity) {
-        return getESAliasName(entity);
+        return getESAliasIndexName(entity);
     }
 
     private void addPurposeMetadataFilterClauses(List<String> tags, List<Map<String, Object>> clauseList) {
