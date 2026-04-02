@@ -280,6 +280,13 @@
         </dependency>
 
         <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <version>1.19.8</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter-api</artifactId>
             <version>${junit.jupiter.version}</version>
@@ -313,6 +320,12 @@
         <dependency>
             <groupId>org.apache.atlas</groupId>
             <artifactId>atlas-graphdb-janus</artifactId>
+            <version>${project.version}</version>
+            <scope>compile</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.atlas</groupId>
+            <artifactId>atlas-graphdb-cassandra</artifactId>
             <version>${project.version}</version>
             <scope>compile</scope>
         </dependency>

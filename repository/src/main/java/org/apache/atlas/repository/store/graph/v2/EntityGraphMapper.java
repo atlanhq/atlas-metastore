@@ -83,7 +83,7 @@ import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.math.NumberUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.janusgraph.util.encoding.LongEncoding;
+import org.apache.atlas.repository.store.graph.v2.LongEncodingUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -534,6 +534,12 @@ public class EntityGraphMapper {
                     if (!distributedHasLineageCalculationEnabled && CollectionUtils.isNotEmpty(removedEdges)) {
                         deleteDelegate.getHandler().resetHasLineageOnInputOutputDelete(removedEdges, null);
                     }
+
+                    // MS-903: Use the vertex's concrete typeName, not the request typeName.
+                    // When a client sends a supertype (e.g. "SQL") the request entity carries that supertype,
+                    // but the vertex stores the concrete type (e.g. "Table"). Without this correction,
+                    // the cached entity poisons downstream notifications and audits with the wrong typeName.
+                    updatedEntity.setTypeName(getTypeName(vertex));
 
                     reqContext.cache(updatedEntity);
 
@@ -3699,19 +3705,7 @@ public class EntityGraphMapper {
 
 
     private AtlasEntityHeader constructHeader(AtlasEntity entity, AtlasVertex vertex, AtlasEntityType entityType) throws AtlasBaseException {
-        // MS-710: Read all primitive/enum attributes from the vertex (not just writtenAttrs).
-        // This ensures the entity cached in RequestContext includes attributes like
-        // connectorName — even if they weren't in the update request payload.
-        // Only primitive and enum types are fetched to keep the read lightweight.
-        Set<String> primitiveAttrs = new HashSet<>();
-        for (Map.Entry<String, AtlasAttribute> entry : entityType.getAllAttributes().entrySet()) {
-            TypeCategory typeCategory = entry.getValue().getAttributeType().getTypeCategory();
-            if (typeCategory == PRIMITIVE || typeCategory == TypeCategory.ENUM) {
-                primitiveAttrs.add(entry.getKey());
-            }
-        }
-
-        AtlasEntityHeader header = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex, primitiveAttrs);
+        AtlasEntityHeader header = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex, getAttrsToLoad(entityType));
 
         if (entity.getClassifications() == null) {
             entity.setClassifications(header.getClassifications());
@@ -3728,6 +3722,31 @@ public class EntityGraphMapper {
         }
 
         return header;
+    }
+
+    /**
+     * Returns the set of attribute names to load from the vertex during entity cache construction.
+     * Includes: primitive/enum types (lightweight reads) + attributes marked with
+     * includeInNotification or isUnique (required for CDC notification completeness, MS-695).
+     */
+    private Set<String> getAttrsToLoad(AtlasEntityType entityType) {
+        Set<String> ret = new HashSet<>();
+
+        for (Map.Entry<String, AtlasAttribute> entry : entityType.getAllAttributes().entrySet()) {
+            TypeCategory typeCategory = entry.getValue().getAttributeType().getTypeCategory();
+
+            if (typeCategory == PRIMITIVE || typeCategory == TypeCategory.ENUM) {
+                ret.add(entry.getKey());
+            }
+
+            AtlasAttributeDef attrDef = entry.getValue().getAttributeDef();
+
+            if (attrDef.getIncludeInNotification() || attrDef.getIsUnique()) {
+                ret.add(entry.getKey());
+            }
+        }
+
+        return ret;
     }
 
     private Set<String> getWrittenAttributeNames(AtlasEntity entity, AtlasEntityType entityType) {
@@ -5852,7 +5871,7 @@ public class EntityGraphMapper {
             header.setAttribute(NAME, vertex.getProperty(NAME, String.class));
             header.setAttribute(QUALIFIED_NAME, vertex.getProperty(QUALIFIED_NAME, String.class));
 
-            header.setDocId(LongEncoding.encode(Long.parseLong(vertex.getIdForDisplay())));
+            header.setDocId(LongEncodingUtil.vertexIdToDocId(vertex.getIdForDisplay()));
             header.setSuperTypeNames(typeRegistry.getEntityTypeByName(header.getTypeName()).getAllSuperTypes());
 
             if (!req.isUpdatedEntity(header.getGuid())) {
