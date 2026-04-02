@@ -2110,6 +2110,10 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         return edgeRepository;
     }
 
+    public RepairJobScheduler getRepairJobScheduler() {
+        return repairJobScheduler;
+    }
+
     public IndexRepository getIndexRepository() {
         return indexRepository;
     }

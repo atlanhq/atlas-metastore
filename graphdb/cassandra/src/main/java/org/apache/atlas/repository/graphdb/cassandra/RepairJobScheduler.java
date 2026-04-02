@@ -32,12 +32,18 @@ public class RepairJobScheduler {
     private static final long ES_RECONCILIATION_INTERVAL_HOURS = 6;
     private static final long ES_RECONCILIATION_INITIAL_DELAY_MINUTES = 10;
 
+    private final CqlSession session;
+    private final CassandraGraph graph;
+    private final JobLeaseManager leaseManager;
     private final ScheduledExecutorService scheduler;
     private final ESReconciliationJob esReconciliationJob;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     public RepairJobScheduler(CqlSession session, CassandraGraph graph,
                                JobLeaseManager leaseManager, ESOutboxRepository outboxRepository) {
+        this.session = session;
+        this.graph = graph;
+        this.leaseManager = leaseManager;
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "repair-scheduler");
             t.setDaemon(true);
@@ -47,8 +53,26 @@ public class RepairJobScheduler {
         this.esReconciliationJob = new ESReconciliationJob(session, graph, leaseManager, outboxRepository);
     }
 
+    /**
+     * Runs orphan edge cleanup on-demand (single cycle).
+     * Scans edges_by_id for edges with missing endpoint vertices and deletes them.
+     */
+    public void runOrphanEdgeCleanup() {
+        LOG.info("Running on-demand orphan edge cleanup");
+        OrphanEdgeCleanup cleanup = new OrphanEdgeCleanup(
+                session, graph.getVertexRepository(), graph.getEdgeRepository(), graph, leaseManager);
+        scheduler.submit(wrapWithErrorHandling("OrphanEdgeCleanup", cleanup));
+    }
+
     public void start() {
         if (running.compareAndSet(false, true)) {
+            // Orphan edge cleanup: run once at startup (2 min delay), then every 24h
+            OrphanEdgeCleanup orphanEdgeCleanup = new OrphanEdgeCleanup(
+                    session, graph.getVertexRepository(), graph.getEdgeRepository(), graph, leaseManager);
+            scheduler.scheduleWithFixedDelay(
+                    wrapWithErrorHandling("OrphanEdgeCleanup", orphanEdgeCleanup),
+                    2, 24 * 60, TimeUnit.MINUTES);
+
             // ES reconciliation: every 6 hours, starting after 10 minutes
             scheduler.scheduleWithFixedDelay(
                     wrapWithErrorHandling("ESReconciliationJob", esReconciliationJob),
