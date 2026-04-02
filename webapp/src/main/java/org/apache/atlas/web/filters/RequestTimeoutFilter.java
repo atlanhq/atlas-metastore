@@ -57,8 +57,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public class RequestTimeoutFilter implements Filter {
     private static final Logger LOG = LoggerFactory.getLogger(RequestTimeoutFilter.class);
 
-    private static final long SEARCH_TIMEOUT_MS  = 60_000;   // 60s for search/indexsearch
-    private static final long DEFAULT_TIMEOUT_MS = 300_000;   // 300s (5 min) for all other endpoints
+    private static final long SEARCH_TIMEOUT_MS  = 60_000;  // 60s for search/indexsearch
+    private static final long DEFAULT_TIMEOUT_MS = 300_000; // 300s (5 min) for all other endpoints
 
     private static final long LONG_RUNNING_THRESHOLD_MS = 30_000;  // 30s
 
