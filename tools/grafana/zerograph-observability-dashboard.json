@@ -475,6 +475,141 @@
       ],
       "title": "ES Bulk Item Results",
       "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 51 },
+      "id": 600,
+      "panels": [],
+      "title": "Cassandra Table Health (atlas_graph)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Largest partition per table. Alert if edges_out exceeds 50MB — indicates a super-vertex (e.g., Table with 100K+ Columns).",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "unit": "decbytes"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "edges_out" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 52 },
+      "id": 601,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:edges_out:maxpartitionsize:value\"})", "legendFormat": "edges_out", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:vertices:maxpartitionsize:value\"})", "legendFormat": "vertices", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:edges_in:maxpartitionsize:value\"})", "legendFormat": "edges_in", "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:vertex_index:maxpartitionsize:value\"})", "legendFormat": "vertex_index", "refId": "D" }
+      ],
+      "title": "Max Partition Size by Table",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Tombstones scanned per read at p99. High values (>1000) cause read latency spikes. Reduce gc_grace_seconds or run compaction.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 100 },
+              { "color": "red", "value": 1000 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 52 },
+      "id": 602,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:edges_out:tombstonesscannedhistogram:99thpercentile\"})", "legendFormat": "edges_out", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:vertices:tombstonesscannedhistogram:99thpercentile\"})", "legendFormat": "vertices", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:edges_in:tombstonesscannedhistogram:99thpercentile\"})", "legendFormat": "edges_in", "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:vertex_index:tombstonesscannedhistogram:99thpercentile\"})", "legendFormat": "vertex_index", "refId": "D" }
+      ],
+      "title": "Tombstones Scanned (p99) by Table",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Estimated partition count (row count) per table. Useful for capacity planning.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 52 },
+      "id": 603,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:vertices:estimatedpartitioncount:value\"})", "legendFormat": "vertices", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:edges_out:estimatedpartitioncount:value\"})", "legendFormat": "edges_out", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:edges_by_id:estimatedpartitioncount:value\"})", "legendFormat": "edges_by_id", "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:vertex_index:estimatedpartitioncount:value\"})", "legendFormat": "vertex_index", "refId": "D" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:es_outbox:estimatedpartitioncount:value\"})", "legendFormat": "es_outbox", "refId": "E" }
+      ],
+      "title": "Partition Count by Table",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Read and write latency at p99 per table. Helps identify which table is the bottleneck.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "unit": "µs"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 60 },
+      "id": 604,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:vertices:readlatency:99thpercentile\"})", "legendFormat": "vertices read", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:edges_out:readlatency:99thpercentile\"})", "legendFormat": "edges_out read", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:edges_in:readlatency:99thpercentile\"})", "legendFormat": "edges_in read", "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:vertex_index:readlatency:99thpercentile\"})", "legendFormat": "vertex_index read", "refId": "D" }
+      ],
+      "title": "Read Latency (p99) by Table",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "SSTable count per table. High SSTable count (>32) with no pending compactions may indicate compaction is falling behind.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 60 },
+      "id": 605,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:vertices:livesstablecount:value\"})", "legendFormat": "vertices", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:edges_out:livesstablecount:value\"})", "legendFormat": "edges_out", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:edges_by_id:livesstablecount:value\"})", "legendFormat": "edges_by_id", "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:vertex_index:livesstablecount:value\"})", "legendFormat": "vertex_index", "refId": "D" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:es_outbox:livesstablecount:value\"})", "legendFormat": "es_outbox", "refId": "E" }
+      ],
+      "title": "Live SSTable Count by Table",
+      "type": "timeseries"
     }
   ],
   "schemaVersion": 39,
