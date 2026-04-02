@@ -51,12 +51,32 @@ TARGET_ES_INDEX="${TARGET_ES_INDEX:-atlas_graph_vertex_index}"
 
 # Tuning (in-cluster = fast, can be aggressive)
 SCANNER_THREADS="${SCANNER_THREADS:-16}"
-WRITER_THREADS="${WRITER_THREADS:-8}"
-ES_BULK_SIZE="${ES_BULK_SIZE:-1000}"
+WRITER_THREADS="${WRITER_THREADS:-16}"
+ES_BULK_SIZE="${ES_BULK_SIZE:-5000}"
+QUEUE_CAPACITY="${QUEUE_CAPACITY:-20000}"
+ES_FIELD_LIMIT="${ES_FIELD_LIMIT:-10000}"
+MAX_RETRIES="${MAX_RETRIES:-3}"
 
 # ID strategy and dedup claims
 ID_STRATEGY="${ID_STRATEGY:-legacy}"          # "legacy" (UUID), "hash-jg" (SHA-256 of JG ID), or "deterministic" (identity-based SHA-256)
 CLAIM_ENABLED="${CLAIM_ENABLED:-false}"       # LWT dedup claims during migration
+
+# Backup verification
+SKIP_BACKUP_CHECK="${SKIP_BACKUP_CHECK:-false}"
+BACKUP_RECENCY_HOURS="${BACKUP_RECENCY_HOURS:-24}"
+TENANT_NAME="${TENANT_NAME:-}"               # Tenant/cluster name for backup verification
+
+# Cassandra consistency levels
+SOURCE_CONSISTENCY="${SOURCE_CONSISTENCY:-ONE}"            # Read consistency (ONE = fast scans)
+TARGET_CONSISTENCY="${TARGET_CONSISTENCY:-LOCAL_QUORUM}"   # Write consistency (LOCAL_QUORUM = durable)
+
+# Skip flags
+SKIP_ES_REINDEX="${SKIP_ES_REINDEX:-false}"
+SKIP_CLASSIFICATIONS="${SKIP_CLASSIFICATIONS:-false}"
+SKIP_TASKS="${SKIP_TASKS:-false}"
+
+# Validation tenant ID — auto-derive from hostname if not set
+VALIDATION_TENANT_ID="${VALIDATION_TENANT_ID:-}"
 
 # ---- Helpers ----
 
@@ -167,6 +187,16 @@ read_atlas_config() {
 # ---- Generate migrator.properties ----
 
 generate_properties() {
+    # Auto-derive tenant ID if not set
+    if [ -z "$VALIDATION_TENANT_ID" ]; then
+        # Try VCLUSTER_NAME env, then hostname, then fallback
+        if [ -n "${VCLUSTER_NAME:-}" ]; then
+            VALIDATION_TENANT_ID="$VCLUSTER_NAME"
+        else
+            VALIDATION_TENANT_ID=$(hostname 2>/dev/null | sed 's/\..*$//' || echo "unknown")
+        fi
+    fi
+
     log "Generating $PROPERTIES_FILE"
 
     cat > "$PROPERTIES_FILE" << EOF
@@ -203,18 +233,32 @@ target.elasticsearch.protocol=${ES_PROTOCOL}
 target.elasticsearch.index=${TARGET_ES_INDEX}
 target.elasticsearch.username=
 target.elasticsearch.password=
+target.elasticsearch.field.limit=${ES_FIELD_LIMIT}
 
 # Tuning
 migration.scanner.threads=${SCANNER_THREADS}
 migration.writer.threads=${WRITER_THREADS}
 migration.es.bulk.size=${ES_BULK_SIZE}
+migration.max.retries=${MAX_RETRIES}
 migration.scan.fetch.size=5000
-migration.queue.capacity=10000
+migration.queue.capacity=${QUEUE_CAPACITY}
 migration.resume=true
 
 # ID strategy / dedup
 migration.id.strategy=${ID_STRATEGY}
 migration.claim.enabled=${CLAIM_ENABLED}
+
+# Cassandra consistency levels
+source.cassandra.consistency=${SOURCE_CONSISTENCY}
+target.cassandra.consistency=${TARGET_CONSISTENCY}
+
+# Skip flags
+migration.skip.es.reindex=${SKIP_ES_REINDEX}
+migration.skip.classifications=${SKIP_CLASSIFICATIONS}
+migration.skip.tasks=${SKIP_TASKS}
+
+# Validation
+validation.tenant.id=${VALIDATION_TENANT_ID}
 EOF
 
     log "Properties written to $PROPERTIES_FILE"
@@ -253,6 +297,45 @@ preflight() {
     log "Preflight complete"
 }
 
+# ---- Backup verification ----
+
+verify_backup() {
+    local SCRIPT_DIR
+    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+    local VERIFY_SCRIPT="${SCRIPT_DIR}/verify_backup.sh"
+
+    if [ "$SKIP_BACKUP_CHECK" = "true" ]; then
+        warn "Backup verification SKIPPED (SKIP_BACKUP_CHECK=true)"
+        return 0
+    fi
+
+    # Auto-detect tenant name from atlas-application.properties if not set
+    if [ -z "$TENANT_NAME" ]; then
+        TENANT_NAME=$(read_prop "atlas.cluster.name" "")
+    fi
+    if [ -z "$TENANT_NAME" ]; then
+        TENANT_NAME=$(read_prop "atlas.tenant.name" "")
+    fi
+    if [ -z "$TENANT_NAME" ]; then
+        err "Cannot determine tenant name. Set TENANT_NAME env var or add atlas.cluster.name to atlas-application.properties.
+  To skip: set SKIP_BACKUP_CHECK=true (dev/test only)"
+    fi
+
+    if [ ! -f "$VERIFY_SCRIPT" ]; then
+        err "Backup verification script not found at ${VERIFY_SCRIPT}"
+    fi
+
+    log "Running backup verification for tenant: ${TENANT_NAME}"
+
+    local verify_args=(--tenant "$TENANT_NAME" --recency "$BACKUP_RECENCY_HOURS")
+    if ! "$VERIFY_SCRIPT" "${verify_args[@]}"; then
+        err "Backup verification FAILED. Migration cannot proceed.
+  To override for dev/test: set SKIP_BACKUP_CHECK=true"
+    fi
+
+    log "Backup verification passed."
+}
+
 # ---- Run migrator ----
 
 run() {
@@ -271,16 +354,24 @@ run() {
     log "=========================================="
     log ""
 
+    # Use pipefail + PIPESTATUS to capture the JAR's exit code through tee
+    set +e
     java \
-        -Xmx4g -Xms2g \
+        -Xmx${MIGRATOR_JVM_HEAP:-4g} -Xms${MIGRATOR_JVM_MIN_HEAP:-2g} \
         --add-opens java.base/java.lang=ALL-UNNAMED \
         -jar "$MIGRATOR_JAR" \
         "$PROPERTIES_FILE" \
         $extra_args \
         2>&1 | tee "$LOG_FILE"
+    local jar_exit=${PIPESTATUS[0]}
+    set -e
 
     log ""
     log "Migration log saved to $LOG_FILE"
+
+    if [ "$jar_exit" -ne 0 ]; then
+        err "Migrator exited with code $jar_exit — validation failed or migration encountered errors. Review log at $LOG_FILE"
+    fi
 }
 
 # ---- Help ----
@@ -296,18 +387,30 @@ show_help() {
     echo "  --validate-only    Validate migration completeness"
     echo "  --fresh            Clear resume state, start from scratch"
     echo "  --dry-run          Generate properties and show config without running"
+    echo "  --skip-backup-check  Skip backup verification (dev/test only)"
     echo "  --help             Show this help"
     echo ""
     echo "Environment overrides:"
-    echo "  SOURCE_KEYSPACE        Source JanusGraph keyspace (default: atlas)"
-    echo "  SOURCE_EDGESTORE_TABLE Edgestore table name (default: edgestore)"
-    echo "  TARGET_KEYSPACE        Target keyspace (default: atlas_graph)"
-    echo "  SOURCE_ES_INDEX        Source ES index to copy mappings from (default: janusgraph_vertex_index)"
-    echo "  TARGET_ES_INDEX        Target ES index to write docs to (default: atlas_graph_vertex_index)"
-    echo "  SCANNER_THREADS        Scanner parallelism (default: 16)"
-    echo "  WRITER_THREADS         Writer parallelism (default: 8)"
-    echo "  ID_STRATEGY            ID generation: legacy, hash-jg, or deterministic (identity-based SHA-256) (default: legacy)"
-    echo "  CLAIM_ENABLED          LWT dedup claims during migration: true/false (default: false)"
+    echo "  SOURCE_KEYSPACE          Source JanusGraph keyspace (default: atlas)"
+    echo "  SOURCE_EDGESTORE_TABLE   Edgestore table name (default: edgestore)"
+    echo "  TARGET_KEYSPACE          Target keyspace (default: atlas_graph)"
+    echo "  SOURCE_ES_INDEX          Source ES index to copy mappings from (default: janusgraph_vertex_index)"
+    echo "  TARGET_ES_INDEX          Target ES index to write docs to (default: atlas_graph_vertex_index)"
+    echo "  SCANNER_THREADS          Scanner parallelism (default: 16, auto-sized by Java)"
+    echo "  WRITER_THREADS           Writer parallelism (default: 16, auto-sized by Java)"
+    echo "  ID_STRATEGY              ID generation: legacy, hash-jg, or deterministic (default: legacy)"
+    echo "  CLAIM_ENABLED            LWT dedup claims during migration: true/false (default: false)"
+    echo "  SKIP_ES_REINDEX          Skip ES reindexing phase: true/false (default: false)"
+    echo "  SKIP_CLASSIFICATIONS     Skip classification vertices: true/false (default: false)"
+    echo "  SKIP_TASKS               Skip task vertices: true/false (default: false)"
+    echo "  VALIDATION_TENANT_ID     Tenant ID for validation report (default: auto-derived from hostname)"
+    echo "  TENANT_NAME              Tenant/cluster name for backup check (auto-detected from config)"
+    echo "  SKIP_BACKUP_CHECK        Skip backup verification: true/false (default: false)"
+    echo "  BACKUP_RECENCY_HOURS     Max backup age in hours (default: 24)"
+    echo "  TEMPORAL_ADDRESS         Temporal server address (default: temporal-server.atlan.com:443)"
+    echo "  TEMPORAL_NAMESPACE       Temporal namespace (default: default)"
+    echo "  MIGRATOR_JVM_HEAP        JVM max heap (default: 4g)"
+    echo "  MIGRATOR_JVM_MIN_HEAP    JVM initial heap (default: 2g)"
     echo ""
     echo "Quick start (from kubectl):"
     echo "  kubectl exec -it atlas-0 -n atlas -c atlas-main -- /opt/apache-atlas/bin/atlas_migrate.sh --dry-run"
@@ -321,20 +424,33 @@ case "${1:-}" in
         show_help
         exit 0
         ;;
+    --skip-backup-check)
+        SKIP_BACKUP_CHECK=true
+        shift
+        # Fall through to run with remaining args
+        find_migrator_jar
+        read_atlas_config
+        generate_properties
+        preflight
+        verify_backup
+        run "${1:-}"
+        ;;
     --dry-run)
         find_migrator_jar
         read_atlas_config
         generate_properties
         preflight
+        verify_backup
         log ""
         log "Dry run complete. Properties at $PROPERTIES_FILE"
-        log "To run: java -Xmx4g -jar $MIGRATOR_JAR $PROPERTIES_FILE"
+        log "To run: java -Xmx${MIGRATOR_JVM_HEAP:-4g} -jar $MIGRATOR_JAR $PROPERTIES_FILE"
         ;;
     --es-only|--validate-only|--fresh|"")
         find_migrator_jar
         read_atlas_config
         generate_properties
         preflight
+        verify_backup
         run "${1:-}"
         ;;
     *)

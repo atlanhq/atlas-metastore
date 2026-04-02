@@ -38,7 +38,7 @@ public class ESOutboxRepository {
     static final String ACTION_DELETE = "delete";
 
     private static final int TTL_SECONDS = 7 * 24 * 3600; // 7 days
-    static final int MAX_ATTEMPTS = 10;
+    static final int MAX_ATTEMPTS = 5;
 
     private final CqlSession session;
     private final PreparedStatement insertPendingStmt;
