@@ -340,7 +340,8 @@
         { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_outbox_processed_total{result=\"success\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "success", "refId": "A" },
         { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_outbox_processed_total{result=\"failed\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "failed", "refId": "B" },
         { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_outbox_processed_total{result=\"exhausted\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "exhausted", "refId": "C" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_outbox_processed_total{result=\"poison_pill\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "poison pill", "refId": "D" }
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_outbox_processed_total{result=\"permanent\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "permanent", "refId": "D" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_outbox_processed_total{result=\"poison_pill\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "poison pill", "refId": "E" }
       ],
       "title": "Outbox Processing",
       "type": "timeseries"
