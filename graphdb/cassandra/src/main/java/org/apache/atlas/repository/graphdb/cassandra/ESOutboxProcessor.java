@@ -226,25 +226,41 @@ public class ESOutboxProcessor {
 
                 if (status >= 200 && status < 300) {
                     if (respBody != null && respBody.contains("\"errors\":true")) {
-                        // Partial success — parse per-item results
-                        Set<String> failedIds = parseFailedIds(respBody);
+                        // Partial success — parse per-item results, separating retryable from permanent
+                        Set<String> retryableIds = new LinkedHashSet<>();
+                        Set<String> permanentIds = new LinkedHashSet<>();
+                        parseFailedIds(respBody, retryableIds, permanentIds);
+
+                        // Succeeded = everything not in either failure set
                         List<String> succeededIds = new ArrayList<>();
                         for (String id : entryMap.keySet()) {
-                            if (!failedIds.contains(id)) {
+                            if (!retryableIds.contains(id) && !permanentIds.contains(id)) {
                                 succeededIds.add(id);
                             }
                         }
                         outboxRepository.batchMarkDone(succeededIds);
                         for (int i = 0; i < succeededIds.size(); i++) recordOutboxMetric("success");
-                        for (String failedId : failedIds) {
+
+                        // Retryable failures — increment attempt, will retry on next cycle
+                        for (String failedId : retryableIds) {
                             ESOutboxRepository.OutboxEntry entry = entryMap.get(failedId);
                             if (entry != null) {
                                 outboxRepository.incrementAttempt(failedId, entry.attemptCount + 1);
                             }
                             recordOutboxMetric("failed");
                         }
-                        LOG.info("ESOutboxProcessor: {} succeeded, {} failed (will retry)",
-                                succeededIds.size(), failedIds.size());
+
+                        // Permanent failures — mark FAILED immediately, skip retries
+                        for (String permId : permanentIds) {
+                            ESOutboxRepository.OutboxEntry entry = entryMap.get(permId);
+                            if (entry != null) {
+                                outboxRepository.markFailed(permId, entry.attemptCount);
+                            }
+                            recordOutboxMetric("exhausted");
+                        }
+
+                        LOG.info("ESOutboxProcessor: {} succeeded, {} retryable, {} permanent failures",
+                                succeededIds.size(), retryableIds.size(), permanentIds.size());
                     } else {
                         // All succeeded
                         outboxRepository.batchMarkDone(new ArrayList<>(entryMap.keySet()));
@@ -373,23 +389,37 @@ public class ESOutboxProcessor {
         }
     }
 
+    /**
+     * Parses an ES bulk response to separate retryable from permanent failures.
+     * Retryable: 5xx server errors, 429 rate-limited — will be retried on next cycle.
+     * Permanent: 4xx mapping errors, bad request — marked FAILED immediately to avoid
+     * wasting ~1 minute of pointless retries per entry.
+     */
     @SuppressWarnings("unchecked")
-    private Set<String> parseFailedIds(String respBody) {
-        Set<String> failedIds = new LinkedHashSet<>();
+    private void parseFailedIds(String respBody, Set<String> retryableIds, Set<String> permanentIds) {
         try {
             Map<String, Object> bulkResp = AtlasType.fromJson(respBody, Map.class);
             List<Map<String, Object>> items = (List<Map<String, Object>>) bulkResp.get("items");
-            if (items == null) return failedIds;
+            if (items == null) return;
 
             for (Map<String, Object> item : items) {
                 Map<String, Object> action = (Map<String, Object>) item.values().iterator().next();
-                if (action != null && action.containsKey("error")) {
-                    failedIds.add(String.valueOf(action.get("_id")));
+                if (action == null || !action.containsKey("error")) continue;
+
+                String docId = String.valueOf(action.get("_id"));
+                Object statusObj = action.get("status");
+                int itemStatus = (statusObj instanceof Number) ? ((Number) statusObj).intValue() : 0;
+
+                if (itemStatus >= 500 || itemStatus == 429) {
+                    retryableIds.add(docId);
+                } else {
+                    permanentIds.add(docId);
+                    LOG.error("ESOutboxProcessor: permanent bulk item failure _id='{}', status={}, error={}",
+                            docId, itemStatus, AtlasType.toJson(action.get("error")));
                 }
             }
         } catch (Exception e) {
             LOG.warn("ESOutboxProcessor: failed to parse bulk response: {}", e.getMessage());
         }
-        return failedIds;
     }
 }

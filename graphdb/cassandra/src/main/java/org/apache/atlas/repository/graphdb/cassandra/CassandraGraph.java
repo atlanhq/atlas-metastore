@@ -1548,13 +1548,13 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             LOG.info("ES bulk response: {} succeeded, {} retryable failures, {} permanent failures",
                     succeeded, retryable, permanent);
 
-            // Record per-item metrics
+            // Record per-item metrics (actual counts, not just presence)
             try {
                 CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
                 if (metrics != null) {
-                    if (succeeded > 0) metrics.recordESBulkItem("success");
-                    if (retryable > 0) metrics.recordESBulkItem("retryable");
-                    if (permanent > 0) metrics.recordESBulkItem("permanent");
+                    for (int i = 0; i < succeeded; i++) metrics.recordESBulkItem("success");
+                    for (int i = 0; i < retryable; i++) metrics.recordESBulkItem("retryable");
+                    for (int i = 0; i < permanent; i++) metrics.recordESBulkItem("permanent");
                 }
             } catch (Throwable t) {
                 LOG.debug("Failed to record ES bulk item metrics: {}", t.getMessage());
