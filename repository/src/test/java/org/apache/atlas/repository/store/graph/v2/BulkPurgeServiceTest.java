@@ -33,8 +33,8 @@ import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.model.Tag;
-import org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModels.PurgeContext;
-import org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModels.BatchWork;
+import org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModel.PurgeContext;
+import org.apache.atlas.repository.store.graph.v2.purge.BulkPurgeModel.BatchWork;
 import org.apache.atlas.repository.store.graph.v2.purge.PurgeBatchCleanupService;
 import org.apache.atlas.repository.store.graph.v2.tags.PaginatedTagResult;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
@@ -644,7 +644,7 @@ class BulkPurgeServiceTest {
     // ======================== Worker Cleanup on ES Failure Tests ========================
 
     @Test
-    void testWorkerCleanup_onEsScrollFailure_workersStillShutDown() throws Exception {
+    void testWorkerCleanup_onEsSearchFailure_workersStillShutDown() throws Exception {
         mockedGraphUtils.when(() -> AtlasGraphUtilsV2.findByTypeAndUniquePropertyName(
                 eq(mockGraph), eq(Constants.CONNECTION_ENTITY_TYPE),
                 eq(Constants.QUALIFIED_NAME), eq(TEST_CONNECTION_QN)))
@@ -654,12 +654,18 @@ class BulkPurgeServiceTest {
         when(mockRedisService.putValue(anyString(), anyString(), anyInt())).thenReturn("OK");
         when(mockRedisService.acquireDistributedLock(anyString())).thenReturn(true);
 
-        // First call (_count) succeeds, second call (_search) fails with exception
+        // PIT open succeeds, but _search fails with IOException
         when(mockEsClient.performRequest(any(Request.class))).thenAnswer(invocation -> {
             Request req = invocation.getArgument(0);
             String endpoint = req.getEndpoint();
             String method = req.getMethod();
 
+            if (endpoint.contains("_pit") && "POST".equals(method)) {
+                return newMockResponse("{\"id\":\"test-pit-id\"}");
+            }
+            if (endpoint.equals("/_pit") && "DELETE".equals(method)) {
+                return newMockResponse("{\"succeeded\":true}");
+            }
             if (endpoint.contains("_count")) {
                 return newMockResponse("{\"count\":1000}");
             }
@@ -1437,37 +1443,52 @@ class BulkPurgeServiceTest {
 
     /**
      * Sets up a unified ES mock that routes requests based on endpoint.
+     * Handles PIT open/close, search with search_after, count, and delete_by_query.
      * Uses thenAnswer to create fresh response objects per call, avoiding
      * ByteArrayInputStream reuse issues.
      */
     private void setupFullEsMock(long count, List<String> vertexIds) throws Exception {
+        // Track whether the first search page (with vertex IDs) has been returned
+        final boolean[] firstSearchReturned = {false};
+
         when(mockEsClient.performRequest(any(Request.class))).thenAnswer(invocation -> {
             Request req = invocation.getArgument(0);
             String endpoint = req.getEndpoint();
             String method = req.getMethod();
 
+            // PIT open: POST /{index}/_pit
+            if (endpoint.contains("_pit") && "POST".equals(method)) {
+                return newMockResponse("{\"id\":\"test-pit-id\"}");
+            }
+            // PIT close: DELETE /_pit
+            if (endpoint.equals("/_pit") && "DELETE".equals(method)) {
+                return newMockResponse("{\"succeeded\":true}");
+            }
             if (endpoint.contains("_count")) {
                 return newMockResponse("{\"count\":" + count + "}");
             }
             if (endpoint.contains("_delete_by_query")) {
                 return newMockResponse("{\"deleted\":0}");
             }
-            if ("DELETE".equals(method)) {
+            if (endpoint.contains("_refresh")) {
                 return newMockResponse("{}");
             }
-            if (endpoint.equals("/_search/scroll")) {
-                // Scroll continuation: always return empty hits
-                return newMockResponse("{\"_scroll_id\":\"sid\",\"hits\":{\"hits\":[]}}");
-            }
-            if (endpoint.contains("_search")) {
-                // Initial scroll: return vertex IDs
-                StringBuilder hitsArray = new StringBuilder("[");
-                for (int i = 0; i < vertexIds.size(); i++) {
-                    if (i > 0) hitsArray.append(",");
-                    hitsArray.append("{\"_id\":\"").append(vertexIds.get(i)).append("\"}");
+            if (endpoint.equals("/_search") || endpoint.contains("_search")) {
+                if (!firstSearchReturned[0] && !vertexIds.isEmpty()) {
+                    firstSearchReturned[0] = true;
+                    // First page: return vertex IDs with sort values
+                    StringBuilder hitsArray = new StringBuilder("[");
+                    for (int i = 0; i < vertexIds.size(); i++) {
+                        if (i > 0) hitsArray.append(",");
+                        hitsArray.append("{\"_id\":\"").append(vertexIds.get(i))
+                                .append("\",\"sort\":[").append(i + 1).append("]}");
+                    }
+                    hitsArray.append("]");
+                    return newMockResponse("{\"pit_id\":\"test-pit-id\",\"hits\":{\"hits\":" + hitsArray + "}}");
+                } else {
+                    // Subsequent pages: empty hits (end of results)
+                    return newMockResponse("{\"pit_id\":\"test-pit-id\",\"hits\":{\"hits\":[]}}");
                 }
-                hitsArray.append("]");
-                return newMockResponse("{\"_scroll_id\":\"sid\",\"hits\":{\"hits\":" + hitsArray + "}}");
             }
 
             return newMockResponse("{}");
