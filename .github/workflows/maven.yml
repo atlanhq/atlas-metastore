@@ -26,6 +26,8 @@ on:
       - staging
       - ms-635
       - lg-async-producer
+      - ms-885-undertow-migration
+
       - switchable-graph-provider
       - ring-*
       - sgp-consistency-improvements
