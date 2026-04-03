@@ -2092,23 +2092,29 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     }
 
     private void executePreProcessor(EntityMutationContext context) throws AtlasBaseException {
-        AtlasEntityType entityType;
-        List<PreProcessor> preProcessors;
+        // Build the preprocessor map once per request so that a single preprocessor instance
+        // is shared across all N entities of the same type in the batch.
+        // This is required for per-instance caches (Fix A: ES index name, Fix C: connection cache)
+        // to be effective across entities — without this, getPreProcessor() would create a fresh
+        // instance (and fresh caches) for every entity, defeating those optimisations.
+        Map<String, List<PreProcessor>> preProcessorCache = new HashMap<>();
 
         List<AtlasEntity> copyOfCreated = new ArrayList<>(context.getCreatedEntities());
         for (AtlasEntity entity : copyOfCreated) {
-            entityType = context.getType(entity.getGuid());
-            preProcessors = getPreProcessor(entityType.getTypeName());
-            for(PreProcessor processor : preProcessors){
+            AtlasEntityType entityType = context.getType(entity.getGuid());
+            List<PreProcessor> preProcessors = preProcessorCache.computeIfAbsent(
+                    entityType.getTypeName(), this::getPreProcessor);
+            for (PreProcessor processor : preProcessors) {
                 processor.processAttributes(entity, context, CREATE);
             }
         }
 
         List<AtlasEntity> copyOfUpdated = new ArrayList<>(context.getUpdatedEntities());
-        for (AtlasEntity entity: copyOfUpdated) {
-            entityType = context.getType(entity.getGuid());
-            preProcessors = getPreProcessor(entityType.getTypeName());
-            for(PreProcessor processor : preProcessors){
+        for (AtlasEntity entity : copyOfUpdated) {
+            AtlasEntityType entityType = context.getType(entity.getGuid());
+            List<PreProcessor> preProcessors = preProcessorCache.computeIfAbsent(
+                    entityType.getTypeName(), this::getPreProcessor);
+            for (PreProcessor processor : preProcessors) {
                 processor.processAttributes(entity, context, UPDATE);
             }
         }

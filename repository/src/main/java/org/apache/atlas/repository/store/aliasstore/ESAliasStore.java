@@ -89,6 +89,12 @@ public class ESAliasStore implements IndexAliasStore {
 
     private final int assetsMaxLimit = AtlasConfiguration.PERSONA_POLICY_ASSET_MAX_LIMIT.getInt();
 
+    // Cache the physical index name that VERTEX_INDEX_NAME alias resolves to.
+    // This is a static alias mapping that never changes at runtime, so one ES GET per
+    // ESAliasStore instance is sufficient.  Combined with Fix D (preprocessor reuse per batch),
+    // this reduces N ES index-resolution GETs per bulk create request to exactly 1.
+    private volatile String resolvedVertexIndexName;
+
     @Inject
     public ESAliasStore(AtlasGraph graph,
                         EntityGraphRetriever entityRetriever) {
@@ -113,6 +119,12 @@ public class ESAliasStore implements IndexAliasStore {
     }
 
     private String getIndexNameFromAliasIfExists(final String aliasIndexName) throws AtlasBaseException {
+        // Fast path: VERTEX_INDEX_NAME is a static alias; the physical index it points to
+        // never changes while Atlas is running.  Return the cached name after the first resolve.
+        if (VERTEX_INDEX_NAME.equals(aliasIndexName) && resolvedVertexIndexName != null) {
+            return resolvedVertexIndexName;
+        }
+
         try {
             RestHighLevelClient esClient = AtlasElasticsearchDatabase.getClient();
             GetAliasesRequest aliasesRequest = new GetAliasesRequest(aliasIndexName);
@@ -123,6 +135,9 @@ public class ESAliasStore implements IndexAliasStore {
                 Set<AliasMetadata> aliasMetadataList = entry.getValue();
                 for (AliasMetadata aliasMetadata : aliasMetadataList) {
                     if (aliasIndexName.equals(aliasMetadata.alias())) {
+                        if (VERTEX_INDEX_NAME.equals(aliasIndexName)) {
+                            resolvedVertexIndexName = indexName;
+                        }
                         return indexName;
                     }
                 }

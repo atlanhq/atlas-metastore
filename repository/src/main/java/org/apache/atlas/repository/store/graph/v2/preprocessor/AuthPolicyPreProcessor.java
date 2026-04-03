@@ -81,6 +81,11 @@ public class AuthPolicyPreProcessor implements PreProcessor {
     private IndexAliasStore aliasStore;
     private EntityDiscoveryService discovery;
 
+    // Fix C: request-scoped cache for Connection entities loaded during validateConnectionAdmin().
+    // All N policies in a bulk create typically belong to the same Connection, so we pay the
+    // graph read cost exactly once instead of once per policy.
+    private final Map<String, AtlasEntity> connectionCache = new HashMap<>();
+
     public AuthPolicyPreProcessor(AtlasGraph graph,
                                   AtlasTypeRegistry typeRegistry,
                                   EntityGraphRetriever entityRetriever) {
@@ -358,7 +363,13 @@ public class AuthPolicyPreProcessor implements PreProcessor {
             //connectionAdmins check
 
             String connQn = getPolicyConnectionQN(policy);
-            AtlasEntity connection = getEntityByQualifiedName(entityRetriever, connQn);
+            AtlasEntity connection = connectionCache.get(connQn);
+            if (connection == null) {
+                connection = getEntityByQualifiedName(entityRetriever, connQn);
+                if (connection != null) {
+                    connectionCache.put(connQn, connection);
+                }
+            }
             if (connection == null) {
                 throw new AtlasBaseException(RESOURCE_NOT_FOUND, "Connection entity for policy");
             }
