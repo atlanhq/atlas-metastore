@@ -131,11 +131,15 @@ public class TaskExecutor {
                 TASK_LOG.info("Task guid = "+task.getGuid());
                 taskVertex = registry.getVertex(task.getGuid());
                 if (taskVertex == null) {
-                    TASK_LOG.warn("Task not scheduled as vertex not found", task);
+                    TASK_LOG.warn("Task not scheduled as vertex not found, marking as FAILED", task);
+                    task.setStatus(AtlasTask.Status.FAILED);
+                    task.setErrorMessage("Task vertex not found in graph");
+                    return;
                 }
 
                 if (task.getStatus() == AtlasTask.Status.COMPLETE) {
                     TASK_LOG.warn("Task not scheduled as status was COMPLETE!", task);
+                    return;
                 }
 
                 if (perfEnabled) {
