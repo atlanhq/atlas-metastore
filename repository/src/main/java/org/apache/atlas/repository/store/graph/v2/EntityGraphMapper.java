@@ -6200,13 +6200,27 @@ public class EntityGraphMapper {
 
         try {
             // Batch async read from Cassandra — fires all queries in parallel
+            // Returns only successfully read vertices; failed reads are omitted from the map
             Map<String, List<Tag>> allTagsByVertex = tagDAO.getAllTagsByVertexIds(snapshotMap.keySet());
 
-            // Compute denorm using Tag.isPropagated() (more reliable than entityGuid comparison)
-            Map<String, Map<String, Object>> deNormMap = new HashMap<>();
+            // DLQ vertices whose Cassandra read failed (missing from result map)
+            List<String> cassandraFailedVertexIds = new ArrayList<>();
             for (String vertexId : snapshotMap.keySet()) {
-                List<Tag> tags = allTagsByVertex.getOrDefault(vertexId, Collections.emptyList());
-                deNormMap.put(vertexId, TagDeNormAttributesUtil.computeAllDenormAttributes(tags, typeRegistry, fullTextMapperV2, tagAttributeMapper));
+                if (!allTagsByVertex.containsKey(vertexId)) {
+                    cassandraFailedVertexIds.add(vertexId);
+                }
+            }
+            if (!cassandraFailedVertexIds.isEmpty()) {
+                LOG.warn("Cassandra read failed for {} vertices, sending to DLQ", cassandraFailedVertexIds.size());
+                tagDenormDLQProducer.emitFailedVertices(cassandraFailedVertexIds, snapshotMap);
+                RequestContext.get().addTagDenormEsFailureCount(cassandraFailedVertexIds.size());
+                incrementCounter(tagDenormEsFlushFailure, cassandraFailedVertexIds.size());
+            }
+
+            // Compute denorm only for successfully read vertices
+            Map<String, Map<String, Object>> deNormMap = new HashMap<>();
+            for (Map.Entry<String, List<Tag>> entry : allTagsByVertex.entrySet()) {
+                deNormMap.put(entry.getKey(), TagDeNormAttributesUtil.computeAllDenormAttributes(entry.getValue(), typeRegistry, fullTextMapperV2, tagAttributeMapper));
             }
 
             ESConnector.TagDenormESWriteResult result;

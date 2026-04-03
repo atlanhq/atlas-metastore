@@ -483,13 +483,13 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
             }
 
             Map<String, List<Tag>> result = new HashMap<>();
+            List<String> failedVertexIds = new ArrayList<>();
             List<String> vertexIdList = new ArrayList<>(vertexIds);
 
-            // Process in sub-batches to bound concurrent Cassandra async reads
+            // Phase 1: Fast async reads in sub-batches
             for (int i = 0; i < vertexIdList.size(); i += ASYNC_READ_BATCH_SIZE) {
                 List<String> batch = vertexIdList.subList(i, Math.min(i + ASYNC_READ_BATCH_SIZE, vertexIdList.size()));
 
-                // Fire async reads for this sub-batch
                 Map<String, CompletionStage<AsyncResultSet>> futures = new LinkedHashMap<>();
                 for (String vertexId : batch) {
                     int bucket = calculateBucket(vertexId);
@@ -497,7 +497,6 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
                     futures.put(vertexId, cassSession.executeAsync(bound));
                 }
 
-                // Collect results for this sub-batch before firing the next
                 for (Map.Entry<String, CompletionStage<AsyncResultSet>> entry : futures.entrySet()) {
                     String vertexId = entry.getKey();
                     try {
@@ -505,11 +504,23 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
                         List<Tag> tags = asyncResultSetToTags(vertexId, asyncRs);
                         result.put(vertexId, tags);
                     } catch (Exception e) {
-                        LOG.error("Error in getAllTagsByVertexIds for vertexId={}", vertexId, e);
-                        throw new AtlasBaseException("Error batch-reading tags for vertexId=" + vertexId, e);
+                        LOG.warn("Async read failed for vertexId={}, will retry synchronously", vertexId, e);
+                        failedVertexIds.add(vertexId);
                     }
                 }
             }
+
+            // Phase 2: Retry failed reads synchronously (uses executeWithRetry — has backoff)
+            for (String vertexId : failedVertexIds) {
+                try {
+                    List<Tag> tags = getAllTagsByVertexId(vertexId);
+                    result.put(vertexId, tags);
+                    LOG.info("Sync retry succeeded for vertexId={}", vertexId);
+                } catch (Exception e) {
+                    LOG.error("Sync retry also failed for vertexId={}, skipping (caller will DLQ)", vertexId, e);
+                }
+            }
+
             return result;
         } finally {
             RequestContext.get().endMetricRecord(recorder);
