@@ -91,7 +91,7 @@ jobs:
           echo "${{ steps.get_pr_url_user.outputs.pr_user }}"
 
       - name: Repository Dispatch
-        uses: peter-evans/repository-dispatch@v2
+        uses: peter-evans/repository-dispatch@v4
         with:
           token: ${{ secrets.ORG_PAT_GITHUB }}
           repository: ${{ matrix.repo }}
