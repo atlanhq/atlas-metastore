@@ -15,7 +15,7 @@ class HarnessConfig:
     admin_base: str = "http://localhost:21000/api/atlas/admin"
     user: str = "admin"
     password: str = "admin"
-    creds_file: str = os.path.expanduser("~/Desktop/Projects/tokens/creds.yaml")
+    creds_file: str = os.environ.get("TOKEN_FILE", os.path.expanduser("~/Desktop/Projects/tokens/creds.yaml"))
     suites: List[str] = field(default_factory=list)
     tags: List[str] = field(default_factory=list)
     exclude_tags: List[str] = field(default_factory=list)
@@ -68,7 +68,7 @@ Examples:
     parser.add_argument("--password", default="admin",
                         help="Basic auth password (local dev, default: admin)")
     parser.add_argument("--creds-file",
-                        default=os.path.expanduser("~/Desktop/Projects/tokens/creds.yaml"),
+                        default=os.environ.get("TOKEN_FILE", os.path.expanduser("~/Desktop/Projects/tokens/creds.yaml")),
                         help="Path to creds.yaml for OAuth2")
     parser.add_argument("--suite", nargs="+", default=[], dest="suites",
                         help="Run only these suites (space-separated names)")
