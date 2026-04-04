@@ -59,11 +59,17 @@ public class OrphanEdgeCleanup implements Runnable {
     public void run() {
         if (!leaseManager.tryAcquire(JOB_NAME, LEASE_TTL_SECONDS)) {
             LOG.info("OrphanEdgeCleanup: another pod holds the lease, skipping");
+            recordJobMetric("skipped_lease", 0);
             return;
         }
 
+        long startMs = System.currentTimeMillis();
         try {
             runProgressiveScan();
+            recordJobMetric("success", startMs);
+        } catch (Exception e) {
+            recordJobMetric("failed", startMs);
+            throw e;
         } finally {
             leaseManager.release(JOB_NAME);
         }
@@ -144,6 +150,16 @@ public class OrphanEdgeCleanup implements Runnable {
             LOG.info("OrphanEdgeCleanup: completed in {}ms — scanned {} edges, {} orphans found, {} deleted, cycleComplete={}",
                     elapsed, totalScanned, orphansFound, orphansDeleted, cycleComplete);
 
+            // Record orphan scan metrics
+            try {
+                CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
+                if (metrics != null) {
+                    metrics.recordOrphanEdgeScan(elapsed, totalScanned, orphansFound, orphansDeleted);
+                }
+            } catch (Throwable t) {
+                LOG.debug("Failed to record orphan scan metrics: {}", t.getMessage());
+            }
+
         } catch (Exception e) {
             LOG.error("OrphanEdgeCleanup: failed", e);
         }
@@ -189,6 +205,18 @@ public class OrphanEdgeCleanup implements Runnable {
                 JOB_NAME, lastToken, Instant.now(), (long) rowsProcessed, cycleComplete));
         } catch (Exception e) {
             LOG.warn("OrphanEdgeCleanup: failed to save progress: {}", e.getMessage());
+        }
+    }
+
+    private void recordJobMetric(String result, long startMs) {
+        try {
+            CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
+            if (metrics != null) {
+                long durationMs = startMs > 0 ? System.currentTimeMillis() - startMs : 0;
+                metrics.recordJobRun(JOB_NAME, result, durationMs);
+            }
+        } catch (Throwable t) {
+            LOG.debug("Failed to record job metric: {}", t.getMessage());
         }
     }
 

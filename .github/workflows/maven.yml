@@ -31,7 +31,7 @@ on:
       - hotfix-reindex-refresh
       - nb-switchable-graph-provider
       - ms-864-keycloak-jwks-internal-url
-      - switchable-graph-provider
+      - ms-911-add-observability
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'

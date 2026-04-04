@@ -1,0 +1,663 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "ZeroGraph (CassandraGraph) operational observability — write path, ES sync, outbox, data integrity, background jobs. Companion to the ring deployment dashboard.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [
+    {
+      "icon": "external link",
+      "title": "Ring Deployment Health",
+      "type": "link",
+      "url": "/d/atlas-ring-deployment-health"
+    },
+    {
+      "icon": "external link",
+      "title": "Atlas Metastore",
+      "type": "link",
+      "url": "/d/atlas-metastore-service"
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "panels": [],
+      "title": "ZeroGraph Overview",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Commit success rate over the last hour",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "decimals": 2,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 99 },
+              { "color": "green", "value": 99.9 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 1 },
+      "id": 10,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "editorMode": "code",
+          "expr": "100 * sum(rate(atlas_metastore_cg_commit_total{status=\"success\", clusterName=~\"$tenant\"}[1h])) / (sum(rate(atlas_metastore_cg_commit_total{clusterName=~\"$tenant\"}[1h])) > 0)",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Commit Success Rate",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "ES sync success rate — how often the synchronous sync succeeds without falling back to outbox",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "decimals": 2,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 99 },
+              { "color": "green", "value": 99.9 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 1 },
+      "id": 11,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "editorMode": "code",
+          "expr": "100 * sum(rate(atlas_metastore_cg_es_sync_total{result=\"sync_success\", clusterName=~\"$tenant\"}[1h])) / (sum(rate(atlas_metastore_cg_es_sync_total{clusterName=~\"$tenant\"}[1h])) > 0)",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "ES Sync Success Rate",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Current number of PENDING entries in the ES outbox",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 8, "y": 1 },
+      "id": 12,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "editorMode": "code",
+          "expr": "sum(rate(atlas_metastore_cg_outbox_processed_total{result=~\"exhausted|permanent|poison_pill\", clusterName=~\"$tenant\"}[1h])) * 3600",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Outbox Failures/hr",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Outbox pending + failed entries — entities in Cassandra not yet synced to ES. Seeded from C* on startup, updated inline.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 12, "y": 1 },
+      "id": 13,
+      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "editorMode": "code",
+          "expr": "sum(atlas_metastore_cg_outbox_pending{clusterName=~\"$tenant\"}) + sum(atlas_metastore_cg_outbox_failed{clusterName=~\"$tenant\"})",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Outbox Unsync'd",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "ES reconciliation miss rate — fraction of sampled GUIDs missing from ES",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "decimals": 2,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 1 },
+      "id": 14,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "editorMode": "code",
+          "expr": "100 * atlas_metastore_cg_reconciliation_miss_rate{clusterName=~\"$tenant\"}",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Reconciliation Miss Rate",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "1 = outbox processor is actively draining entries (something failed). 0 = idle (healthy).",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            { "options": { "0": { "color": "green", "text": "Idle" } }, "type": "value" },
+            { "options": { "1": { "color": "yellow", "text": "Draining" } }, "type": "value" }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 1 },
+      "id": 15,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "editorMode": "code",
+          "expr": "atlas_metastore_cg_outbox_drain_mode{clusterName=~\"$tenant\"}",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Outbox Processor",
+      "type": "stat"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "id": 100,
+      "panels": [],
+      "title": "Write Path (commit)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 10 }, "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 7 },
+      "id": 101,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_commit_total{status=\"success\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "success", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_commit_total{status=\"failure\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "failure", "refId": "B" }
+      ],
+      "title": "Commits/sec",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 10 }, "unit": "s" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 7 },
+      "id": 102,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.50, sum(rate(atlas_metastore_cg_commit_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p50", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.95, sum(rate(atlas_metastore_cg_commit_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p95", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.99, sum(rate(atlas_metastore_cg_commit_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p99", "refId": "C" }
+      ],
+      "title": "Commit Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 30, "stacking": { "mode": "normal" } }, "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 7 },
+      "id": 103,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_vertices_written_total{op=\"create\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "vertices created", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_vertices_written_total{op=\"update\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "vertices updated", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_edges_written_total{op=\"create\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "edges created", "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_claim_conflicts_total{clusterName=~\"$tenant\"}[5m]))", "legendFormat": "claim conflicts", "refId": "D" }
+      ],
+      "title": "Write Throughput",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 },
+      "id": 200,
+      "panels": [],
+      "title": "ES Sync & Outbox Health",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 30, "stacking": { "mode": "normal" } }, "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
+      "id": 201,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_es_sync_total{result=\"sync_success\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "sync success", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_es_sync_total{result=\"outbox_fallback\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "outbox fallback", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_es_sync_total{result=\"permanent_failure\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "permanent failure", "refId": "C" }
+      ],
+      "title": "ES Sync Outcome",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 10 } } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 16 },
+      "id": 202,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(atlas_metastore_cg_outbox_pending{clusterName=~\"$tenant\"})", "legendFormat": "pending", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(atlas_metastore_cg_outbox_failed{clusterName=~\"$tenant\"})", "legendFormat": "failed", "refId": "B" }
+      ],
+      "title": "Outbox Queue Depth",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 30, "stacking": { "mode": "normal" } }, "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
+      "id": 203,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_outbox_processed_total{result=\"success\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "success", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_outbox_processed_total{result=\"failed\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "failed", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_outbox_processed_total{result=\"exhausted\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "exhausted", "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_outbox_processed_total{result=\"permanent\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "permanent", "refId": "D" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_outbox_processed_total{result=\"poison_pill\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "poison pill", "refId": "E" }
+      ],
+      "title": "Outbox Processing",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+      "id": 300,
+      "panels": [],
+      "title": "Data Integrity & Consistency",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 10 } } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 25 },
+      "id": 301,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(atlas_metastore_cg_outbox_pending{clusterName=~\"$tenant\"})", "legendFormat": "pending", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(atlas_metastore_cg_outbox_failed{clusterName=~\"$tenant\"})", "legendFormat": "failed", "refId": "B" }
+      ],
+      "title": "Outbox Unsync'd Over Time",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 10 }, "unit": "percentunit" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 25 },
+      "id": 302,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "atlas_metastore_cg_reconciliation_miss_rate{clusterName=~\"$tenant\"}", "legendFormat": "miss rate", "refId": "A" }
+      ],
+      "title": "Reconciliation Miss Rate Over Time",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 10 }, "unit": "short" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 25 },
+      "id": 303,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(increase(atlas_metastore_cg_orphan_edges_found_total{clusterName=~\"$tenant\"}[1h]))", "legendFormat": "found", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(increase(atlas_metastore_cg_orphan_edges_deleted_total{clusterName=~\"$tenant\"}[1h]))", "legendFormat": "deleted", "refId": "B" }
+      ],
+      "title": "Orphan Edges (per hour)",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 33 },
+      "id": 400,
+      "panels": [],
+      "title": "Background Jobs",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 30, "stacking": { "mode": "normal" } }, "unit": "short" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 34 },
+      "id": 401,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(increase(atlas_metastore_cg_job_run_total{result=\"success\", clusterName=~\"$tenant\"}[6h])) by (job)", "legendFormat": "{{job}} success", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(increase(atlas_metastore_cg_job_run_total{result=\"failed\", clusterName=~\"$tenant\"}[6h])) by (job)", "legendFormat": "{{job}} failed", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(increase(atlas_metastore_cg_job_run_total{result=\"skipped_lease\", clusterName=~\"$tenant\"}[6h])) by (job)", "legendFormat": "{{job}} skipped (lease)", "refId": "C" }
+      ],
+      "title": "Background Job Runs (6h window)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 10 }, "unit": "s" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 34 },
+      "id": 402,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.99, sum(rate(atlas_metastore_cg_job_duration_seconds_bucket{clusterName=~\"$tenant\"}[6h])) by (le, job))", "legendFormat": "{{job}} p99", "refId": "A" }
+      ],
+      "title": "Background Job Duration (p99)",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 42 },
+      "id": 500,
+      "panels": [],
+      "title": "ES Sync Details",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 10 }, "unit": "s" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 43 },
+      "id": 501,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.50, sum(rate(atlas_metastore_cg_es_sync_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p50", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.95, sum(rate(atlas_metastore_cg_es_sync_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p95", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "histogram_quantile(0.99, sum(rate(atlas_metastore_cg_es_sync_duration_seconds_bucket{clusterName=~\"$tenant\"}[5m])) by (le))", "legendFormat": "p99", "refId": "C" }
+      ],
+      "title": "ES Sync Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 10 }, "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 43 },
+      "id": 502,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_es_sync_retry_total{clusterName=~\"$tenant\"}[5m])) by (attempt)", "legendFormat": "attempt {{attempt}}", "refId": "A" }
+      ],
+      "title": "ES Sync Retries",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 30, "stacking": { "mode": "normal" } }, "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 43 },
+      "id": 503,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_es_bulk_items_total{status=\"success\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "success", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_es_bulk_items_total{status=\"retryable\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "retryable", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(rate(atlas_metastore_cg_es_bulk_items_total{status=\"permanent\", clusterName=~\"$tenant\"}[5m]))", "legendFormat": "permanent", "refId": "C" }
+      ],
+      "title": "ES Bulk Item Results",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 51 },
+      "id": 600,
+      "panels": [],
+      "title": "Cassandra Table Health (atlas_graph)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Largest partition per table. Alert if edges_out exceeds 50MB — indicates a super-vertex (e.g., Table with 100K+ Columns).",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "unit": "decbytes"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "edges_out" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 52 },
+      "id": 601,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:edges_out:maxpartitionsize:value\"})", "legendFormat": "edges_out", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:vertices:maxpartitionsize:value\"})", "legendFormat": "vertices", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:edges_in:maxpartitionsize:value\"})", "legendFormat": "edges_in", "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:vertex_index:maxpartitionsize:value\"})", "legendFormat": "vertex_index", "refId": "D" }
+      ],
+      "title": "Max Partition Size by Table",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Tombstones scanned per read at p99. High values (>1000) cause read latency spikes. Reduce gc_grace_seconds or run compaction.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 100 },
+              { "color": "red", "value": 1000 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 52 },
+      "id": 602,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:edges_out:tombstonesscannedhistogram:99thpercentile\"})", "legendFormat": "edges_out", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:vertices:tombstonesscannedhistogram:99thpercentile\"})", "legendFormat": "vertices", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:edges_in:tombstonesscannedhistogram:99thpercentile\"})", "legendFormat": "edges_in", "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:vertex_index:tombstonesscannedhistogram:99thpercentile\"})", "legendFormat": "vertex_index", "refId": "D" }
+      ],
+      "title": "Tombstones Scanned (p99) by Table",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Estimated partition count (row count) per table. Useful for capacity planning.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 52 },
+      "id": 603,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:vertices:estimatedpartitioncount:value\"})", "legendFormat": "vertices", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:edges_out:estimatedpartitioncount:value\"})", "legendFormat": "edges_out", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:edges_by_id:estimatedpartitioncount:value\"})", "legendFormat": "edges_by_id", "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:vertex_index:estimatedpartitioncount:value\"})", "legendFormat": "vertex_index", "refId": "D" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:es_outbox:estimatedpartitioncount:value\"})", "legendFormat": "es_outbox", "refId": "E" }
+      ],
+      "title": "Partition Count by Table",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Read and write latency at p99 per table. Helps identify which table is the bottleneck.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "unit": "µs"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 60 },
+      "id": 604,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:vertices:readlatency:99thpercentile\"})", "legendFormat": "vertices read", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:edges_out:readlatency:99thpercentile\"})", "legendFormat": "edges_out read", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:edges_in:readlatency:99thpercentile\"})", "legendFormat": "edges_in read", "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:vertex_index:readlatency:99thpercentile\"})", "legendFormat": "vertex_index read", "refId": "D" }
+      ],
+      "title": "Read Latency (p99) by Table",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "SSTable count per table. High SSTable count (>32) with no pending compactions may indicate compaction is falling behind.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 60 },
+      "id": 605,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:vertices:livesstablecount:value\"})", "legendFormat": "vertices", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:edges_out:livesstablecount:value\"})", "legendFormat": "edges_out", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:edges_by_id:livesstablecount:value\"})", "legendFormat": "edges_by_id", "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:vertex_index:livesstablecount:value\"})", "legendFormat": "vertex_index", "refId": "D" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "max(cassandra_stats{clusterName=~\"$tenant\", name=~\".*:atlas_graph:es_outbox:livesstablecount:value\"})", "legendFormat": "es_outbox", "refId": "E" }
+      ],
+      "title": "Live SSTable Count by Table",
+      "type": "timeseries"
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["atlas", "zerograph", "cassandra-graph", "observability"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "default", "value": "default" },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "current": { "selected": false, "text": ".*", "value": ".*" },
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "definition": "label_values(atlas_metastore_cg_commit_total, clusterName)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Tenant",
+        "multi": true,
+        "name": "tenant",
+        "options": [],
+        "query": { "qryType": 1, "query": "label_values(atlas_metastore_cg_commit_total, clusterName)" },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "ZeroGraph Operational Observability",
+  "uid": "zerograph-operational-observability",
+  "version": 1
+}
