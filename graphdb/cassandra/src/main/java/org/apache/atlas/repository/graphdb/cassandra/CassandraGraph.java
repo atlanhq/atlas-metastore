@@ -127,9 +127,37 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                     org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry();
             if (registry != null) {
                 CassandraGraphMetrics.getInstance(registry);
+                seedOutboxFailedGauge();
             }
         } catch (Throwable t) {
             LOG.warn("Failed to initialize CassandraGraph metrics (non-fatal): {}", t.getMessage());
+        }
+    }
+
+    /**
+     * One-time seed of the outbox_failed gauge from Cassandra on startup.
+     * The es_outbox table is partitioned by status, so WHERE status = 'FAILED'
+     * is a single-partition read — milliseconds even with thousands of entries.
+     * Uses a 2-second timeout to avoid delaying startup if C* is slow.
+     */
+    private void seedOutboxFailedGauge() {
+        try {
+            com.datastax.oss.driver.api.core.cql.ResultSet rs = session.execute(
+                    com.datastax.oss.driver.api.core.cql.SimpleStatement.builder(
+                            "SELECT COUNT(*) FROM es_outbox WHERE status = 'FAILED'")
+                        .setTimeout(java.time.Duration.ofSeconds(2))
+                        .build());
+            com.datastax.oss.driver.api.core.cql.Row row = rs.one();
+            if (row != null) {
+                int count = (int) row.getLong(0);
+                if (count > 0) {
+                    CassandraGraphMetrics.getInstance().incrementOutboxFailed(count);
+                    LOG.info("Seeded outbox_failed gauge from C*: {}", count);
+                }
+            }
+        } catch (Exception e) {
+            LOG.info("Could not seed outbox_failed gauge (will self-correct on next reconciliation): {}",
+                    e.getMessage());
         }
     }
 

@@ -130,23 +130,23 @@
       },
       "gridPos": { "h": 5, "w": 4, "x": 8, "y": 1 },
       "id": 12,
-      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "sum(atlas_metastore_cg_outbox_pending{clusterName=~\"$tenant\"})",
+          "expr": "sum(rate(atlas_metastore_cg_outbox_processed_total{result=~\"exhausted|permanent|poison_pill\", clusterName=~\"$tenant\"}[1h])) * 3600",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Outbox Pending",
+      "title": "Outbox Failures/hr",
       "type": "stat"
     },
     {
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "description": "Number of FAILED outbox entries — requires manual investigation",
+      "description": "Outbox pending + failed entries — entities in Cassandra not yet synced to ES. Seeded from C* on startup, updated inline.",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -154,7 +154,8 @@
             "mode": "absolute",
             "steps": [
               { "color": "green", "value": null },
-              { "color": "red", "value": 1 }
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 10 }
             ]
           }
         }
@@ -166,13 +167,13 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "sum(atlas_metastore_cg_outbox_failed{clusterName=~\"$tenant\"})",
+          "expr": "sum(atlas_metastore_cg_outbox_pending{clusterName=~\"$tenant\"}) + sum(atlas_metastore_cg_outbox_failed{clusterName=~\"$tenant\"})",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Outbox Failed",
+      "title": "Outbox Unsync'd",
       "type": "stat"
     },
     {
@@ -213,34 +214,37 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "description": "Outbox pending + failed entries — entities written to Cassandra but not yet synced to ES. If > 0, search results may be stale.",
+      "description": "1 = outbox processor is actively draining entries (something failed). 0 = idle (healthy).",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
+          "mappings": [
+            { "options": { "0": { "color": "green", "text": "Idle" } }, "type": "value" },
+            { "options": { "1": { "color": "yellow", "text": "Draining" } }, "type": "value" }
+          ],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               { "color": "green", "value": null },
-              { "color": "yellow", "value": 50 },
-              { "color": "red", "value": 100 }
+              { "color": "yellow", "value": 1 }
             ]
           }
         }
       },
       "gridPos": { "h": 5, "w": 4, "x": 20, "y": 1 },
       "id": 15,
-      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto" },
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "sum(atlas_metastore_cg_outbox_pending{clusterName=~\"$tenant\"}) + sum(atlas_metastore_cg_outbox_failed{clusterName=~\"$tenant\"})",
+          "expr": "atlas_metastore_cg_outbox_drain_mode{clusterName=~\"$tenant\"}",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Outbox Unsync'd",
+      "title": "Outbox Processor",
       "type": "stat"
     },
 

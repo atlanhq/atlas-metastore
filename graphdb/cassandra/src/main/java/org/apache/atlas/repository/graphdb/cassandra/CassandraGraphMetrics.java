@@ -125,9 +125,14 @@ public class CassandraGraphMetrics {
         outboxFailed.addAndGet(count);
     }
 
-    /** Decrements outbox FAILED gauge when reconciliation drains entries. */
-    public void decrementOutboxFailed(int count) {
-        outboxFailed.addAndGet(-count);
+    /**
+     * Resets outbox FAILED gauge to the actual C* count. Called by
+     * ESReconciliationJob which already reads the FAILED partition
+     * as part of its drain phase — no additional C* cost.
+     * This corrects any drift from pod restarts or missed increments.
+     */
+    public void resetOutboxFailed(int count) {
+        outboxFailed.set(count);
     }
 
     public void setOutboxDrainMode(boolean drain) {

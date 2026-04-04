@@ -181,9 +181,6 @@ public class ESReconciliationJob implements Runnable {
                 if (metrics != null) {
                     metrics.recordReconciliation(elapsed, failedDrained,
                             totalSampled, totalMissing, totalReindexed, missRate);
-                    if (failedDrained > 0) {
-                        metrics.decrementOutboxFailed(failedDrained);
-                    }
                 }
             } catch (Throwable t) {
                 LOG.debug("Failed to record reconciliation metrics: {}", t.getMessage());
@@ -300,6 +297,19 @@ public class ESReconciliationJob implements Runnable {
      */
     private int drainFailedOutboxEntries() {
         List<String> failedVertexIds = outboxRepository.getFailedVertexIds(5000);
+
+        // Reset the outbox_failed gauge to the actual C* count (piggybacking on
+        // this existing query — no additional C* cost). This corrects any drift
+        // from pod restarts or missed inline increments.
+        try {
+            CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
+            if (metrics != null) {
+                metrics.resetOutboxFailed(failedVertexIds.size());
+            }
+        } catch (Throwable t) {
+            LOG.debug("Failed to reset outbox_failed gauge: {}", t.getMessage());
+        }
+
         if (failedVertexIds.isEmpty()) {
             LOG.info("ESReconciliationJob phase 1: no FAILED outbox entries");
             return 0;
