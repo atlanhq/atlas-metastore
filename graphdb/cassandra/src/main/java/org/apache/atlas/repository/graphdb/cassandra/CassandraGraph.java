@@ -98,6 +98,11 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     }
 
     public CassandraGraph(CqlSession session, RuntimeIdStrategy idStrategy, boolean claimEnabled) {
+        this(session, idStrategy, claimEnabled, null);
+    }
+
+    public CassandraGraph(CqlSession session, RuntimeIdStrategy idStrategy, boolean claimEnabled,
+                           org.apache.commons.configuration.Configuration configuration) {
         this.session             = session;
         this.vertexRepository    = new VertexRepository(session);
         this.edgeRepository      = new EdgeRepository(session);
@@ -108,7 +113,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         this.esOutboxRepository  = new ESOutboxRepository(session);
         this.leaseManager        = new JobLeaseManager(session);
         this.esOutboxProcessor   = new ESOutboxProcessor(esOutboxRepository, leaseManager);
-        this.repairJobScheduler  = new RepairJobScheduler(session, this, leaseManager, esOutboxRepository);
+        this.repairJobScheduler  = new RepairJobScheduler(session, this, leaseManager, esOutboxRepository, configuration);
         this.multiProperties     = ConcurrentHashMap.newKeySet();
         this.idStrategy          = idStrategy != null ? idStrategy : RuntimeIdStrategy.LEGACY;
         this.claimEnabled        = claimEnabled;
