@@ -78,7 +78,6 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     private final JobLeaseManager     leaseManager;
     private final ESOutboxProcessor        esOutboxProcessor;
     private final RepairJobScheduler       repairJobScheduler;
-    private final CassandraGraphHealthPoller healthPoller;
     private final Set<String>              multiProperties;
     private final RuntimeIdStrategy   idStrategy;
     private final boolean             claimEnabled;
@@ -110,7 +109,6 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         this.leaseManager        = new JobLeaseManager(session);
         this.esOutboxProcessor   = new ESOutboxProcessor(esOutboxRepository, leaseManager);
         this.repairJobScheduler  = new RepairJobScheduler(session, this, leaseManager, esOutboxRepository);
-        this.healthPoller        = new CassandraGraphHealthPoller(session);
         this.multiProperties     = ConcurrentHashMap.newKeySet();
         this.idStrategy          = idStrategy != null ? idStrategy : RuntimeIdStrategy.LEGACY;
         this.claimEnabled        = claimEnabled;
@@ -121,7 +119,6 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         // Start background processors
         this.esOutboxProcessor.start();
         this.repairJobScheduler.start();
-        this.healthPoller.start();
     }
 
     private void initMetrics() {
@@ -1548,13 +1545,13 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             LOG.info("ES bulk response: {} succeeded, {} retryable failures, {} permanent failures",
                     succeeded, retryable, permanent);
 
-            // Record per-item metrics (actual counts, not just presence)
+            // Record per-item metrics
             try {
                 CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
                 if (metrics != null) {
-                    for (int i = 0; i < succeeded; i++) metrics.recordESBulkItem("success");
-                    for (int i = 0; i < retryable; i++) metrics.recordESBulkItem("retryable");
-                    for (int i = 0; i < permanent; i++) metrics.recordESBulkItem("permanent");
+                    metrics.recordESBulkItems("success", succeeded);
+                    metrics.recordESBulkItems("retryable", retryable);
+                    metrics.recordESBulkItems("permanent", permanent);
                 }
             } catch (Throwable t) {
                 LOG.debug("Failed to record ES bulk item metrics: {}", t.getMessage());
@@ -2002,11 +1999,6 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             LOG.warn("Error stopping ESOutboxProcessor: {}", e.getMessage());
         }
         try {
-            healthPoller.stop();
-        } catch (Exception e) {
-            LOG.warn("Error stopping CassandraGraphHealthPoller: {}", e.getMessage());
-        }
-        try {
             repairJobScheduler.stop();
         } catch (Exception e) {
             LOG.warn("Error stopping RepairJobScheduler: {}", e.getMessage());
@@ -2110,7 +2102,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         return edgeRepository;
     }
 
-    public RepairJobScheduler getRepairJobScheduler() {
+    RepairJobScheduler getRepairJobScheduler() {
         return repairJobScheduler;
     }
 

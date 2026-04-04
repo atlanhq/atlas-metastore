@@ -175,12 +175,15 @@ public class ESReconciliationJob implements Runnable {
                     elapsed, failedDrained, totalSampled, totalMissing, totalReindexed,
                     String.format("%.2f%%", missRate * 100));
 
-            // Record reconciliation metrics
+            // Record reconciliation metrics and update outbox failed gauge
             try {
                 CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
                 if (metrics != null) {
                     metrics.recordReconciliation(elapsed, failedDrained,
                             totalSampled, totalMissing, totalReindexed, missRate);
+                    if (failedDrained > 0) {
+                        metrics.decrementOutboxFailed(failedDrained);
+                    }
                 }
             } catch (Throwable t) {
                 LOG.debug("Failed to record reconciliation metrics: {}", t.getMessage());
@@ -204,13 +207,24 @@ public class ESReconciliationJob implements Runnable {
     }
 
     /**
-     * Returns true if the vertex is an entity (has __typeName property).
+     * Returns true if the vertex is an entity (has __typeName property with a non-null value).
      * Only entity vertices are indexed to ES. TypeDef vertices, system vertices,
      * and internal vertices do not have __typeName and should be excluded from
      * the reconciliation sample to avoid false-positive miss rates.
+     *
+     * Parses JSON to check the key exists (not String.contains, which would
+     * false-positive on "__typeName" appearing in description or other text fields).
      */
+    @SuppressWarnings("unchecked")
     private boolean isEntityVertex(String propsJson) {
-        return propsJson.contains("__typeName");
+        try {
+            Map<String, Object> props = AtlasType.fromJson(propsJson, Map.class);
+            if (props == null) return false;
+            Object typeName = props.get("__typeName");
+            return typeName != null && !String.valueOf(typeName).isEmpty();
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     @SuppressWarnings("unchecked")

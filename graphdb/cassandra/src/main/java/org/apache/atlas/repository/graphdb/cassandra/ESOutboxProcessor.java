@@ -139,6 +139,7 @@ public class ESOutboxProcessor {
         try {
             int batchSize = drainMode ? DRAIN_BATCH_SIZE : IDLE_BATCH_SIZE;
             List<ESOutboxRepository.OutboxEntry> entries = outboxRepository.getPendingEntries(batchSize);
+            updateOutboxPendingGauge(entries.size());
 
             if (entries.isEmpty()) {
                 consecutiveEmptyPolls++;
@@ -174,32 +175,29 @@ public class ESOutboxProcessor {
             StringBuilder bulkBody = new StringBuilder();
             Map<String, ESOutboxRepository.OutboxEntry> entryMap = new LinkedHashMap<>();
             int skippedBackoff = 0;
+            int exhaustedCount = 0;
+            int poisonPillCount = 0;
 
             for (ESOutboxRepository.OutboxEntry entry : entries) {
                 // Exhausted: hit max attempts → mark FAILED, remove from batch
                 if (entry.attemptCount >= ESOutboxRepository.MAX_ATTEMPTS) {
                     outboxRepository.markFailed(entry.vertexId, entry.attemptCount);
-                    recordOutboxMetric("exhausted");
+                    exhaustedCount++;
                     LOG.error("ESOutboxProcessor: marking vertex '{}' as FAILED after {} attempts",
                             entry.vertexId, entry.attemptCount);
                     continue;
                 }
 
                 // Exponential backoff via time-based skipping (not Thread.sleep).
-                // Entries stay in PENDING and are re-evaluated on the next 2s poll cycle.
-                // This avoids blocking the processor thread so other entries can still be processed.
-                // First attempt (attemptCount=0) has no backoff — retried immediately.
                 if (entry.attemptCount > 0 && !isBackoffElapsed(entry)) {
                     skippedBackoff++;
-                    recordOutboxMetric("backoff_skipped");
                     continue;
                 }
 
                 // Validate entry before adding to bulk body — catch poison pills
                 if (!appendToBulk(bulkBody, entry, indexName)) {
-                    // Poison pill: malformed JSON or missing data — mark FAILED immediately
                     outboxRepository.markFailed(entry.vertexId, entry.attemptCount);
-                    recordOutboxMetric("poison_pill");
+                    poisonPillCount++;
                     LOG.error("ESOutboxProcessor: marking vertex '{}' as FAILED (poison pill: invalid entry data)",
                             entry.vertexId);
                     continue;
@@ -207,6 +205,12 @@ public class ESOutboxProcessor {
 
                 entryMap.put(entry.vertexId, entry);
             }
+
+            // Record triage metrics in batch (no per-item loops)
+            recordOutboxMetrics("exhausted", exhaustedCount);
+            recordOutboxMetrics("backoff_skipped", skippedBackoff);
+            recordOutboxMetrics("poison_pill", poisonPillCount);
+            incrementOutboxFailedGauge(exhaustedCount + poisonPillCount);
 
             if (skippedBackoff > 0) {
                 LOG.debug("ESOutboxProcessor: skipped {} entries still in backoff window", skippedBackoff);
@@ -239,7 +243,7 @@ public class ESOutboxProcessor {
                             }
                         }
                         outboxRepository.batchMarkDone(succeededIds);
-                        for (int i = 0; i < succeededIds.size(); i++) recordOutboxMetric("success");
+                        recordOutboxMetrics("success", succeededIds.size());
 
                         // Retryable failures — increment attempt, will retry on next cycle
                         for (String failedId : retryableIds) {
@@ -247,8 +251,8 @@ public class ESOutboxProcessor {
                             if (entry != null) {
                                 outboxRepository.incrementAttempt(failedId, entry.attemptCount + 1);
                             }
-                            recordOutboxMetric("failed");
                         }
+                        recordOutboxMetrics("failed", retryableIds.size());
 
                         // Permanent failures — mark FAILED immediately, skip retries
                         for (String permId : permanentIds) {
@@ -256,15 +260,16 @@ public class ESOutboxProcessor {
                             if (entry != null) {
                                 outboxRepository.markFailed(permId, entry.attemptCount);
                             }
-                            recordOutboxMetric("permanent");
                         }
+                        recordOutboxMetrics("permanent", permanentIds.size());
+                        incrementOutboxFailedGauge(permanentIds.size());
 
                         LOG.info("ESOutboxProcessor: {} succeeded, {} retryable, {} permanent failures",
                                 succeededIds.size(), retryableIds.size(), permanentIds.size());
                     } else {
                         // All succeeded
                         outboxRepository.batchMarkDone(new ArrayList<>(entryMap.keySet()));
-                        for (int i = 0; i < entryMap.size(); i++) recordOutboxMetric("success");
+                        recordOutboxMetrics("success", entryMap.size());
                         LOG.info("ESOutboxProcessor: all {} entries synced to ES", entryMap.size());
                     }
                 } else {
@@ -291,11 +296,11 @@ public class ESOutboxProcessor {
         }
     }
 
-    private void recordOutboxMetric(String result) {
+    private void recordOutboxMetrics(String result, int count) {
         try {
             CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
-            if (metrics != null) {
-                metrics.recordOutboxProcessed(result);
+            if (metrics != null && count > 0) {
+                metrics.recordOutboxProcessed(result, count);
             }
         } catch (Throwable t) {
             // non-fatal
@@ -318,6 +323,28 @@ public class ESOutboxProcessor {
             CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
             if (metrics != null) {
                 metrics.setOutboxDrainMode(drain);
+            }
+        } catch (Throwable t) {
+            // non-fatal
+        }
+    }
+
+    private void updateOutboxPendingGauge(int count) {
+        try {
+            CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
+            if (metrics != null) {
+                metrics.setOutboxPending(count);
+            }
+        } catch (Throwable t) {
+            // non-fatal
+        }
+    }
+
+    private void incrementOutboxFailedGauge(int count) {
+        try {
+            CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
+            if (metrics != null && count > 0) {
+                metrics.incrementOutboxFailed(count);
             }
         } catch (Throwable t) {
             // non-fatal

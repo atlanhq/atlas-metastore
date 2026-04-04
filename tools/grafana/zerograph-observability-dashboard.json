@@ -234,13 +234,13 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "sum(atlas_metastore_cg_vertex_count_drift{clusterName=~\"$tenant\"})",
+          "expr": "sum(atlas_metastore_cg_outbox_pending{clusterName=~\"$tenant\"}) + sum(atlas_metastore_cg_outbox_failed{clusterName=~\"$tenant\"})",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "C*↔ES Vertex Drift",
+      "title": "Outbox Unsync'd",
       "type": "stat"
     },
 
@@ -362,9 +362,10 @@
       "id": 301,
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(atlas_metastore_cg_vertex_count_drift{clusterName=~\"$tenant\"})", "legendFormat": "drift", "refId": "A" }
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(atlas_metastore_cg_outbox_pending{clusterName=~\"$tenant\"})", "legendFormat": "pending", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "editorMode": "code", "expr": "sum(atlas_metastore_cg_outbox_failed{clusterName=~\"$tenant\"})", "legendFormat": "failed", "refId": "B" }
       ],
-      "title": "Cassandra↔ES Vertex Count Drift",
+      "title": "Outbox Unsync'd Over Time",
       "type": "timeseries"
     },
     {

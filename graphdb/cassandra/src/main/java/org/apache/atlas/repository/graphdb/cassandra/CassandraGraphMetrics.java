@@ -16,11 +16,15 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Centralized Prometheus metrics for the CassandraGraph (ZeroGraph) data plane.
  *
- * All metrics use the {@code cg_} prefix (CassandraGraph) and are tagged with
- * {@code clusterName} for per-tenant drill-down in Grafana.
+ * All metrics use the {@code cg_} prefix (CassandraGraph). The {@code clusterName}
+ * label is added automatically by the fleet-level Prometheus scraper (vmagent),
+ * not by this class.
  *
  * Singleton — call {@link #getInstance(MeterRegistry)} once at graph creation,
  * then {@link #getInstance()} everywhere else.
+ *
+ * Gauge values (outbox pending/failed, drift, miss rate) are updated inline by
+ * the code paths that change them — no background polling of Cassandra.
  */
 public class CassandraGraphMetrics {
 
@@ -33,10 +37,9 @@ public class CassandraGraphMetrics {
     private final Map<String, Counter> counterCache = new ConcurrentHashMap<>();
     private final Map<String, Timer> timerCache = new ConcurrentHashMap<>();
 
-    // ---- Gauges (mutable state) ----
+    // ---- Gauges (mutable state, updated inline — no C* polling) ----
     private final AtomicInteger outboxPending = new AtomicInteger(0);
     private final AtomicInteger outboxFailed = new AtomicInteger(0);
-    private final AtomicLong vertexCountDrift = new AtomicLong(0);
     private final AtomicInteger outboxDrainMode = new AtomicInteger(0);
     private final AtomicLong reconciliationMissRateBps = new AtomicLong(0); // basis points (missRate * 10000)
 
@@ -85,9 +88,7 @@ public class CassandraGraphMetrics {
     // Section 2: ES Sync
     // =========================================================================
 
-    /** Called after synchronous ES sync attempt in commit(). */
     public void recordESSync(String result, long durationMs, int indexOps, int deleteOps) {
-        // result: "sync_success", "outbox_fallback", "permanent_failure"
         getCounter("es_sync_total", "result", result).increment();
         getTimer("es_sync_duration_seconds").record(Duration.ofMillis(durationMs));
         if (indexOps > 0)  getCounter("es_sync_ops_total", "op", "index").increment(indexOps);
@@ -98,28 +99,35 @@ public class CassandraGraphMetrics {
         getCounter("es_sync_retry_total", "attempt", String.valueOf(attempt)).increment();
     }
 
-    /** Per-item result from ES bulk response. */
-    public void recordESBulkItem(String status) {
-        // status: "success", "retryable", "permanent"
-        getCounter("es_bulk_items_total", "status", status).increment();
+    public void recordESBulkItems(String status, int count) {
+        if (count > 0) getCounter("es_bulk_items_total", "status", status).increment(count);
     }
 
     // =========================================================================
     // Section 3: Outbox
     // =========================================================================
 
-    /** Called by ESOutboxProcessor for each entry outcome. */
-    public void recordOutboxProcessed(String result) {
-        // result: "success", "failed", "poison_pill", "exhausted", "backoff_skipped"
-        getCounter("outbox_processed_total", "result", result).increment();
+    /**
+     * Records outbox processing outcomes. Supports batch counts to avoid
+     * per-item loops at call sites.
+     */
+    public void recordOutboxProcessed(String result, int count) {
+        if (count > 0) getCounter("outbox_processed_total", "result", result).increment(count);
     }
 
+    /** Sets outbox PENDING gauge from the batch size returned by getPendingEntries(). */
     public void setOutboxPending(int count) {
         outboxPending.set(count);
     }
 
-    public void setOutboxFailed(int count) {
-        outboxFailed.set(count);
+    /** Increments outbox FAILED gauge when entries are marked FAILED. */
+    public void incrementOutboxFailed(int count) {
+        outboxFailed.addAndGet(count);
+    }
+
+    /** Decrements outbox FAILED gauge when reconciliation drains entries. */
+    public void decrementOutboxFailed(int count) {
+        outboxFailed.addAndGet(-count);
     }
 
     public void setOutboxDrainMode(boolean drain) {
@@ -141,9 +149,6 @@ public class CassandraGraphMetrics {
         if (sampled > 0)       getCounter("reconciliation_sampled_total").increment(sampled);
         if (missing > 0)       getCounter("reconciliation_missing_total").increment(missing);
         if (reindexed > 0)     getCounter("reconciliation_reindexed_total").increment(reindexed);
-
-        // Update miss rate gauge — stored as basis points (missRate * 10000) in AtomicLong
-        // to avoid floating-point atomics. Gauge reads it back as a fraction.
         reconciliationMissRateBps.set((long) (missRate * 10000));
     }
 
@@ -154,16 +159,11 @@ public class CassandraGraphMetrics {
         if (deleted > 0)  getCounter("orphan_edges_deleted_total").increment(deleted);
     }
 
-    public void setVertexCountDrift(long drift) {
-        vertexCountDrift.set(drift);
-    }
-
     // =========================================================================
     // Section 5: Background Jobs
     // =========================================================================
 
     public void recordJobRun(String jobName, String result, long durationMs) {
-        // result: "success", "skipped_lease", "failed"
         getCounter("job_run_total", "job", jobName, "result", result).increment();
         if (!"skipped_lease".equals(result)) {
             getTimer("job_duration_seconds", "job", jobName).record(Duration.ofMillis(durationMs));
@@ -185,10 +185,6 @@ public class CassandraGraphMetrics {
 
         Gauge.builder(PREFIX + "outbox_drain_mode", outboxDrainMode, AtomicInteger::get)
                 .description("1 if outbox processor is in drain mode, 0 if idle")
-                .register(registry);
-
-        Gauge.builder(PREFIX + "vertex_count_drift", vertexCountDrift, AtomicLong::get)
-                .description("Absolute difference between Cassandra vertex count and ES doc count")
                 .register(registry);
 
         Gauge.builder(PREFIX + "reconciliation_miss_rate", reconciliationMissRateBps,
