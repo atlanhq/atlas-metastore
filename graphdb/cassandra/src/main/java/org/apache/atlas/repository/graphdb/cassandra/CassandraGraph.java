@@ -2,6 +2,7 @@ package org.apache.atlas.repository.graphdb.cassandra;
 
 // CassandraGraph: direct Cassandra + ES graph backend implementation
 import com.datastax.oss.driver.api.core.CqlSession;
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.ESAliasRequestBuilder;
@@ -476,22 +477,26 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> getEdgesForVertex(String vertexId,
                                                                             AtlasEdgeDirection direction,
                                                                             String edgeLabel) {
-        // Check buffer for new edges first
+        // Snapshot buffered edges (small — typically 0-100)
         List<CassandraEdge> bufferedEdges = txBuffer.get().getEdgesForVertex(vertexId, direction, edgeLabel);
-        List<CassandraEdge> persistedEdges = edgeRepository.getEdgesForVertex(vertexId, direction, edgeLabel, this);
 
-        // Merge, avoiding duplicates
-        Map<String, CassandraEdge> merged = new LinkedHashMap<>();
-        for (CassandraEdge e : persistedEdges) {
-            if (!txBuffer.get().isEdgeRemoved(e.getIdString())) {
-                merged.put(e.getIdString(), e);
-            }
-        }
-        for (CassandraEdge e : bufferedEdges) {
-            merged.put(e.getIdString(), e);
-        }
+        // Lazy paginated fetch from Cassandra — O(pageSize) memory instead of O(totalEdges)
+        int pageSize = AtlasConfiguration.CASSANDRA_EDGE_PAGE_SIZE.getInt();
+        Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> persistedEdges =
+                edgeRepository.getEdgesForVertexPaged(vertexId, direction, edgeLabel, this, pageSize);
 
-        return (Iterable) new ArrayList<>(merged.values());
+        // Lazy merge: yields buffered edges first, then streams persisted edges
+        // while filtering out duplicates (buffered overrides) and removed edges.
+        return (Iterable) new MergedEdgeIterable(bufferedEdges, persistedEdges, txBuffer.get());
+    }
+
+    /**
+     * Discover distinct edge labels and their typeNames via label-skip-scan.
+     * Uses ~N tiny CQL queries (one per distinct label) instead of scanning all edges.
+     * Exposed for GraphHelper.retrieveEdgeLabelsAndTypeNameViaAtlasApi() optimization.
+     */
+    public Map<String, String> getDistinctEdgeLabelsWithTypeName(String vertexId, AtlasEdgeDirection direction) {
+        return edgeRepository.getDistinctEdgeLabelsWithTypeName(vertexId, direction);
     }
 
     /**

@@ -41,14 +41,14 @@ public class CassandraVertex extends CassandraElement implements AtlasVertex<Cas
             return getEdges(direction);
         }
 
-        List<AtlasEdge<CassandraVertex, CassandraEdge>> result = new ArrayList<>();
-        for (String label : edgeLabels) {
-            Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> edges = getEdges(direction, label);
-            for (AtlasEdge<CassandraVertex, CassandraEdge> edge : edges) {
-                result.add(edge);
-            }
+        if (edgeLabels.length == 1) {
+            return getEdges(direction, edgeLabels[0]);
         }
-        return result;
+
+        // Lazily chain per-label iterables instead of eagerly collecting all into a List.
+        // For a super vertex with millions of edges across many labels, this keeps
+        // memory at O(pageSize) instead of O(totalEdges).
+        return new ChainedEdgeIterable(edgeLabels, label -> getEdges(direction, label));
     }
 
     @Override

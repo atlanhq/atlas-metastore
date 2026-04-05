@@ -862,31 +862,37 @@ public class EntityLineageService implements AtlasLineageService {
 
     private void setHasDownstream(AtlasLineageOnDemandContext atlasLineageOnDemandContext, AtlasVertex inVertex, LineageInfoOnDemand inLineageInfo) {
         String lineageInputLabel = RequestContext.get().getLineageInputLabel();
-        List<AtlasEdge> filteredEdges = getFilteredAtlasEdges(inVertex, IN, lineageInputLabel, atlasLineageOnDemandContext);
-        if (!filteredEdges.isEmpty()) {
+        int count = countFilteredAtlasEdges(inVertex, IN, lineageInputLabel, atlasLineageOnDemandContext);
+        if (count > 0) {
             inLineageInfo.setHasDownstream(true);
-            inLineageInfo.setTotalOutputRelationsCount(filteredEdges.size());
+            inLineageInfo.setTotalOutputRelationsCount(count);
         }
     }
 
     private void setHasUpstream(AtlasLineageOnDemandContext atlasLineageOnDemandContext, AtlasVertex outVertex, LineageInfoOnDemand outLineageInfo) {
         String lineageOutputLabel = RequestContext.get().getLineageOutputLabel();
-        List<AtlasEdge> filteredEdges = getFilteredAtlasEdges(outVertex, IN, lineageOutputLabel, atlasLineageOnDemandContext);
-        if (!filteredEdges.isEmpty()) {
+        int count = countFilteredAtlasEdges(outVertex, IN, lineageOutputLabel, atlasLineageOnDemandContext);
+        if (count > 0) {
             outLineageInfo.setHasUpstream(true);
-            outLineageInfo.setTotalInputRelationsCount(filteredEdges.size());
+            outLineageInfo.setTotalInputRelationsCount(count);
         }
     }
 
-    private List<AtlasEdge> getFilteredAtlasEdges(AtlasVertex outVertex, AtlasEdgeDirection direction, String processEdgeLabel, AtlasLineageOnDemandContext atlasLineageOnDemandContext) {
-        List<AtlasEdge> filteredEdges = new ArrayList<>();
-        Iterable<AtlasEdge> edges = outVertex.getEdges(direction, processEdgeLabel);
+    /**
+     * Count filtered edges lazily — iterates edges on demand without materializing
+     * the full list. For lineage leaf-node checks, the count is typically small.
+     */
+    private int countFilteredAtlasEdges(AtlasVertex vertex, AtlasEdgeDirection direction,
+                                         String processEdgeLabel,
+                                         AtlasLineageOnDemandContext atlasLineageOnDemandContext) {
+        int count = 0;
+        Iterable<AtlasEdge> edges = vertex.getEdges(direction, processEdgeLabel);
         for (AtlasEdge edge : edges) {
             if (edgeMatchesEvaluation(edge, atlasLineageOnDemandContext)) {
-                filteredEdges.add(edge);
+                count++;
             }
         }
-        return filteredEdges;
+        return count;
     }
 
     private boolean isEntityTraversalLimitReached(AtomicInteger entitiesTraversed) {
