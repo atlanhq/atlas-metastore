@@ -962,6 +962,7 @@ phase_migration() {
         export SOURCE_CONSISTENCY='ONE'
         export TARGET_CONSISTENCY='LOCAL_QUORUM'
         export ES_FIELD_LIMIT='${ES_FIELD_LIMIT}'
+        export SKIP_BACKUP_CHECK=true
         /opt/apache-atlas/bin/atlas_migrate.sh --dry-run
     " || gen_exit=$?
 
@@ -1048,8 +1049,13 @@ LOGBACK'
             MIGRATOR_JAR=\${ATLAS_HOME}/libext/atlas-graphdb-migrator.jar
             CLASSPATH=\"\${MIGRATOR_JAR}:\${LIB_DIR}/*\"
 
+            export DOMAIN_NAME='${VCLUSTER}'
+            [ -n '${MIXPANEL_TOKEN:-}' ] && export MIXPANEL_TOKEN='${MIXPANEL_TOKEN}'
+            [ -n '${MIXPANEL_API_SECRET:-}' ] && export MIXPANEL_API_SECRET='${MIXPANEL_API_SECRET}'
+
             echo '=== Atlas Migrator (thin JAR + classpath) ==='
             echo \"Mode: ${mode_flag:-full}\"
+            echo \"Tenant: \${DOMAIN_NAME}\"
             echo \"Classpath: \${MIGRATOR_JAR} + \${LIB_DIR}/*\"
             echo 'Log level: DEBUG (org.apache.atlas.repository.graphdb.migrator)'
             echo 'Log file:  /opt/apache-atlas/logs/migrator.log (rolling, 100MB x 5)'

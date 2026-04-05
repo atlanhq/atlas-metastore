@@ -224,8 +224,8 @@ public class ParallelTagsMigrator {
         inflight.acquire(config.getMaxInflightPerThread());
 
         stateStore.markRangeCompleted(phase, rangeStart, rangeEnd, rangeRows, 0);
-        LOG.info("Token range completed: [{}, {}] for {} — {} rows",
-                 rangeStart, rangeEnd, tableName, String.format("%,d", rangeRows));
+        LOG.debug("Token range completed: [{}, {}] for {} — {} rows",
+                  rangeStart, rangeEnd, tableName, String.format("%,d", rangeRows));
 
         return rangeRows;
     }

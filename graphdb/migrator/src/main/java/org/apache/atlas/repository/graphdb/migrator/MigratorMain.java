@@ -225,7 +225,7 @@ public class MigratorMain {
             } else if (esOnly) {
                 runEsReindex(config, metrics, targetSession);
             } else {
-                runFullMigration(config, metrics, sourceSession, targetSession, stateStore, writer);
+                runFullMigration(config, metrics, sourceSession, targetSession, stateStore, writer, fresh);
             }
         } finally {
             sourceSession.close();
@@ -236,7 +236,11 @@ public class MigratorMain {
     private static void runFullMigration(MigratorConfig config, MigrationMetrics metrics,
                                           CqlSession sourceSession, CqlSession targetSession,
                                           MigrationStateStore stateStore,
-                                          CassandraTargetWriter writer) throws Exception {
+                                          CassandraTargetWriter writer,
+                                          boolean fresh) throws Exception {
+        MigrationMixpanelReport mixpanelReport = new MigrationMixpanelReport();
+        mixpanelReport.recordStart(config, fresh);
+
         metrics.start();
 
         // Source baseline collector — captures stats during Phase 1 scan at zero extra cost
@@ -378,6 +382,14 @@ public class MigratorMain {
                 LOG.info("========================================");
             }
 
+            // Stop progress reporter — all writes are done, no point logging 0/s during validation
+            reporter.shutdownNow();
+
+            // Print final migration metrics before validation begins
+            LOG.info("========================================");
+            LOG.info("  {}", metrics.summary());
+            LOG.info("========================================");
+
             // ========== Phase 3: Validation ==========
             LOG.info("========================================");
             LOG.info("=== Phase 3/3: Post-Migration Validation ===");
@@ -387,12 +399,12 @@ public class MigratorMain {
             validator.setSourceBaseline(baseline);
             ValidationReport report = validator.validateAll();
 
-            // Final summary
-            LOG.info("========================================");
-            LOG.info("  {}", metrics.summary());
-            LOG.info("========================================");
+            // Record metrics + validation for Mixpanel
+            mixpanelReport.recordMetrics(metrics);
+            mixpanelReport.recordValidation(report);
 
             if (!report.isOverallPassed()) {
+                mixpanelReport.recordCompletion("failed");
                 LOG.error("========================================");
                 LOG.error("  MIGRATION FAILED VALIDATION");
                 LOG.error("  Migration data is written but NOT safe for cutover.");
@@ -401,13 +413,42 @@ public class MigratorMain {
                 System.exit(1);
             }
 
+            mixpanelReport.recordCompletion("success");
             LOG.info("========================================");
             LOG.info("  MIGRATION COMPLETED SUCCESSFULLY");
             LOG.info("  All {} validation checks PASSED.", report.getChecks().size());
             LOG.info("  Review the validation report above before proceeding with cutover.");
             LOG.info("========================================");
+        } catch (Exception e) {
+            // Capture partial metrics and error for Mixpanel reporting
+            mixpanelReport.recordMetrics(metrics);
+            mixpanelReport.recordError(e.getMessage());
+            mixpanelReport.recordCompletion("error");
+            throw e;
         } finally {
             reporter.shutdownNow();
+            sendMixpanelReport(mixpanelReport);
+        }
+    }
+
+    /**
+     * Send migration lifecycle event to Mixpanel. Never throws — logs and continues on failure.
+     */
+    private static void sendMixpanelReport(MigrationMixpanelReport report) {
+        try {
+            LOG.info("========================================");
+            LOG.info("=== Mixpanel Migration Event Payload ===");
+            LOG.info("========================================");
+            LOG.info("\n{}", report.toJson());
+
+            MixpanelReporter mixpanel = MixpanelReporter.fromEnv();
+            if (mixpanel != null) {
+                mixpanel.sendMigrationEvent(report);
+            } else {
+                LOG.info("Mixpanel push skipped — MIXPANEL_TOKEN not set (payload printed above for reference)");
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to send Mixpanel migration event: {}", e.getMessage());
         }
     }
 
@@ -642,8 +683,8 @@ public class MigratorMain {
             }
             rowsRead++;
             if (rowsRead % 1_000_000 == 0) {
-                LOG.info("  ... scanned {} vertex rows for type counts, {} distinct types",
-                         String.format("%,d", rowsRead), typeCounts.size());
+                LOG.debug("  ... scanned {} vertex rows for type counts, {} distinct types",
+                          String.format("%,d", rowsRead), typeCounts.size());
             }
         }
 
@@ -674,8 +715,15 @@ public class MigratorMain {
         // Always create config builder to suppress driver warnings
         var configBuilder = DriverConfigLoader.programmaticBuilder();
 
-        // Suppress server-side CQL warnings (unlogged batch size, etc.)
+        // Suppress noisy driver request logging:
+        // REQUEST_LOG_WARNINGS: don't log server-side warning text (unlogged batch spanning partitions)
+        // REQUEST_LOGGER_SUCCESS_ENABLED: don't log successful request details
+        // REQUEST_LOGGER_SLOW_ENABLED: don't log slow request details
+        // REQUEST_LOGGER_VALUES: don't log bound parameter values (huge for batch writes)
         configBuilder.withString(DefaultDriverOption.REQUEST_LOG_WARNINGS, "false");
+        configBuilder.withBoolean(DefaultDriverOption.REQUEST_LOGGER_SUCCESS_ENABLED, false);
+        configBuilder.withBoolean(DefaultDriverOption.REQUEST_LOGGER_SLOW_ENABLED, false);
+        configBuilder.withBoolean(DefaultDriverOption.REQUEST_LOGGER_VALUES, false);
 
         // Set consistency level
         if (consistencyLevel != null && !consistencyLevel.isEmpty()) {

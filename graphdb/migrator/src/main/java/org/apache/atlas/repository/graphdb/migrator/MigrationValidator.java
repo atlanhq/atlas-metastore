@@ -324,7 +324,7 @@ public class MigrationValidator {
             totalScanned++;
 
             if (totalScanned % 100_000 == 0) {
-                LOG.info("  ... scanned {} vertices for type grouping", String.format("%,d", totalScanned));
+                LOG.debug("  ... scanned {} vertices for type grouping", String.format("%,d", totalScanned));
             }
         }
 
