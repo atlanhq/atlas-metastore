@@ -39,6 +39,7 @@ import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
+import org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection;
 import org.apache.atlas.repository.store.aliasstore.ESAliasStore;
 import org.apache.atlas.repository.store.aliasstore.IndexAliasStore;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
@@ -70,6 +71,9 @@ import static org.apache.atlas.repository.util.AtlasEntityUtils.mapOf;
 public class AuthPolicyPreProcessor implements PreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(AuthPolicyPreProcessor.class);
     public static final String ENTITY_DEFAULT_DOMAIN_SUPER = "entity:default/domain/*/super";
+    // Relationship type name for the AccessControl → AuthPolicy "policies" edge.
+    // Key into the inner map returned by AtlasEntityType.getRelationshipAttributes().get("policies").
+    private static final String POLICIES_REL_TYPE = "access_control_policies";
 
     private final AtlasGraph graph;
     private final AtlasTypeRegistry typeRegistry;
@@ -423,8 +427,10 @@ public class AuthPolicyPreProcessor implements PreProcessor {
                 Map<String, AtlasAttribute> policiesAttrMap = parentType != null
                         ? parentType.getRelationshipAttributes().get(REL_ATTR_POLICIES)
                         : null;
-                AtlasAttribute policiesAttr = (policiesAttrMap != null && !policiesAttrMap.isEmpty())
-                        ? policiesAttrMap.values().iterator().next()
+                // Use the specific relationship type name as the key — avoids picking an arbitrary
+                // entry if multiple relationship types ever define the same attribute name.
+                AtlasAttribute policiesAttr = (policiesAttrMap != null)
+                        ? policiesAttrMap.get(POLICIES_REL_TYPE)
                         : null;
 
                 // Step 3: for each policy edge, load the policy as a scalar entity and register it
@@ -433,10 +439,20 @@ public class AuthPolicyPreProcessor implements PreProcessor {
                 if (policiesAttr != null) {
                     List<AtlasEdge> policyEdges = GraphHelper.getActiveCollectionElementsUsingRelationship(
                             parentVertex, policiesAttr, policiesAttr.getRelationshipEdgeLabel());
+                    // Use the declared edge direction from the relationship definition instead of
+                    // comparing vertex IDs — matches the pattern in EntityGraphRetriever and handles
+                    // BOTH-direction edges correctly.
+                    AtlasRelationshipEdgeDirection dir = policiesAttr.getRelationshipEdgeDirection();
                     for (AtlasEdge edge : policyEdges) {
-                        AtlasVertex outV        = edge.getOutVertex();
-                        AtlasVertex policyVertex = outV.getIdForDisplay().equals(parentVertex.getIdForDisplay())
-                                ? edge.getInVertex() : outV;
+                        AtlasVertex policyVertex;
+                        if (dir == AtlasRelationshipEdgeDirection.OUT) {
+                            policyVertex = edge.getInVertex();
+                        } else if (dir == AtlasRelationshipEdgeDirection.IN) {
+                            policyVertex = edge.getOutVertex();
+                        } else { // BOTH
+                            policyVertex = StringUtils.equals(GraphHelper.getGuid(parentVertex), GraphHelper.getGuid(edge.getOutVertex()))
+                                    ? edge.getInVertex() : edge.getOutVertex();
+                        }
                         AtlasEntity policyEntity = noRelAttrRetriever.toAtlasEntity(policyVertex);
                         ret.addReferredEntity(policyEntity);
                         policyObjectIds.add(new AtlasObjectId(policyEntity.getGuid(), policyEntity.getTypeName()));
