@@ -207,7 +207,10 @@ public enum AtlasConfiguration {
     BULK_PURGE_BATCH_SIZE("atlas.bulk.purge.batch.size", 500),
     BULK_PURGE_WORKER_COUNT("atlas.bulk.purge.worker.count", 4),
     BULK_PURGE_REDIS_TTL_SECONDS("atlas.bulk.purge.redis.ttl.seconds", 86400),
-    BULK_PURGE_ORPHAN_CHECK_ENABLED("atlas.bulk.purge.orphan.check.enabled", true);
+    BULK_PURGE_ORPHAN_CHECK_ENABLED("atlas.bulk.purge.orphan.check.enabled", true),
+
+    // Cassandra edge pagination: page size for lazy edge iteration (super vertex mitigation)
+    CASSANDRA_EDGE_PAGE_SIZE("atlas.cassandra.edge.page.size", 500);
 
     private static final Configuration APPLICATION_PROPERTIES;
 
