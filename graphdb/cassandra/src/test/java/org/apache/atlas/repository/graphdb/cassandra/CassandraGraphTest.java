@@ -40,6 +40,7 @@ public class CassandraGraphTest {
         when(mockPrepared.bind(any())).thenReturn(mockBound);
         when(mockSession.execute(any(BoundStatement.class))).thenReturn(mockResultSet);
         when(mockResultSet.one()).thenReturn(null);
+        when(mockResultSet.iterator()).thenReturn(Collections.emptyIterator());
 
         graph = new CassandraGraph(mockSession);
     }
@@ -204,6 +205,61 @@ public class CassandraGraphTest {
     public void testGetEdgeBetweenVerticesOneNull() {
         AtlasVertex<CassandraVertex, CassandraEdge> v1 = graph.addVertex();
         assertNull(graph.getEdgeBetweenVertices(v1, null, "knows"));
+    }
+
+    @Test
+    public void testGetEdgeBetweenVerticesFindsBufferedEdge() throws AtlasBaseException {
+        AtlasVertex<CassandraVertex, CassandraEdge> v1 = graph.addVertex();
+        AtlasVertex<CassandraVertex, CassandraEdge> v2 = graph.addVertex();
+
+        // Create edge — goes into buffer, NOT persisted yet
+        graph.addEdge(v1, v2, "knows");
+
+        // getEdgeBetweenVertices should find the buffered edge
+        AtlasEdge<CassandraVertex, CassandraEdge> found = graph.getEdgeBetweenVertices(v1, v2, "knows");
+        assertNotNull(found, "Should find edge in transaction buffer");
+        assertEquals(((CassandraEdge) found).getOutVertexId(), ((CassandraVertex) v1).getIdString());
+        assertEquals(((CassandraEdge) found).getInVertexId(), ((CassandraVertex) v2).getIdString());
+    }
+
+    @Test
+    public void testGetEdgeBetweenVerticesRespectsDirection() throws AtlasBaseException {
+        AtlasVertex<CassandraVertex, CassandraEdge> v1 = graph.addVertex();
+        AtlasVertex<CassandraVertex, CassandraEdge> v2 = graph.addVertex();
+
+        // Create edge v1 → v2
+        graph.addEdge(v1, v2, "knows");
+
+        // Reverse lookup (v2 → v1) should NOT find the edge
+        assertNull(graph.getEdgeBetweenVertices(v2, v1, "knows"),
+                "Should not find edge in reverse direction");
+    }
+
+    @Test
+    public void testGetEdgeBetweenVerticesWrongLabel() throws AtlasBaseException {
+        AtlasVertex<CassandraVertex, CassandraEdge> v1 = graph.addVertex();
+        AtlasVertex<CassandraVertex, CassandraEdge> v2 = graph.addVertex();
+
+        graph.addEdge(v1, v2, "knows");
+
+        // Different label should NOT find the edge
+        assertNull(graph.getEdgeBetweenVertices(v1, v2, "likes"),
+                "Should not find edge with different label");
+    }
+
+    @Test
+    public void testGetEdgeBetweenVerticesRespectsRemoval() throws AtlasBaseException {
+        AtlasVertex<CassandraVertex, CassandraEdge> v1 = graph.addVertex();
+        AtlasVertex<CassandraVertex, CassandraEdge> v2 = graph.addVertex();
+
+        AtlasEdge<CassandraVertex, CassandraEdge> edge = graph.addEdge(v1, v2, "knows");
+
+        // Remove the edge
+        graph.removeEdge(edge);
+
+        // Should NOT find the removed edge
+        assertNull(graph.getEdgeBetweenVertices(v1, v2, "knows"),
+                "Should not find removed edge");
     }
 
     // ======================== getEdge ========================
