@@ -293,8 +293,8 @@ public class CassandraTargetWriter implements AutoCloseable {
         writerPool.shutdown();
         writerPool.awaitTermination(24, TimeUnit.HOURS);
         LOG.info("All writer threads completed");
-        LOG.info("DIAG WRITER SUMMARY: write attempts: {}, write errors: {}",
-                 writeAttempts.get(), writeErrors.get());
+        LOG.debug("DIAG WRITER SUMMARY: write attempts: {}, write errors: {}",
+                  writeAttempts.get(), writeErrors.get());
     }
 
     /**
@@ -557,9 +557,9 @@ public class CassandraTargetWriter implements AutoCloseable {
 
         int propsBytes = propsJson.length();
         if (propsBytes > 50_000) {
-            LOG.warn("Large vertex detected: jgId={} vertexId={} typeName={} propsJsonBytes={} propCount={} edgeCount={}",
-                     vertex.getJgVertexId(), vertexId, vertex.getTypeName(),
-                     String.format("%,d", propsBytes), props.size(), vertex.getOutEdges().size());
+            LOG.debug("Large vertex detected: jgId={} vertexId={} typeName={} propsJsonBytes={} propCount={} edgeCount={}",
+                      vertex.getJgVertexId(), vertexId, vertex.getTypeName(),
+                      String.format("%,d", propsBytes), props.size(), vertex.getOutEdges().size());
         }
 
         // --- Individual statements (vertex + indexes + typedefs) ---
@@ -795,10 +795,7 @@ public class CassandraTargetWriter implements AutoCloseable {
         if (!claimedVertexId.equals(computed)) {
             vertexIdOverrides.put(vertex.getJgVertexId(), claimedVertexId);
             long count = claimRedirectCount.incrementAndGet();
-            if (count <= 10 || count % 1000 == 0) {
-                LOG.info("Vertex claim redirect #{}: jgVertexId={} computedId={} claimedId={} identityKey={}",
-                        count, vertex.getJgVertexId(), computed, claimedVertexId, identityKey);
-            } else {
+            if (count <= 10 || count % 10000 == 0) {
                 LOG.debug("Vertex claim redirect #{}: jgVertexId={} computedId={} claimedId={} identityKey={}",
                         count, vertex.getJgVertexId(), computed, claimedVertexId, identityKey);
             }
@@ -814,12 +811,10 @@ public class CassandraTargetWriter implements AutoCloseable {
         }
         // Fallback: for HASH_IDENTITY, the in-vertex may not be processed yet.
         // Use HASH_JG as a stable fallback — the edge will still land on a deterministic ID,
-        // just not the identity-based one. Log a warning so we can track how often this happens.
+        // just not the identity-based one.
         if (config.getIdStrategy() == IdStrategy.HASH_IDENTITY) {
             long count = edgeFallbackCount.incrementAndGet();
-            if (count <= 10 || count % 1000 == 0) {
-                LOG.warn("Edge endpoint jgVertexId={} not in override map (#{}); falling back to HASH_JG", jgVertexId, count);
-            } else {
+            if (count <= 10 || count % 10000 == 0) {
                 LOG.debug("Edge endpoint jgVertexId={} not in override map (#{}); falling back to HASH_JG", jgVertexId, count);
             }
         }

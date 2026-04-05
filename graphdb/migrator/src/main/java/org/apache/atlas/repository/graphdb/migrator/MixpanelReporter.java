@@ -67,12 +67,43 @@ public class MixpanelReporter {
         // 2. Event via /import with $insert_id (deduped by domain + date)
         boolean eventOk = false;
         if (apiSecret != null && !apiSecret.isEmpty()) {
-            eventOk = sendEvent(distinctId, "metastore_graph_analysis_report", properties);
+            eventOk = sendEvent(distinctId, "metastore_graph_analysis_report", properties,
+                distinctId + "_graph_analysis");
         } else {
             LOG.info("Skipping Mixpanel event — MIXPANEL_API_SECRET not set (profile update only)");
         }
 
         LOG.info("Mixpanel send complete: profile={}, event={}",
+            profileOk ? "OK" : "FAILED", eventOk ? "OK" : "SKIPPED/FAILED");
+    }
+
+    /**
+     * Push migration lifecycle event to Mixpanel.
+     * Called once per migration run from a finally block — always sends, even on failure.
+     */
+    public void sendMigrationEvent(MigrationMixpanelReport report) {
+        Map<String, Object> properties = report.toFlatMap();
+        String distinctId = report.getDistinctId();
+
+        if (distinctId == null || distinctId.isEmpty()) {
+            LOG.error("Cannot send migration event to Mixpanel: distinctId is null/empty");
+            return;
+        }
+
+        LOG.info("Sending migration event to Mixpanel (distinctId='{}', status={})...",
+            distinctId, properties.get("status"));
+
+        boolean profileOk = sendProfileUpdate(distinctId, properties);
+
+        boolean eventOk = false;
+        if (apiSecret != null && !apiSecret.isEmpty()) {
+            eventOk = sendEvent(distinctId, "metastore_zgraph_migrator_events", properties,
+                distinctId + "_migration");
+        } else {
+            LOG.info("Skipping Mixpanel event — MIXPANEL_API_SECRET not set (profile update only)");
+        }
+
+        LOG.info("Mixpanel migration event complete: profile={}, event={}",
             profileOk ? "OK" : "FAILED", eventOk ? "OK" : "SKIPPED/FAILED");
     }
 
@@ -117,16 +148,13 @@ public class MixpanelReporter {
 
     /**
      * Send event via /import with $insert_id for dedup.
-     * Same domain + same date = same event (no duplicates on re-run).
      * Auth: Basic auth with API secret as username, empty password.
+     *
+     * @param insertId  dedup key — same insertId within Mixpanel's 5-day window = one event
      */
     private boolean sendEvent(String distinctId, String eventName,
-                              Map<String, Object> properties) {
+                              Map<String, Object> properties, String insertId) {
         try {
-            // Dedup key: domain only — one event per tenant, latest wins
-            // (within Mixpanel's 5-day $insert_id dedup window)
-            String insertId = distinctId + "_graph_analysis";
-
             Map<String, Object> eventProps = new LinkedHashMap<>(properties);
             eventProps.put("distinct_id", distinctId);
             eventProps.put("time", Instant.now().getEpochSecond());
