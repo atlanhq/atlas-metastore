@@ -382,6 +382,14 @@ public class MigratorMain {
                 LOG.info("========================================");
             }
 
+            // Stop progress reporter — all writes are done, no point logging 0/s during validation
+            reporter.shutdownNow();
+
+            // Print final migration metrics before validation begins
+            LOG.info("========================================");
+            LOG.info("  {}", metrics.summary());
+            LOG.info("========================================");
+
             // ========== Phase 3: Validation ==========
             LOG.info("========================================");
             LOG.info("=== Phase 3/3: Post-Migration Validation ===");
@@ -394,11 +402,6 @@ public class MigratorMain {
             // Record metrics + validation for Mixpanel
             mixpanelReport.recordMetrics(metrics);
             mixpanelReport.recordValidation(report);
-
-            // Final summary
-            LOG.info("========================================");
-            LOG.info("  {}", metrics.summary());
-            LOG.info("========================================");
 
             if (!report.isOverallPassed()) {
                 mixpanelReport.recordCompletion("failed");
