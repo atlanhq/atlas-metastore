@@ -80,7 +80,8 @@ public class TransactionBuffer {
     }
 
     public List<CassandraEdge> getEdgesForVertex(String vertexId, AtlasEdgeDirection direction, String edgeLabel) {
-        List<CassandraEdge> result = new ArrayList<>();
+        // Use a map keyed by edgeId so that dirty edges override new edges for the same ID
+        Map<String, CassandraEdge> resultMap = new LinkedHashMap<>();
 
         for (CassandraEdge edge : newEdges.values()) {
             if (removedEdges.containsKey(edge.getIdString())) {
@@ -98,11 +99,33 @@ public class TransactionBuffer {
             };
 
             if (matches) {
-                result.add(edge);
+                resultMap.put(edge.getIdString(), edge);
             }
         }
 
-        return result;
+        // Include dirty edges so that in-transaction state changes (e.g. restore setting
+        // __state=ACTIVE) are visible to subsequent reads within the same transaction.
+        for (CassandraEdge edge : dirtyEdges.values()) {
+            if (removedEdges.containsKey(edge.getIdString())) {
+                continue;
+            }
+
+            if (edgeLabel != null && !edgeLabel.equals(edge.getLabel())) {
+                continue;
+            }
+
+            boolean matches = switch (direction) {
+                case OUT -> edge.getOutVertexId().equals(vertexId);
+                case IN -> edge.getInVertexId().equals(vertexId);
+                case BOTH -> edge.getOutVertexId().equals(vertexId) || edge.getInVertexId().equals(vertexId);
+            };
+
+            if (matches) {
+                resultMap.put(edge.getIdString(), edge);
+            }
+        }
+
+        return new ArrayList<>(resultMap.values());
     }
 
     public void clear() {

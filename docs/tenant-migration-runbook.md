@@ -6,11 +6,13 @@
 
 ## Overview
 
-This runbook walks you through migrating a single tenant from the JanusGraph graph backend to the new Cassandra+ES backend. The process has four stages:
+This runbook walks you through migrating a single tenant from the JanusGraph graph backend to the new Cassandra+ES backend. The process has five stages:
 
 ```
-1. Deploy  →  2. Migrate Data  →  3. Switch Backend  →  4. Validate
+1. Deploy  →  2. Migrate Data  →  3. Switch Backend  →  4. Validate  →  5. Rollback (if needed)
 ```
+
+**Automated orchestrator:** For production migrations, use `tools/atlas_migrate_tenant.sh` which automates all stages including maintenance mode, adaptive sizing, retry, and summary reporting. See the [Tenant Migration Operations](tenant-migration-operations.md) doc for details.
 
 **Key safety guarantees:**
 - JanusGraph data is **never modified** — migration is copy-not-move
@@ -122,6 +124,15 @@ kubectl exec -it atlas-0 -n atlas -c atlas-main -- \
 
 ```bash
 kubectl exec -it atlas-0 -n atlas -c atlas-main -- \
+  env MIGRATOR_JVM_HEAP=4g MIGRATOR_JVM_MIN_HEAP=2g \
+  /opt/apache-atlas/bin/atlas_migrate.sh
+```
+
+For large tenants, increase the JVM heap:
+
+```bash
+kubectl exec -it atlas-0 -n atlas -c atlas-main -- \
+  env MIGRATOR_JVM_HEAP=24g MIGRATOR_JVM_MIN_HEAP=8g SCANNER_THREADS=32 WRITER_THREADS=16 \
   /opt/apache-atlas/bin/atlas_migrate.sh
 ```
 
@@ -176,6 +187,7 @@ Decode errors: 0, Write errors: 0 | CQL rows: 8,900,000
 | Decode errors > 0 | Some JanusGraph rows couldn't be decoded. Check log for vertex IDs. Usually safe to proceed if < 0.01% of total. |
 | Validation failed | See Stage 4 for detailed validation steps |
 | Want to start over | Run with `--fresh` flag to clear resume state: `atlas_migrate.sh --fresh` |
+| Some token ranges failed | Re-run the same command — it resumes from failed ranges. The orchestrator (`atlas_migrate_tenant.sh --max-retries 3`) handles this automatically. |
 
 ### 2.6 ES-only reindex (optional)
 
@@ -429,9 +441,9 @@ kubectl exec -it atlas-0 -n atlas -c atlas-main -- \
   env SOURCE_KEYSPACE=custom_atlas TARGET_KEYSPACE=custom_atlas_graph \
   /opt/apache-atlas/bin/atlas_migrate.sh
 
-# More scanner threads for large tenants
+# More scanner threads + JVM heap for large tenants
 kubectl exec -it atlas-0 -n atlas -c atlas-main -- \
-  env SCANNER_THREADS=32 WRITER_THREADS=16 \
+  env SCANNER_THREADS=32 WRITER_THREADS=16 MIGRATOR_JVM_HEAP=24g MIGRATOR_JVM_MIN_HEAP=8g \
   /opt/apache-atlas/bin/atlas_migrate.sh
 
 # Custom ES index names (source = copy mappings from, target = write docs to)
@@ -455,8 +467,20 @@ kubectl exec -it atlas-0 -n atlas -c atlas-main -- \
 | `SCANNER_THREADS` | `16` | Parallel CQL scan threads |
 | `WRITER_THREADS` | `8` | Parallel write threads |
 | `ES_BULK_SIZE` | `1000` | Documents per ES bulk request |
+| `MIGRATOR_JVM_HEAP` | `4g` | JVM max heap (`-Xmx`) for the migrator process |
+| `MIGRATOR_JVM_MIN_HEAP` | `2g` | JVM initial heap (`-Xms`) for the migrator process |
 | `ID_STRATEGY` | `legacy` | ID generation: `legacy` (UUID) or `deterministic` (SHA-256) |
 | `CLAIM_ENABLED` | `false` | LWT dedup claims during migration: `true`/`false` |
+
+### Recommended Sizing by Tenant Size
+
+| Tenant size | Asset count | JVM Heap | Scanner Threads | Writer Threads |
+|-------------|------------|----------|-----------------|----------------|
+| Small | < 1M | 4g | 8 | 4 |
+| Medium | 1M – 10M | 24g | 16 | 8 |
+| Large | 10M+ | 48g | 32 | 16 |
+
+The orchestrator (`tools/atlas_migrate_tenant.sh`) probes the source ES index to auto-recommend sizing.
 
 ---
 
@@ -520,24 +544,112 @@ If counts are zero, the migration may have failed in Phase 1. Check the migrator
 
 ### OOM during migration (large tenants)
 
-For very large tenants (50M+ assets), the migrator might need more heap:
+For very large tenants (50M+ assets), increase the JVM heap via environment variables:
 
 ```bash
 kubectl exec -it atlas-0 -n atlas -c atlas-main -- \
-  bash -c 'JAVA_OPTS="-Xmx8g -Xms4g" /opt/apache-atlas/bin/atlas_migrate.sh'
+  env MIGRATOR_JVM_HEAP=24g MIGRATOR_JVM_MIN_HEAP=8g \
+  /opt/apache-atlas/bin/atlas_migrate.sh
 ```
 
-Or set conservative tuning:
+Or combine with conservative tuning for memory-constrained environments:
 
 ```bash
 kubectl exec -it atlas-0 -n atlas -c atlas-main -- \
-  env SCANNER_THREADS=8 WRITER_THREADS=4 ES_BULK_SIZE=500 \
+  env MIGRATOR_JVM_HEAP=8g MIGRATOR_JVM_MIN_HEAP=4g SCANNER_THREADS=8 WRITER_THREADS=4 ES_BULK_SIZE=500 \
   /opt/apache-atlas/bin/atlas_migrate.sh
+```
+
+When using the Helm migration Pod, set heap via `values.yaml`:
+
+```yaml
+migration:
+  jvmHeap: "24g"
+  jvmMinHeap: "8g"
+  resources:
+    requests:
+      cpu: "16"
+      memory: "32Gi"
+    limits:
+      cpu: "16"
+      memory: "32Gi"
+```
+
+---
+
+## Advanced: Maintenance Mode
+
+To prevent data drift during migration, enable maintenance mode before starting. This blocks all POST/PUT/DELETE requests to the Atlas API while keeping reads and the migration config API accessible.
+
+```bash
+# Enable maintenance mode
+kubectl exec -it atlas-0 -n atlas -c atlas-main -- \
+  curl -s -X PUT -H "Content-Type: application/json" \
+  -d 'true' "http://localhost:21000/api/atlas/v2/configs/MAINTENANCE_MODE"
+
+# Verify
+kubectl exec -it atlas-0 -n atlas -c atlas-main -- \
+  curl -s "http://localhost:21000/api/atlas/v2/configs/MAINTENANCE_MODE"
+# Expected: true
+
+# ... run migration + switch backend ...
+
+# Disable maintenance mode after validation
+kubectl exec -it atlas-0 -n atlas -c atlas-main -- \
+  curl -s -X PUT -H "Content-Type: application/json" \
+  -d 'false' "http://localhost:21000/api/atlas/v2/configs/MAINTENANCE_MODE"
+```
+
+The orchestrator (`tools/atlas_migrate_tenant.sh --maintenance-mode`) handles this automatically.
+
+---
+
+## Advanced: Helm Migration Pod
+
+For running migrations via Helm instead of `kubectl exec`, enable the migration Pod in `values.yaml`:
+
+```yaml
+migration:
+  enabled: true
+  mode: ""                          # "" for resume, "--fresh" for clean start
+  idStrategy: "deterministic"
+  claimEnabled: true
+  scannerThreads: 16
+  writerThreads: 8
+  esBulkSize: 1000
+  jvmHeap: "4g"                     # -Xmx for migrator JVM
+  jvmMinHeap: "2g"                  # -Xms for migrator JVM
+  postCompletionSleepSeconds: 3600  # Keep pod alive 1hr for log inspection
+  resources:
+    requests:
+      cpu: "4"
+      memory: "8Gi"
+    limits:
+      cpu: "4"
+      memory: "8Gi"
+```
+
+The Helm template creates a **Pod** (not a Job). After migration completes, the pod stays in Running state for the configured `postCompletionSleepSeconds` (default: 1 hour) so you can inspect logs and run `cqlsh`. After the sleep expires, the pod exits and transitions to Completed.
+
+```bash
+# Deploy the migration pod
+helm upgrade atlas ./helm/atlas -n atlas --reuse-values --set migration.enabled=true
+
+# Monitor logs
+kubectl logs -f atlas-migrator-<revision> -n atlas
+
+# Exec into the pod for inspection (while it's in the post-completion sleep)
+kubectl exec -it atlas-migrator-<revision> -n atlas -- bash
+
+# Clean up when done
+helm upgrade atlas ./helm/atlas -n atlas --reuse-values --set migration.enabled=false
 ```
 
 ---
 
 ## Quick Reference: Complete Migration in 5 Commands
+
+### Manual (kubectl exec)
 
 ```bash
 NS="atlas"
@@ -546,7 +658,9 @@ NS="atlas"
 kubectl exec -it atlas-0 -n $NS -c atlas-main -- /opt/apache-atlas/bin/atlas_migrate.sh --dry-run
 
 # 2. Migrate data
-kubectl exec -it atlas-0 -n $NS -c atlas-main -- /opt/apache-atlas/bin/atlas_migrate.sh
+kubectl exec -it atlas-0 -n $NS -c atlas-main -- \
+  env MIGRATOR_JVM_HEAP=4g MIGRATOR_JVM_MIN_HEAP=2g \
+  /opt/apache-atlas/bin/atlas_migrate.sh
 
 # 3. Switch backend config (add atlas.graphdb.backend=cassandra + cassandra.graph.* — ES prefix auto-derives)
 # ... via your config management tool ...
@@ -557,6 +671,17 @@ kubectl rollout restart statefulset/atlas -n $NS
 # 5. Validate
 kubectl exec -it atlas-0 -n $NS -c atlas-main -- curl -s http://localhost:21000/api/atlas/admin/status
 kubectl exec -it atlas-0 -n $NS -c atlas-main -- curl -s -u admin:admin http://localhost:21000/api/atlas/v2/search/basic?typeName=Table\&limit=5
+```
+
+### Automated (orchestrator)
+
+```bash
+# Full migration with maintenance mode, retry, and summary
+./tools/atlas_migrate_tenant.sh \
+  --vcluster my-tenant \
+  --maintenance-mode \
+  --max-retries 3 \
+  --switch
 ```
 
 ---

@@ -703,7 +703,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             qualifiedName = params.getPurpose();
         }
 
-        String aliasName = AccessControlUtils.getESAliasName(qualifiedName);
+        String aliasName = AccessControlUtils.getESAliasIndexName(qualifiedName);
 
         if (StringUtils.isNotEmpty(aliasName)) {
             if(params.isAccessControlExclusive()) {
