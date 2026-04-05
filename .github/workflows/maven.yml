@@ -32,6 +32,7 @@ on:
       - nb-switchable-graph-provider
       - ms-864-keycloak-jwks-internal-url
       - ms-610-ranges-policy-cache
+      - hotfix_repeated_tasks
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
