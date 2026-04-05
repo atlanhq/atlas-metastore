@@ -642,8 +642,8 @@ public class MigratorMain {
             }
             rowsRead++;
             if (rowsRead % 1_000_000 == 0) {
-                LOG.info("  ... scanned {} vertex rows for type counts, {} distinct types",
-                         String.format("%,d", rowsRead), typeCounts.size());
+                LOG.debug("  ... scanned {} vertex rows for type counts, {} distinct types",
+                          String.format("%,d", rowsRead), typeCounts.size());
             }
         }
 
@@ -674,8 +674,15 @@ public class MigratorMain {
         // Always create config builder to suppress driver warnings
         var configBuilder = DriverConfigLoader.programmaticBuilder();
 
-        // Suppress server-side CQL warnings (unlogged batch size, etc.)
+        // Suppress noisy driver request logging:
+        // REQUEST_LOG_WARNINGS: don't log server-side warning text (unlogged batch spanning partitions)
+        // REQUEST_LOGGER_SUCCESS_ENABLED: don't log successful request details
+        // REQUEST_LOGGER_SLOW_ENABLED: don't log slow request details
+        // REQUEST_LOGGER_VALUES: don't log bound parameter values (huge for batch writes)
         configBuilder.withString(DefaultDriverOption.REQUEST_LOG_WARNINGS, "false");
+        configBuilder.withBoolean(DefaultDriverOption.REQUEST_LOGGER_SUCCESS_ENABLED, false);
+        configBuilder.withBoolean(DefaultDriverOption.REQUEST_LOGGER_SLOW_ENABLED, false);
+        configBuilder.withBoolean(DefaultDriverOption.REQUEST_LOGGER_VALUES, false);
 
         // Set consistency level
         if (consistencyLevel != null && !consistencyLevel.isEmpty()) {

@@ -962,6 +962,7 @@ phase_migration() {
         export SOURCE_CONSISTENCY='ONE'
         export TARGET_CONSISTENCY='LOCAL_QUORUM'
         export ES_FIELD_LIMIT='${ES_FIELD_LIMIT}'
+        export SKIP_BACKUP_CHECK=true
         /opt/apache-atlas/bin/atlas_migrate.sh --dry-run
     " || gen_exit=$?
 

@@ -244,7 +244,7 @@ public class JanusGraphScanner implements AutoCloseable {
             long rangeEnd   = range[1];
 
             if (completedRanges.contains(rangeStart)) {
-                LOG.info("Skipping already-completed token range [{}, {}] (resume mode)", rangeStart, rangeEnd);
+                LOG.debug("Skipping already-completed token range [{}, {}] (resume mode)", rangeStart, rangeEnd);
                 metrics.incrTokenRangesDone();
                 continue;
             }
@@ -276,10 +276,10 @@ public class JanusGraphScanner implements AutoCloseable {
                  String.format("%,d", metrics.getCqlRowsRead()),
                  String.format("%,d", metrics.getVerticesScanned()),
                  metrics.getDecodeErrors());
-        LOG.info("DIAG SUMMARY: edges decoded: {}, properties decoded: {}, system relations skipped: {}, " +
-                 "null-type relations skipped: {}, edge decode errors: {}",
-                 edgeDecodeCount.get(), propertyDecodeCount.get(), edgeSkippedSystem.get(),
-                 edgeSkippedNullType.get(), edgeDecodeErrors.get());
+        LOG.debug("DIAG SUMMARY: edges decoded: {}, properties decoded: {}, system relations skipped: {}, " +
+                  "null-type relations skipped: {}, edge decode errors: {}",
+                  edgeDecodeCount.get(), propertyDecodeCount.get(), edgeSkippedSystem.get(),
+                  edgeSkippedNullType.get(), edgeDecodeErrors.get());
     }
 
     /**
@@ -344,9 +344,9 @@ public class JanusGraphScanner implements AutoCloseable {
         stateStore.markRangeCompleted(phase, rangeStart, rangeEnd, rangeVertices, rangeEdges);
         metrics.incrTokenRangesDone();
 
-        LOG.info("Token range completed: [{}, {}] — {} CQL rows, {} vertices, {} edges (ranges done: {}/{})",
-                  rangeStart, rangeEnd, rowCount, rangeVertices, rangeEdges,
-                  metrics.getTokenRangesDone(), metrics.getTokenRangesTotal());
+        LOG.debug("Token range completed: [{}, {}] — {} CQL rows, {} vertices, {} edges (ranges done: {}/{})",
+                   rangeStart, rangeEnd, rowCount, rangeVertices, rangeEdges,
+                   metrics.getTokenRangesDone(), metrics.getTokenRangesTotal());
     }
 
     /**
@@ -552,8 +552,8 @@ public class JanusGraphScanner implements AutoCloseable {
                 if (type == null) {
                     entryNullType++;
                     if (edgeSkippedNullType.incrementAndGet() <= EDGE_SAMPLE_LOG_LIMIT) {
-                        LOG.info("DIAG: Skipping relation with null type: typeId={}, vertexId={}, direction={}",
-                                 rel.typeId, vertexId, rel.direction);
+                        LOG.debug("DIAG: Skipping relation with null type: typeId={}, vertexId={}, direction={}",
+                                  rel.typeId, vertexId, rel.direction);
                     }
                     continue;
                 }
@@ -600,12 +600,12 @@ public class JanusGraphScanner implements AutoCloseable {
                     vertex.addOutEdge(edge);
                     entryEdges++;
 
-                    // Log first N edges at INFO for diagnostics
+                    // Log first N edges at DEBUG for diagnostics
                     long totalEdges = edgeDecodeCount.incrementAndGet();
                     if (totalEdges <= EDGE_SAMPLE_LOG_LIMIT) {
-                        LOG.info("DIAG: Edge decoded #{}: {} -[{}]-> {} (relId={}, dir={}, props={})",
-                                 totalEdges, outVertexId, relTypeName, inVertexId,
-                                 relationId, dir, edge.getProperties().size());
+                        LOG.debug("DIAG: Edge decoded #{}: {} -[{}]-> {} (relId={}, dir={}, props={})",
+                                  totalEdges, outVertexId, relTypeName, inVertexId,
+                                  relationId, dir, edge.getProperties().size());
                     }
                 }
             } catch (Exception e) {
@@ -623,8 +623,8 @@ public class JanusGraphScanner implements AutoCloseable {
 
         // Log per-vertex breakdown for first few vertices that have edges
         if (entryEdges > 0 && edgeDecodeCount.get() <= EDGE_SAMPLE_LOG_LIMIT * 2) {
-            LOG.info("DIAG: Vertex {} decoded: {} entries total, {} props, {} edges, {} system, {} nullType, {} errors",
-                     vertexId, entries.size(), entryProps, entryEdges, entrySystem, entryNullType, entryErrors);
+            LOG.debug("DIAG: Vertex {} decoded: {} entries total, {} props, {} edges, {} system, {} nullType, {} errors",
+                      vertexId, entries.size(), entryProps, entryEdges, entrySystem, entryNullType, entryErrors);
         }
         propertyDecodeCount.addAndGet(entryProps);
         edgeSkippedSystem.addAndGet(entrySystem);

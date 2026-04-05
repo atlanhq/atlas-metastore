@@ -95,6 +95,7 @@ OLD_ES_INDEX="janusgraph_vertex_index"
 NEW_ES_INDEX="atlas_graph_vertex_index"
 VERTEX_ALIAS="atlas_vertex_index"
 MAX_RETRIES=3
+JAR_OVERRIDE=""               # Local path to a custom migrator JAR to override the image-bundled one
 
 # Runtime state
 CONFIGMAP_BACKUP=""
@@ -295,6 +296,7 @@ parse_args() {
             --maintenance-cooldown) MAINTENANCE_COOLDOWN="$2"; shift 2 ;;
             --alias-script)   warn "--alias-script is deprecated (alias logic is now inline); ignoring"; shift 2 ;;
             --max-retries)    MAX_RETRIES="$2"; shift 2 ;;
+            --jar-override)   JAR_OVERRIDE="$2"; shift 2 ;;
             --dry-run)        DRY_RUN="true"; shift ;;
             --report-file)    REPORT_FILE="$2"; shift 2 ;;
             --wait-timeout)   WAIT_TIMEOUT="$2"; shift 2 ;;
@@ -914,6 +916,11 @@ print('\n'.join(lines))
     - name: QUEUE_CAPACITY
       value: \"${QUEUE_CAPACITY}\""
         fi
+        if [ -n "$JAR_OVERRIDE" ]; then
+            extra_env="${extra_env}
+    - name: JAR_OVERRIDE_ENABLED
+      value: \"true\""
+        fi
 
         # Generate Pod YAML manifest
         cat > "$pod_manifest" <<EOYAML
@@ -965,6 +972,24 @@ ${tolerations_yaml}
       echo "ID Strategy: ${ID_STRATEGY}"
       echo "Claim Enabled: ${CLAIM_ENABLED}"
       echo ""
+
+      # If --jar-override was used, wait for the JAR to be kubectl cp'd into the pod
+      if [ "${JAR_OVERRIDE_ENABLED:-false}" = "true" ]; then
+        echo "Waiting for custom migrator JAR at /opt/jar-overrides/atlas-graphdb-migrator-3.0.0-SNAPSHOT.jar ..."
+        mkdir -p /opt/jar-overrides
+        WAIT_COUNT=0
+        while [ ! -f /opt/jar-overrides/atlas-graphdb-migrator-3.0.0-SNAPSHOT.jar ]; do
+          sleep 2
+          WAIT_COUNT=\$((WAIT_COUNT + 1))
+          if [ \$WAIT_COUNT -ge 150 ]; then
+            echo "ERROR: Timed out waiting for custom JAR (300s). Falling back to image-bundled JAR."
+            break
+          fi
+        done
+        if [ -f /opt/jar-overrides/atlas-graphdb-migrator-3.0.0-SNAPSHOT.jar ]; then
+          echo "Custom migrator JAR received ($(ls -lh /opt/jar-overrides/atlas-graphdb-migrator-3.0.0-SNAPSHOT.jar | awk '{print \$5}'))"
+        fi
+      fi
 
       export ID_STRATEGY="${ID_STRATEGY}"
       export CLAIM_ENABLED="${CLAIM_ENABLED}"
@@ -1023,6 +1048,8 @@ ${multitenant_env_yaml}
       subPath: atlas-logback.xml
     - name: atlas-logs
       mountPath: /opt/apache-atlas/logs
+    - name: jar-overrides
+      mountPath: /opt/jar-overrides
   volumes:
   - name: atlas-config
     configMap:
@@ -1031,6 +1058,8 @@ ${multitenant_env_yaml}
     configMap:
       name: atlas-logback-config
   - name: atlas-logs
+    emptyDir: {}
+  - name: jar-overrides
     emptyDir: {}
 EOYAML
 
@@ -1075,6 +1104,17 @@ EOYAML
             fi
             record_phase "Phase 3: Migration" "FAIL (pod timeout after $MAX_RETRIES attempts)"
             die "Migration pod did not start after $MAX_RETRIES attempts" "$EXIT_MIGRATION"
+        fi
+
+        # Upload custom JAR if --jar-override was specified
+        if [ -n "$JAR_OVERRIDE" ]; then
+            log "Uploading custom migrator JAR to $job_pod ..."
+            if kubectl cp "$JAR_OVERRIDE" "$job_pod:/opt/jar-overrides/atlas-graphdb-migrator-3.0.0-SNAPSHOT.jar" \
+                -n "$NAMESPACE" -c atlas-migrator; then
+                ok "Custom JAR uploaded — migration will use the override"
+            else
+                warn "Failed to upload custom JAR — migration will use the image-bundled JAR"
+            fi
         fi
 
         # Stream logs
