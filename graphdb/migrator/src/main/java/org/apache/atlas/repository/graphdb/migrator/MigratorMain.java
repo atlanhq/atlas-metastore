@@ -225,7 +225,7 @@ public class MigratorMain {
             } else if (esOnly) {
                 runEsReindex(config, metrics, targetSession);
             } else {
-                runFullMigration(config, metrics, sourceSession, targetSession, stateStore, writer);
+                runFullMigration(config, metrics, sourceSession, targetSession, stateStore, writer, fresh);
             }
         } finally {
             sourceSession.close();
@@ -236,7 +236,11 @@ public class MigratorMain {
     private static void runFullMigration(MigratorConfig config, MigrationMetrics metrics,
                                           CqlSession sourceSession, CqlSession targetSession,
                                           MigrationStateStore stateStore,
-                                          CassandraTargetWriter writer) throws Exception {
+                                          CassandraTargetWriter writer,
+                                          boolean fresh) throws Exception {
+        MigrationMixpanelReport mixpanelReport = new MigrationMixpanelReport();
+        mixpanelReport.recordStart(config, fresh);
+
         metrics.start();
 
         // Source baseline collector — captures stats during Phase 1 scan at zero extra cost
@@ -387,12 +391,17 @@ public class MigratorMain {
             validator.setSourceBaseline(baseline);
             ValidationReport report = validator.validateAll();
 
+            // Record metrics + validation for Mixpanel
+            mixpanelReport.recordMetrics(metrics);
+            mixpanelReport.recordValidation(report);
+
             // Final summary
             LOG.info("========================================");
             LOG.info("  {}", metrics.summary());
             LOG.info("========================================");
 
             if (!report.isOverallPassed()) {
+                mixpanelReport.recordCompletion("failed");
                 LOG.error("========================================");
                 LOG.error("  MIGRATION FAILED VALIDATION");
                 LOG.error("  Migration data is written but NOT safe for cutover.");
@@ -401,13 +410,42 @@ public class MigratorMain {
                 System.exit(1);
             }
 
+            mixpanelReport.recordCompletion("success");
             LOG.info("========================================");
             LOG.info("  MIGRATION COMPLETED SUCCESSFULLY");
             LOG.info("  All {} validation checks PASSED.", report.getChecks().size());
             LOG.info("  Review the validation report above before proceeding with cutover.");
             LOG.info("========================================");
+        } catch (Exception e) {
+            // Capture partial metrics and error for Mixpanel reporting
+            mixpanelReport.recordMetrics(metrics);
+            mixpanelReport.recordError(e.getMessage());
+            mixpanelReport.recordCompletion("error");
+            throw e;
         } finally {
             reporter.shutdownNow();
+            sendMixpanelReport(mixpanelReport);
+        }
+    }
+
+    /**
+     * Send migration lifecycle event to Mixpanel. Never throws — logs and continues on failure.
+     */
+    private static void sendMixpanelReport(MigrationMixpanelReport report) {
+        try {
+            LOG.info("========================================");
+            LOG.info("=== Mixpanel Migration Event Payload ===");
+            LOG.info("========================================");
+            LOG.info("\n{}", report.toJson());
+
+            MixpanelReporter mixpanel = MixpanelReporter.fromEnv();
+            if (mixpanel != null) {
+                mixpanel.sendMigrationEvent(report);
+            } else {
+                LOG.info("Mixpanel push skipped — MIXPANEL_TOKEN not set (payload printed above for reference)");
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to send Mixpanel migration event: {}", e.getMessage());
         }
     }
 
