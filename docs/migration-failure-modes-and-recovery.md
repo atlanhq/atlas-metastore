@@ -296,6 +296,46 @@ The `migration_state` table in Cassandra tracks token ranges with states: `PENDI
 
 These issues may appear **after** a successful migration and backend switch.
 
+### 6.0 Pre/Post Migration Entity Count Verification
+
+**Always capture entity counts from the Atlas reporting page before and after migration.** This is the most reliable way to detect data loss or migration gaps.
+
+**Pre-migration (before starting):**
+1. Open the Atlas UI reporting/overview page for the tenant
+2. Record **all** the numbers shown on the reporting page:
+   - **Total assets** (overall count)
+   - **Assets by type** — tables, columns, schemas, databases, connections, processes, etc.
+   - **Tags / classifications** — total tags, tagged assets count
+   - **Glossary metrics** — number of glossaries, terms, categories
+   - **Policies** — personas, purposes, policies count
+   - **Any other counts** visible on the reporting page
+3. Save a screenshot or copy the numbers for comparison
+
+**Post-migration (after backend switch):**
+1. Open the same reporting page
+2. Compare **every number** against the pre-migration snapshot
+3. All counts should match exactly (or be very close — within 0.1%)
+
+**What to look for:**
+
+| Observation | Likely Cause | Fix |
+|-------------|-------------|-----|
+| All counts match | Migration successful | No action needed |
+| All counts zero | ES alias not pointing to correct index | Run `manage_es_aliases.sh` or check alias with `curl localhost:9200/_alias/atlas_vertex_index` |
+| Counts slightly lower (< 1% gap) | Decode errors during scan, or internal/system vertices excluded | Check `decode_errors` metric; usually safe |
+| Counts significantly lower (> 5% gap) | Failed token ranges or write errors | Check `migration_state` for FAILED ranges; re-run with `--fresh` |
+| Specific entity type missing entirely | TypeDef not migrated or ES mapping issue | Check `type_definitions` table; re-run with `--fresh` |
+| Counts higher post-migration | Writes occurred between migration and switch (data drift) | Expected if maintenance mode was not used; re-run with `--fresh --maintenance-mode` |
+
+> **Tip:** If the reporting page is slow or unavailable, you can get entity counts via the REST API:
+> ```bash
+> # Get entity counts by type from ES
+> kubectl exec atlas-0 -n atlas -c atlas-main -- \
+>   curl -s "localhost:9200/atlas_vertex_index/_search" \
+>   -H "Content-Type: application/json" \
+>   -d '{"size":0,"aggs":{"by_type":{"terms":{"field":"__typeName.keyword","size":500}}}}'
+> ```
+
 ### 6.1 Search Returns Empty Results
 
 **Cause:** ES alias not pointing to new index, or ES reindex incomplete.
