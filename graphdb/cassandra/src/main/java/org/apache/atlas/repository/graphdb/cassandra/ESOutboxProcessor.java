@@ -181,10 +181,10 @@ public class ESOutboxProcessor {
             for (ESOutboxRepository.OutboxEntry entry : entries) {
                 // Exhausted: hit max attempts → mark FAILED, remove from batch
                 if (entry.attemptCount >= ESOutboxRepository.MAX_ATTEMPTS) {
-                    outboxRepository.markFailed(entry.vertexId, entry.attemptCount);
+                    outboxRepository.markFailed(entry.vertexId, entry.attemptCount, entry.action, entry.propertiesJson);
                     exhaustedCount++;
-                    LOG.error("ESOutboxProcessor: marking vertex '{}' as FAILED after {} attempts",
-                            entry.vertexId, entry.attemptCount);
+                    LOG.error("ESOutboxProcessor: marking vertex '{}' as FAILED after {} attempts (action={})",
+                            entry.vertexId, entry.attemptCount, entry.action);
                     continue;
                 }
 
@@ -196,10 +196,11 @@ public class ESOutboxProcessor {
 
                 // Validate entry before adding to bulk body — catch poison pills
                 if (!appendToBulk(bulkBody, entry, indexName)) {
-                    outboxRepository.markFailed(entry.vertexId, entry.attemptCount);
+                    // Poison pill: malformed JSON or missing data — mark FAILED immediately
+                    outboxRepository.markFailed(entry.vertexId, entry.attemptCount, entry.action, entry.propertiesJson);
                     poisonPillCount++;
-                    LOG.error("ESOutboxProcessor: marking vertex '{}' as FAILED (poison pill: invalid entry data)",
-                            entry.vertexId);
+                    LOG.error("ESOutboxProcessor: marking vertex '{}' as FAILED (poison pill: invalid entry data, action={})",
+                            entry.vertexId, entry.action);
                     continue;
                 }
 
@@ -258,7 +259,7 @@ public class ESOutboxProcessor {
                         for (String permId : permanentIds) {
                             ESOutboxRepository.OutboxEntry entry = entryMap.get(permId);
                             if (entry != null) {
-                                outboxRepository.markFailed(permId, entry.attemptCount);
+                                outboxRepository.markFailed(permId, entry.attemptCount, entry.action, entry.propertiesJson);
                             }
                         }
                         recordOutboxMetrics("permanent", permanentIds.size());

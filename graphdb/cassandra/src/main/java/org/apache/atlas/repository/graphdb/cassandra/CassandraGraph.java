@@ -480,16 +480,30 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         String fromId = ((CassandraVertex) fromVertex).getIdString();
         String toId   = ((CassandraVertex) toVertex).getIdString();
 
-        // O(1) lookup when using deterministic edge IDs — compute edge ID from endpoints + label
-        if (RuntimeIdStrategy.DETERMINISTIC == idStrategy) {
-            String edgeId = GraphIdUtil.deterministicEdgeId(fromId, relationshipLabel, toId);
-            return edgeRepository.getEdge(edgeId, this);
+        // 1. Check transaction buffer first — edges created in the current transaction
+        //    are not yet persisted to Cassandra but must be visible to getOrCreate checks
+        List<CassandraEdge> bufferedEdges = txBuffer.get().getEdgesForVertex(fromId, AtlasEdgeDirection.OUT, relationshipLabel);
+        for (CassandraEdge edge : bufferedEdges) {
+            if (edge.getInVertexId().equals(toId)) {
+                return edge;
+            }
         }
 
-        // Fallback: O(n) scan for LEGACY mode (UUID-based edge IDs)
+        // 2. Check persisted edges in Cassandra
+        if (RuntimeIdStrategy.DETERMINISTIC == idStrategy) {
+            // O(1) lookup — compute edge ID from endpoints + label
+            String edgeId = GraphIdUtil.deterministicEdgeId(fromId, relationshipLabel, toId);
+            CassandraEdge edge = (CassandraEdge) edgeRepository.getEdge(edgeId, this);
+            if (edge != null && !txBuffer.get().isEdgeRemoved(edge.getIdString())) {
+                return edge;
+            }
+            return null;
+        }
+
+        // Legacy: O(n) scan for UUID-based edge IDs
         List<CassandraEdge> outEdges = edgeRepository.getEdgesForVertex(fromId, AtlasEdgeDirection.OUT, relationshipLabel, this);
         for (CassandraEdge edge : outEdges) {
-            if (edge.getInVertexId().equals(toId)) {
+            if (edge.getInVertexId().equals(toId) && !txBuffer.get().isEdgeRemoved(edge.getIdString())) {
                 return edge;
             }
         }
