@@ -86,6 +86,10 @@ public class TermPreProcessor extends AbstractGlossaryPreProcessor {
     private void processCreateTerm(AtlasEntity entity, AtlasVertex vertex) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreateTerm");
         String termName = (String) entity.getAttribute(NAME);
+        if (StringUtils.isNotEmpty(termName)) {
+            termName = termName.trim();
+            entity.setAttribute(NAME, termName);
+        }
         String termQName = vertex.getProperty(QUALIFIED_NAME, String.class);
 
         if (StringUtils.isEmpty(termName) || isNameInvalid(termName)) {
@@ -115,6 +119,10 @@ public class TermPreProcessor extends AbstractGlossaryPreProcessor {
     private void processUpdateTerm(AtlasEntity entity, AtlasVertex vertex) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processUpdateTerm");
         String termName = (String) entity.getAttribute(NAME);
+        if (StringUtils.isNotEmpty(termName)) {
+            termName = termName.trim();
+            entity.setAttribute(NAME, termName);
+        }
         String vertexName = vertex.getProperty(NAME, String.class);
         String termGuid = entity.getGuid();
 
