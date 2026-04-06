@@ -175,9 +175,9 @@ public class ESOutboxProcessor {
             for (ESOutboxRepository.OutboxEntry entry : entries) {
                 // Exhausted: hit max attempts → mark FAILED, remove from batch
                 if (entry.attemptCount >= ESOutboxRepository.MAX_ATTEMPTS) {
-                    outboxRepository.markFailed(entry.vertexId, entry.attemptCount);
-                    LOG.error("ESOutboxProcessor: marking vertex '{}' as FAILED after {} attempts",
-                            entry.vertexId, entry.attemptCount);
+                    outboxRepository.markFailed(entry.vertexId, entry.attemptCount, entry.action, entry.propertiesJson);
+                    LOG.error("ESOutboxProcessor: marking vertex '{}' as FAILED after {} attempts (action={})",
+                            entry.vertexId, entry.attemptCount, entry.action);
                     continue;
                 }
 
@@ -193,9 +193,9 @@ public class ESOutboxProcessor {
                 // Validate entry before adding to bulk body — catch poison pills
                 if (!appendToBulk(bulkBody, entry, indexName)) {
                     // Poison pill: malformed JSON or missing data — mark FAILED immediately
-                    outboxRepository.markFailed(entry.vertexId, entry.attemptCount);
-                    LOG.error("ESOutboxProcessor: marking vertex '{}' as FAILED (poison pill: invalid entry data)",
-                            entry.vertexId);
+                    outboxRepository.markFailed(entry.vertexId, entry.attemptCount, entry.action, entry.propertiesJson);
+                    LOG.error("ESOutboxProcessor: marking vertex '{}' as FAILED (poison pill: invalid entry data, action={})",
+                            entry.vertexId, entry.action);
                     continue;
                 }
 
