@@ -23,13 +23,19 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntityWithExtInfo;
 import org.apache.atlas.model.instance.AtlasObjectId;
+import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.aliasstore.IndexAliasStore;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.repository.util.AccessControlUtils;
+import org.apache.atlas.type.AtlasEntityType;
+import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
+import org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 import org.mockito.MockitoAnnotations;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
@@ -38,13 +44,16 @@ import org.testng.annotations.Test;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.atlas.model.instance.EntityMutations.EntityOperation.CREATE;
 import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.util.AccessControlUtils.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.*;
 import static org.testng.Assert.*;
@@ -212,6 +221,103 @@ public class AuthPolicyPreProcessorLatencyTest {
         verify(aliasStore).updateAlias(
                 argThat(info -> PERSONA_GUID.equals(info.getEntity().getGuid())),
                 argThat(p -> "policy-new".equals(p.getAttribute(NAME)))
+        );
+    }
+
+    /**
+     * [MS-752 Fix B — CORE TRAVERSAL PATH]
+     *
+     * <p>Exercises Steps 2-3 of the optimisation: when {@code typeRegistry.getEntityTypeByName()}
+     * returns a non-null {@code AtlasEntityType} whose {@code policiesAttrMap} contains the
+     * {@code "access_control_policies"} key, {@code getAccessControlEntity()} must:
+     *
+     * <ol>
+     *   <li>Call {@code GraphHelper.getActiveCollectionElementsUsingRelationship()} to obtain the K
+     *       policy edges from the graph.
+     *   <li>For each edge, pick the correct vertex using the declared
+     *       {@code AtlasRelationshipEdgeDirection} (IN → {@code edge.getOutVertex()} is the policy).
+     *   <li>Load each policy as a scalar-only entity via {@code noRelAttrRetriever.toAtlasEntity(vertex)}.
+     *   <li>Register all K policies in {@code ret.getReferredEntities()}.
+     * </ol>
+     *
+     * <p>Without this test, the gap flagged in the PR review would leave the entire edge-traversal
+     * loop unexercised (because {@code mockPersonaFetch()} stubs typeRegistry to return null, which
+     * short-circuits the loop).
+     */
+    @Test
+    public void getAccessControlEntity_traversesEdgesForExistingPolicies() throws Exception {
+        int K = 3;
+
+        // ── persona entity (scalar-only, as returned by noRelAttrRetriever) ──
+        AtlasEntity persona = new AtlasEntity();
+        persona.setTypeName(PERSONA_ENTITY_TYPE);
+        persona.setGuid(PERSONA_GUID);
+        persona.setAttribute(QUALIFIED_NAME, PERSONA_QN);
+        persona.setAttribute(NAME, "Test Persona");
+        persona.setAttribute(ATTR_ACCESS_CONTROL_ENABLED, Boolean.TRUE);
+
+        // ── mock AtlasAttribute for the "policies" relationship ──
+        AtlasAttribute policiesAttr = mock(AtlasAttribute.class);
+        // Direction IN: from the Persona's perspective the edge goes OUT from policy → IN to persona.
+        // So edge.getOutVertex() is the policy vertex.
+        when(policiesAttr.getRelationshipEdgeDirection()).thenReturn(AtlasRelationshipEdgeDirection.IN);
+        when(policiesAttr.getRelationshipEdgeLabel()).thenReturn("__AccessControl.policies");
+
+        // ── mock AtlasEntityType so typeRegistry returns it ──
+        AtlasEntityType parentType = mock(AtlasEntityType.class);
+        Map<String, AtlasAttribute> innerMap = new HashMap<>();
+        innerMap.put("access_control_policies", policiesAttr);
+        Map<String, Map<String, AtlasAttribute>> relAttrsMap = new HashMap<>();
+        relAttrsMap.put(REL_ATTR_POLICIES, innerMap);
+        when(parentType.getRelationshipAttributes()).thenReturn(relAttrsMap);
+        when(typeRegistry.getEntityTypeByName(anyString())).thenReturn(parentType);
+
+        // ── build K mock edges, each carrying a policy vertex (as outVertex, per IN direction) ──
+        List<AtlasEdge> mockEdges = new ArrayList<>();
+        List<AtlasEntity> expectedPolicies = new ArrayList<>();
+        for (int i = 0; i < K; i++) {
+            String policyGuid = "traversal-policy-guid-" + i;
+            AtlasEntity policyEntity = buildExistingPolicy(policyGuid, i);
+            expectedPolicies.add(policyEntity);
+
+            AtlasVertex policyVertex = mock(AtlasVertex.class);
+            AtlasEdge edge = mock(AtlasEdge.class);
+            when(edge.getOutVertex()).thenReturn(policyVertex);   // direction=IN → policy is outVertex
+            when(noRelAttrRetriever.toAtlasEntity(policyVertex)).thenReturn(policyEntity);
+            mockEdges.add(edge);
+        }
+
+        // ── wire up entity-retriever stubs ──
+        AtlasVertex personaVertex = mock(AtlasVertex.class);
+        when(entityRetriever.getEntityVertex(any(AtlasObjectId.class))).thenReturn(personaVertex);
+        when(noRelAttrRetriever.toAtlasEntity(personaVertex)).thenReturn(persona);
+
+        AtlasEntity newPolicy = buildDomainPolicy("policy-traversal-test", PERSONA_GUID);
+
+        // ── execute with GraphHelper.getActiveCollectionElementsUsingRelationship mocked ──
+        try (MockedStatic<GraphHelper> mockedGraphHelper = mockStatic(GraphHelper.class)) {
+            mockedGraphHelper.when(() -> GraphHelper.getActiveCollectionElementsUsingRelationship(
+                            eq(personaVertex), eq(policiesAttr), anyString()))
+                    .thenReturn(mockEdges);
+
+            preProcessor.processAttributes(newPolicy, mutationContext, CREATE);
+        }
+
+        // ── verify: noRelAttrRetriever.toAtlasEntity(vertex) called K times for policy vertices ──
+        verify(noRelAttrRetriever, times(K)).toAtlasEntity(any(AtlasVertex.class));
+
+        // ── verify: updateAlias was invoked (alias store received the parent entity) ──
+        verify(aliasStore).updateAlias(
+                argThat(info -> {
+                    // All K policy GUIDs must be registered in referredEntities
+                    Map<String, AtlasEntity> referred = info.getReferredEntities();
+                    if (referred == null || referred.size() != K) return false;
+                    for (AtlasEntity ep : expectedPolicies) {
+                        if (!referred.containsKey(ep.getGuid())) return false;
+                    }
+                    return true;
+                }),
+                any(AtlasEntity.class)
         );
     }
 
