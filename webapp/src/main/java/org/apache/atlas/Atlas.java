@@ -365,6 +365,11 @@ public final class Atlas {
             createESTemplateIfNotExists(esClient, "atlas-graph-template",
                     Arrays.asList("atlas_graph_*"), settingsJson, mappingsJson, false);
         }
+
+        // Create a unified alias "atlas_vertex_index" pointing to the actual vertex index.
+        // This allows consumers to use a stable alias regardless of the backend-specific index name.
+        // Best-effort — failure does not block startup.
+        createVertexIndexAliasIfNotExists(esClient, vertexIndex);
     }
 
     private static final String REMOVE_NULL_FIELDS_PIPELINE      = "remove_null_fields";
@@ -498,11 +503,6 @@ public final class Atlas {
             }
         }
 
-        // Create a unified alias "atlas_vertex_index" pointing to the actual vertex index.
-        // This allows consumers to use a stable alias regardless of the backend-specific index name.
-        // Best-effort — failure does not block startup.
-        String vertexIndex = INDEX_PREFIX + VERTEX_INDEX;
-        createVertexIndexAliasIfNotExists(esClient, vertexIndex);
     }
 
     private static final String VERTEX_INDEX_ALIAS = "atlas_vertex_index";
