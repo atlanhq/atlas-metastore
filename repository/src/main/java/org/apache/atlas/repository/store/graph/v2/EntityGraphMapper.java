@@ -18,6 +18,8 @@
 package org.apache.atlas.repository.store.graph.v2;
 
 import com.google.common.annotations.VisibleForTesting;
+import io.micrometer.core.instrument.Counter;
+import org.apache.atlas.service.metrics.MetricUtils;
 
 import java.util.*;
 import java.util.regex.Matcher;
@@ -212,6 +214,9 @@ public class EntityGraphMapper {
     private final EntityGraphRetriever       retrieverNoRelation;
     private final TagDAO                    tagDAO;
     private final TagAttributeMapper        tagAttributeMapper;
+    private final TagDenormDLQProducer      tagDenormDLQProducer;
+    private Counter tagDenormEsFlushSuccess;
+    private Counter tagDenormEsFlushFailure;
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_GLOSSARY, TYPE_CATEGORY, TYPE_TERM, TYPE_PRODUCT, TYPE_DOMAIN));
     public static final Set<String> CLASSIFICATION_ADD_EXCLUDE_LIST = new HashSet<>(Arrays.asList(ATLAS_GLOSSARY_ENTITY_TYPE, ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE, DATA_DOMAIN_ENTITY_TYPE));
 
@@ -220,7 +225,8 @@ public class EntityGraphMapper {
                              AtlasRelationshipStore relationshipStore, IAtlasEntityChangeNotifier entityChangeNotifier,
                              AtlasInstanceConverter instanceConverter, IFullTextMapper fullTextMapperV2,
                              TaskManagement taskManagement, TransactionInterceptHelper transactionInterceptHelper,
-                             EntityGraphRetriever entityRetriever, TagAttributeMapper tagAttributeMapper) {
+                             EntityGraphRetriever entityRetriever, TagAttributeMapper tagAttributeMapper,
+                             TagDenormDLQProducer tagDenormDLQProducer) {
         this.restoreHandlerV1 = restoreHandlerV1;
         this.graphHelper          = new GraphHelper(graph);
         this.deleteDelegate       = deleteDelegate;
@@ -236,6 +242,29 @@ public class EntityGraphMapper {
         this.transactionInterceptHelper = transactionInterceptHelper;
         this.tagDAO = TagDAOCassandraImpl.getInstance();
         this.tagAttributeMapper = tagAttributeMapper;
+        this.tagDenormDLQProducer = tagDenormDLQProducer;
+
+        try {
+            io.micrometer.core.instrument.MeterRegistry registry = MetricUtils.getMeterRegistry();
+            this.tagDenormEsFlushSuccess = Counter.builder("tag.denorm.es.flush.success")
+                    .description("Successful tag denorm ES flush count (vertices)")
+                    .register(registry);
+            this.tagDenormEsFlushFailure = Counter.builder("tag.denorm.es.flush.failure")
+                    .description("Failed tag denorm ES flush count (vertices)")
+                    .register(registry);
+        } catch (Exception e) {
+            LOG.warn("Failed to register tag denorm ES flush metrics", e);
+        }
+    }
+
+    private static void incrementCounter(Counter counter, double amount) {
+        if (counter != null) {
+            try {
+                counter.increment(amount);
+            } catch (Exception e) {
+                LOG.warn("Failed to increment Prometheus counter", e);
+            }
+        }
     }
 
     @VisibleForTesting
@@ -3932,6 +3961,7 @@ public class EntityGraphMapper {
         return entity;
     }
 
+    // TODO: Migrate to buffer+flush pattern (like propagation paths) once validated in production
     public Map<String, String> repairClassificationMappingsV2(List<AtlasVertex> entityVertices) throws AtlasBaseException {
         Map<String, String> errorMap = new HashMap<>(0);
 
@@ -4222,11 +4252,10 @@ public class EntityGraphMapper {
                                 minAssetMap)
                 );
 
-                // Update ES attributes
+                // TODO: Migrate to buffer+flush pattern (like propagation paths) once validated in production
                 Map<String, Map<String, Object>> deNormMap = new HashMap<>();
                 deNormMap.put(entityVertex.getIdForDisplay(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForAddTag(classification,
                         currentTags, typeRegistry, fullTextMapperV2));
-                // ES operation collected to be executed in the end
                 RequestContext.get().addESDeferredOperation(
                         new ESDeferredOperation(
                                 ESDeferredOperation.OperationType.TAG_DENORM_FOR_ADD_CLASSIFICATIONS,
@@ -4601,15 +4630,20 @@ public class EntityGraphMapper {
                 toIndex = Math.min(offset + CHUNK_SIZE, impactedVerticesSize);
                 List<AtlasVertex> chunkedVerticesToPropagate = verticesToPropagate.subList(offset, toIndex);
                 Set<AtlasVertex> chunkedVerticesToPropagateSet = new HashSet<>(chunkedVerticesToPropagate);
-                Map<String, Map<String, Object>> deNormAttributesMap = new HashMap<>();
+                // Build assetMinAttrsMap from vertices (needed for putPropagatedTags)
                 Map<String, Map<String, Object>> assetMinAttrsMap = new HashMap<>();
-
-                List<AtlasEntity> propagatedEntitiesChunked = updateClassificationTextV2(classification, chunkedVerticesToPropagate, deNormAttributesMap, assetMinAttrsMap);
-
-                tagDAO.putPropagatedTags(entityVertexId, classification.getTypeName(), deNormAttributesMap.keySet(), assetMinAttrsMap, classification);
-                if (MapUtils.isNotEmpty(deNormAttributesMap)) {
-                    ESConnector.writeTagProperties(deNormAttributesMap);
+                for (AtlasVertex vertex : chunkedVerticesToPropagate) {
+                    assetMinAttrsMap.put(vertex.getIdForDisplay(), getMinimalAssetMap(vertex));
                 }
+
+                // Write to Cassandra FIRST (reordered for read-after-write correctness)
+                tagDAO.putPropagatedTags(entityVertexId, classification.getTypeName(), assetMinAttrsMap.keySet(), assetMinAttrsMap, classification);
+
+                // Buffer vertex IDs for full-snapshot ES denorm, then flush per chunk
+                for (Map.Entry<String, Map<String, Object>> entry : assetMinAttrsMap.entrySet()) {
+                    RequestContext.get().addVertexNeedingTagDenorm(entry.getKey(), (String) entry.getValue().get(GUID_PROPERTY_KEY));
+                }
+                safeFlushTagDenormToES("propagation add");
                 
                 // Convert vertices to entities before async notification (prevent transaction closure issues)
                 try {
@@ -4893,13 +4927,13 @@ public class EntityGraphMapper {
                         currentTag.getAssetMetadata())
         );
 
+        // TODO: Migrate to buffer+flush pattern (like propagation paths) once validated in production
         List<AtlasClassification> currentTags = tagDAO.getAllClassificationsForVertex(entityVertex.getIdForDisplay());
         currentTags = mapClassificationsV2(currentTags);
 
         Map<String, Map<String, Object>> deNormMap = new HashMap<>();
         deNormMap.put(entityVertex.getIdForDisplay(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForDeleteTag(currentClassification, currentTags, typeRegistry, fullTextMapperV2));
 
-        // ES operation collected to be executed in the end
         RequestContext.get().addESDeferredOperation(
                 new ESDeferredOperation(
                         ESDeferredOperation.OperationType.TAG_DENORM_FOR_DELETE_CLASSIFICATIONS,
@@ -4918,6 +4952,7 @@ public class EntityGraphMapper {
         AtlasPerfTracer.log(perf);
     }
 
+    // TODO: Migrate to buffer+flush pattern (like propagation paths) once validated in production
     private void addEsDeferredOperation(AtlasVertex entityVertex, String classificationName) throws AtlasBaseException {
         LOG.info("Adding ES deferred operation for Entity not found in cassandra. id : [{}]", entityVertex.getId());
         List<AtlasClassification> currentTags = tagDAO.getAllClassificationsForVertex(entityVertex.getIdForDisplay());
@@ -5338,10 +5373,10 @@ public class EntityGraphMapper {
                             currentTag.getAssetMetadata()
                     )
             );
+            // TODO: Migrate to buffer+flush pattern (like propagation paths) once validated in production
             Map<String, Map<String, Object>> deNormMap = new HashMap<>();
             deNormMap.put(entityVertex.getIdForDisplay(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForAddTag(classification,
                     currentTags, typeRegistry, fullTextMapperV2));
-            // ES operation collected to be executed in the end
             RequestContext.get().addESDeferredOperation(
                     new ESDeferredOperation(
                             ESDeferredOperation.OperationType.TAG_DENORM_FOR_UPDATE_CLASSIFICATIONS,
@@ -5663,13 +5698,8 @@ public class EntityGraphMapper {
                 // Delete from Cassandra. The DAO correctly performs a hard delete on the lookup table.
                 deletePropagations(batchToDelete);
 
-                // compute fresh classification‑text de‑norm attributes for this batch
-                Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-                updateClassificationTextV2(originalClassification, vertexIds, batchToDelete, deNormMap, true);
-                // push them to ES
-                if (MapUtils.isNotEmpty(deNormMap)) {
-                    ESConnector.writeTagProperties(deNormMap);
-                }
+                // Buffer vertex IDs for full-snapshot ES denorm, then flush per chunk (delete already happened above)
+                bufferAndFlushTagDenormToES(batchToDelete, "propagation delete");
 
                 Set<AtlasVertex> vertices = graph.getVertices(vertexIds.toArray(new String[0]));
 
@@ -6184,96 +6214,120 @@ public class EntityGraphMapper {
         return propagatedEntities;
     }
 
-    List<AtlasEntity> updateClassificationTextV2(AtlasClassification currentTag,
-                                                 Collection<AtlasVertex> propagatedVertices,
-                                                 Map<String, Map<String, Object>> deNormAttributesMap,
-                                                 Map<String, Map<String, Object>> assetMinAttrsMap) throws AtlasBaseException {
-        List<AtlasEntity> propagatedEntities = new ArrayList<>();
-        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateClassificationTextV2");
-
-        if(CollectionUtils.isNotEmpty(propagatedVertices)) {
-            for(AtlasVertex vertex : propagatedVertices) {
-                Map<String, Object> assetMinAttrs = getMinimalAssetMap(vertex);
-                assetMinAttrsMap.put(vertex.getIdForDisplay(), assetMinAttrs);
-
-                //get current associated tags to asset ONLY from Cassandra namespace
-                List<Tag> tags = tagDAO.getAllTagsByVertexId(vertex.getIdForDisplay());
-                List<AtlasClassification> finalClassifications = tags.stream().map(t -> {
-                    return TagDAOCassandraImpl.toAtlasClassification(t.getTagMetaJson());
-                }).collect(Collectors.toList());
-                finalClassifications = mapClassificationsV2(finalClassifications);
-
-                tags = tags.stream().filter(Tag::isPropagated).toList();
-                List<AtlasClassification> finalPropagatedClassifications = tags.stream().map(t -> {
-                    return TagDAOCassandraImpl.toAtlasClassification(t.getTagMetaJson());
-                }).collect(Collectors.toList());
-
-                AtlasClassification copiedPropagatedClassification = new AtlasClassification(currentTag);
-                copiedPropagatedClassification.setEntityGuid((String) assetMinAttrs.get(GUID_PROPERTY_KEY));
-                finalClassifications.add(copiedPropagatedClassification);
-                finalPropagatedClassifications.add(copiedPropagatedClassification);
-
-                AtlasEntity entity = new AtlasEntity();
-                entity.setClassifications(finalClassifications);
-
-                entity.setGuid((String) assetMinAttrs.get(GUID_PROPERTY_KEY));
-
-                entity.setTypeName((String) assetMinAttrs.get(TYPE_NAME_PROPERTY_KEY));
-
-                entity.setCreatedBy((String) assetMinAttrs.get(CREATED_BY_KEY));
-                entity.setUpdatedBy((String) assetMinAttrs.get(MODIFIED_BY_KEY));
-
-                entity.setCreateTime((Date) assetMinAttrs.get(TIMESTAMP_PROPERTY_KEY));
-                entity.setUpdateTime((Date) assetMinAttrs.get(MODIFICATION_TIMESTAMP_PROPERTY_KEY));
-
-                entity.setAttribute(NAME, assetMinAttrs.get(NAME));
-                entity.setAttribute(QUALIFIED_NAME, assetMinAttrs.get(QUALIFIED_NAME));
-
-
-                Map<String, Object> deNormAttributes;
-                if (CollectionUtils.isEmpty(finalClassifications)) {
-                    deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForNoTags();
-                } else {
-                    deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, finalPropagatedClassifications, typeRegistry, fullTextMapperV2, false);
-                }
-
-                deNormAttributesMap.put(vertex.getIdForDisplay(), deNormAttributes);
-                propagatedEntities.add(entity);
-            }
+    /**
+     * Flushes all buffered tag denorm updates to ES.
+     * Reads ALL tags from Cassandra for each collected vertex,
+     * computes ALL 5 denorm fields, batch-writes to ES.
+     * Clears the buffer after successful write.
+     *
+     * @return result with success count and any failed vertex IDs
+     */
+    public ESConnector.TagDenormESWriteResult flushTagDenormToES() throws AtlasBaseException {
+        Map<String, String> vertexIdToGuidMap = RequestContext.get().getVerticesNeedingTagDenorm();
+        if (MapUtils.isEmpty(vertexIdToGuidMap)) {
+            return ESConnector.TagDenormESWriteResult.allSuccess(0);
         }
-        RequestContext.get().endMetricRecord(metricRecorder);
-        return propagatedEntities;
+
+        // Snapshot the map before clearing (needed for DLQ GUID mapping on failure)
+        Map<String, String> snapshotMap = new HashMap<>(vertexIdToGuidMap);
+
+        try {
+            // Batch async read from Cassandra — fires all queries in parallel
+            Map<String, List<Tag>> allTagsByVertex = tagDAO.getAllTagsByVertexIds(snapshotMap.keySet());
+
+            // Compute denorm using Tag.isPropagated() (more reliable than entityGuid comparison)
+            Map<String, Map<String, Object>> deNormMap = new HashMap<>();
+            for (String vertexId : snapshotMap.keySet()) {
+                List<Tag> tags = allTagsByVertex.getOrDefault(vertexId, Collections.emptyList());
+                deNormMap.put(vertexId, TagDeNormAttributesUtil.computeAllDenormAttributes(tags, typeRegistry, fullTextMapperV2, tagAttributeMapper));
+            }
+
+            ESConnector.TagDenormESWriteResult result;
+            if (MapUtils.isNotEmpty(deNormMap)) {
+                result = ESConnector.writeTagPropertiesWithResult(deNormMap, false);
+            } else {
+                result = ESConnector.TagDenormESWriteResult.allSuccess(0);
+            }
+
+            // Accumulate counts for task-level observability
+            RequestContext.get().addTagDenormEsSuccessCount(result.getSuccessCount());
+            incrementCounter(tagDenormEsFlushSuccess, result.getSuccessCount());
+            if (result.hasFailures()) {
+                RequestContext.get().addTagDenormEsFailureCount(result.getFailedVertexIds().size());
+                incrementCounter(tagDenormEsFlushFailure, result.getFailedVertexIds().size());
+                // Emit partially failed vertex IDs + GUIDs to DLQ for later repair
+                tagDenormDLQProducer.emitFailedVertices(result.getFailedVertexIds(), snapshotMap);
+            }
+
+            return result;
+        } catch (Exception e) {
+            // Total failure — no ES write succeeded in this flush.
+            // Cassandra read failure: no ES write attempted, all vertices need repair.
+            // Denorm computation failure: no ES write attempted, all vertices need repair.
+            // DLQ repair is idempotent, so emitting all vertices is safe even if some reads succeeded.
+            LOG.error("flushTagDenormToES failed for {} vertices ({}), emitting all to DLQ",
+                    snapshotMap.size(), e.getClass().getSimpleName(), e);
+            try {
+                tagDenormDLQProducer.emitFailedVertices(new ArrayList<>(snapshotMap.keySet()), snapshotMap);
+            } catch (Exception dlqError) {
+                LOG.error("Failed to emit to DLQ as well. Vertices needing repair: {}", snapshotMap.keySet(), dlqError);
+            }
+            RequestContext.get().addTagDenormEsFailureCount(snapshotMap.size());
+            incrementCounter(tagDenormEsFlushFailure, snapshotMap.size());
+            return ESConnector.TagDenormESWriteResult.allFailed(snapshotMap.keySet());
+        } finally {
+            // Always clear the buffer, even on exception (idempotent — DLQ handles recovery)
+            RequestContext.get().clearVerticesNeedingTagDenorm();
+        }
     }
 
-    void updateClassificationTextV2(AtlasClassification currentTag,
-                                                 List<String> propagatedVertexIds,
-                                                 List<Tag> propagatedTags,
-                                                 Map<String, Map<String, Object>> deNormAttributesMap,
-                                                 boolean isDelete) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateClassificationTextV2");
-
-        if(CollectionUtils.isNotEmpty(propagatedVertexIds)) {
-            for(Tag tagAttachment : propagatedTags) {
-                //get current associated tags to asset ONLY from Cassandra namespace
-                List<Tag> tags = tagDAO.getAllTagsByVertexId(tagAttachment.getVertexId());
-
-                List<AtlasClassification> finalClassifications = tags.stream().map(t -> TagDAOCassandraImpl.toAtlasClassification(t.getTagMetaJson())).collect(Collectors.toList());
-                finalClassifications = mapClassificationsV2(finalClassifications);
-
-                tags = tags.stream().filter(Tag::isPropagated).toList();
-                List<AtlasClassification> propagatedClassifications = tags.stream().map(t -> TagDAOCassandraImpl.toAtlasClassification(t.getTagMetaJson())).collect(Collectors.toList());
-
-                Map<String, Object> deNormAttributes;
-                if (CollectionUtils.isEmpty(finalClassifications)) {
-                    deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForNoTags();
-                } else {
-                    deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, propagatedClassifications, typeRegistry, fullTextMapperV2, isDelete);
+    /**
+     * Buffers tag denorm updates for a batch of Tags, using assetMetadata for GUID with graph fallback.
+     */
+    private void bufferTagDenormForTags(List<Tag> tags) {
+        for (Tag tag : tags) {
+            String guid = null;
+            if (tag.getAssetMetadata() != null) {
+                guid = (String) tag.getAssetMetadata().get(GUID_PROPERTY_KEY);
+            }
+            if (guid == null) {
+                AtlasVertex vertex = graph.getVertex(tag.getVertexId());
+                if (vertex != null) {
+                    guid = GraphHelper.getGuid(vertex);
                 }
-
-                deNormAttributesMap.put(tagAttachment.getVertexId(), deNormAttributes);
+            }
+            if (guid != null) {
+                RequestContext.get().addVertexNeedingTagDenorm(tag.getVertexId(), guid);
+            } else {
+                LOG.warn("Could not resolve GUID for vertexId={}, skipping denorm", tag.getVertexId());
             }
         }
-        RequestContext.get().endMetricRecord(metricRecorder);
+    }
+
+    /**
+     * Wrapper around {@link #flushTagDenormToES()} that catches exceptions and logs them.
+     * DLQ handles recovery, so callers should not fail on flush errors.
+     *
+     * @param operation human-readable label for log context (e.g. "propagation add")
+     */
+    void safeFlushTagDenormToES(String operation) {
+        try {
+            flushTagDenormToES();
+        } catch (Exception e) {
+            LOG.error("flushTagDenormToES failed during {}, DLQ handles recovery", operation, e);
+        }
+    }
+
+    /**
+     * Buffers tag denorm updates for the given tags, then flushes to ES.
+     * Exceptions during flush are logged but not rethrown — DLQ handles recovery.
+     *
+     * @param tags      the tags whose vertices need ES denorm sync
+     * @param operation human-readable label for log context (e.g. "propagation delete")
+     */
+    private void bufferAndFlushTagDenormToES(List<Tag> tags, String operation) {
+        bufferTagDenormForTags(tags);
+        safeFlushTagDenormToES(operation);
     }
 
     private void updateLabels(AtlasVertex vertex, Set<String> labels) {
@@ -6748,15 +6802,8 @@ public class EntityGraphMapper {
                 // Update all propagated tags in Cassandra
                 tagDAO.putPropagatedTags(sourceEntityVertex.getIdForDisplay(), tagTypeName, new HashSet<>(vertexIds), assetMinAttrsMap, originalClassification);
 
-                // compute fresh classification‑text de‑norm attributes for this batch
-                Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-                updateClassificationTextV2(originalClassification, vertexIds, batchToUpdate, deNormMap, false);
-
-                // push them to ES
-                if (MapUtils.isNotEmpty(deNormMap)) {
-                    ESConnector.writeTagProperties(deNormMap);
-                }
-
+                // Buffer vertex IDs for full-snapshot ES denorm, then flush per chunk (update already happened above)
+                bufferAndFlushTagDenormToES(batchToUpdate, "propagation update");
 
                 //new bulk method to fetch in batches
                 Set<AtlasVertex> propagtedVertices = graph.getVertices(vertexIds.toArray(new String[0]));
@@ -6983,11 +7030,8 @@ public class EntityGraphMapper {
                 .map(Tag::getVertexId)
                 .toList();
 
-        Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-        updateClassificationTextV2(sourceTag, vertexIdsToDelete, tagsToDelete, deNormMap, true);
-        if (MapUtils.isNotEmpty(deNormMap)) {
-            ESConnector.writeTagProperties(deNormMap);
-        }
+        // Buffer vertex IDs for full-snapshot ES denorm, then flush per chunk (delete already happened above)
+        bufferAndFlushTagDenormToES(tagsToDelete, "propagation refresh delete");
 
         Set<AtlasVertex> vertices = graph.getVertices(vertexIdsToDelete.toArray(new String[0]));
         if (!vertices.isEmpty()) {
