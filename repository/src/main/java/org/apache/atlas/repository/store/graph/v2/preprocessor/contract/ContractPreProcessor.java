@@ -8,11 +8,13 @@ import org.apache.atlas.model.discovery.IndexSearchParams;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.model.instance.EntityMutations;
+import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v2.*;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
@@ -69,6 +71,75 @@ public class ContractPreProcessor extends AbstractContractPreProcessor {
                 processUpdateContract(entity, context);
         }
 
+    }
+
+    @Override
+    public void processDelete(AtlasVertex vertex) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processDeleteContract");
+
+        try {
+            String contractGuid = GraphHelper.getGuid(vertex);
+            String assetGuid    = vertex.getProperty(ATTR_ASSET_GUID, String.class);
+
+            if (StringUtils.isEmpty(assetGuid)) {
+                LOG.warn("processDelete: DataContract {} has no linked asset GUID, skipping asset cleanup", contractGuid);
+            } else {
+                cleanupAssetOnContractDelete(contractGuid, assetGuid);
+            }
+
+            // Remove unique QN property so that a new contract with the same QN can be created after soft-delete
+            vertex.removeProperty(UNIQUE_QUALIFIED_NAME);
+            LOG.info("processDelete: Removed unique QN property from DataContract {}", contractGuid);
+
+        } finally {
+            RequestContext.get().endMetricRecord(metricRecorder);
+        }
+    }
+
+    private void cleanupAssetOnContractDelete(String deletedContractGuid, String assetGuid) throws AtlasBaseException {
+        AtlasVertex assetVertex = AtlasGraphUtilsV2.findByGuid(assetGuid);
+        if (assetVertex == null) {
+            LOG.warn("cleanupAssetOnContractDelete: Asset vertex not found for guid {}", assetGuid);
+            return;
+        }
+
+        // Check if any other ACTIVE contracts exist for this asset (excluding the one being deleted)
+        boolean hasOtherActiveContracts = hasOtherActiveContracts(assetGuid, deletedContractGuid);
+
+        if (!hasOtherActiveContracts) {
+            AtlasGraphUtilsV2.setEncodedProperty(assetVertex, ASSET_ATTR_HAS_CONTRACT, false);
+            AtlasGraphUtilsV2.setEncodedProperty(assetVertex, MODIFICATION_TIMESTAMP_PROPERTY_KEY, RequestContext.get().getRequestTime());
+            AtlasGraphUtilsV2.setEncodedProperty(assetVertex, MODIFIED_BY_KEY, RequestContext.get().getUser());
+
+            LOG.info("cleanupAssetOnContractDelete: Cleared hasContract on asset {} after deleting contract {}", assetGuid, deletedContractGuid);
+        } else {
+            LOG.info("cleanupAssetOnContractDelete: Asset {} still has other active contracts, keeping hasContract=true", assetGuid);
+        }
+    }
+
+    private boolean hasOtherActiveContracts(String assetGuid, String excludeContractGuid) throws AtlasBaseException {
+        IndexSearchParams indexSearchParams = new IndexSearchParams();
+        Map<String, Object> dsl = new HashMap<>();
+
+        List<Map<String, Object>> mustClauseList = new ArrayList<>();
+        mustClauseList.add(mapOf("term", mapOf("__typeName.keyword", CONTRACT_ENTITY_TYPE)));
+        mustClauseList.add(mapOf("term", mapOf(ATTR_ASSET_GUID, assetGuid)));
+
+        List<Map<String, Object>> mustNotClauseList = new ArrayList<>();
+        mustNotClauseList.add(mapOf("term", mapOf("__guid", excludeContractGuid)));
+
+        Map<String, Object> boolClause = new HashMap<>();
+        boolClause.put("must", mustClauseList);
+        boolClause.put("must_not", mustNotClauseList);
+
+        dsl.put("query", mapOf("bool", boolClause));
+        dsl.put("size", 0);
+
+        indexSearchParams.setDsl(dsl);
+        indexSearchParams.setSuppressLogs(true);
+
+        AtlasSearchResult result = discovery.directIndexSearch(indexSearchParams);
+        return result != null && result.getApproximateCount() > 0;
     }
 
     private void processUpdateContract(AtlasEntity entity, EntityMutationContext context) throws AtlasBaseException {

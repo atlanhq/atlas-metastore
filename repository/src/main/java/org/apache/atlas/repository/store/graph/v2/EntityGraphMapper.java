@@ -1832,6 +1832,16 @@ public class EntityGraphMapper {
             }
 
             String      guid            = getGuid(ctx.getValue());
+
+            // Resolve unassigned (temporary) GUIDs to real GUIDs — needed when preprocessors
+            // inject entities into the update context with relationships pointing to newly created entities
+            if (AtlasTypeUtil.isUnAssignedGuid(guid) && MapUtils.isNotEmpty(context.getGuidAssignments())) {
+                String assignedGuid = context.getGuidAssignments().get(guid);
+                if (assignedGuid != null) {
+                    guid = assignedGuid;
+                }
+            }
+
             AtlasVertex attributeVertex = context.getDiscoveryContext().getResolvedEntityVertex(guid);
             AtlasVertex entityVertex    = ctx.getReferringVertex();
             AtlasEdge   ret;
