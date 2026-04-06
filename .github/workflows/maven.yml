@@ -34,7 +34,6 @@ on:
       - hotfix-reindex-refresh
       - ms-864-keycloak-jwks-internal-url
       - ms-610-ranges-policy-cache
-      - ms-802-trim-whitspace
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
