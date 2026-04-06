@@ -116,11 +116,7 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
 
     private void processCreateCategory(AtlasEntity entity, AtlasVertex vertex) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreateCategory");
-        String catName = (String) entity.getAttribute(NAME);
-        if (StringUtils.isNotEmpty(catName)) {
-            catName = catName.trim();
-            entity.setAttribute(NAME, catName);
-        }
+        String catName = trimEntityName(entity);
         String parentQname = null;
 
         if (StringUtils.isEmpty(catName) || isNameInvalid(catName)) {
@@ -152,11 +148,7 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
 
     private void processUpdateCategory(AtlasEntity entity, AtlasVertex vertex) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processUpdateCategory");
-        String catName = (String) entity.getAttribute(NAME);
-        if (StringUtils.isNotEmpty(catName)) {
-            catName = catName.trim();
-            entity.setAttribute(NAME, catName);
-        }
+        String catName = trimEntityName(entity);
         String vertexQnName = vertex.getProperty(QUALIFIED_NAME, String.class);
 
         if (StringUtils.isEmpty(catName) || isNameInvalid(catName)) {
