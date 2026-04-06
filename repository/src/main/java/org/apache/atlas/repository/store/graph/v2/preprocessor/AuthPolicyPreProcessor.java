@@ -435,8 +435,8 @@ public class AuthPolicyPreProcessor implements PreProcessor {
 
                 // Step 3: for each policy edge, load the policy as a scalar entity and register it
                 // in referredEntities so that ESAliasStore.getPolicies() continues to work.
-                List<AtlasObjectId> policyObjectIds = new ArrayList<>();
                 if (policiesAttr != null) {
+                    List<AtlasObjectId> policyObjectIds = new ArrayList<>();
                     List<AtlasEdge> policyEdges = GraphHelper.getActiveCollectionElementsUsingRelationship(
                             parentVertex, policiesAttr, policiesAttr.getRelationshipEdgeLabel());
                     // Use the declared edge direction from the relationship definition instead of
@@ -457,10 +457,16 @@ public class AuthPolicyPreProcessor implements PreProcessor {
                         ret.addReferredEntity(policyEntity);
                         policyObjectIds.add(new AtlasObjectId(policyEntity.getGuid(), policyEntity.getTypeName()));
                     }
+                    // Populate REL_ATTR_POLICIES on the parent entity so that getPolicies() in
+                    // ESAliasStore (which reads this relationship attribute) continues to work unchanged.
+                    // NOTE: only set when policiesAttr is non-null; setting an empty list when the type
+                    // is unknown would wipe all K existing policy filter clauses from the ES alias.
+                    parentEntity.setRelationshipAttribute(REL_ATTR_POLICIES, policyObjectIds);
+                } else {
+                    LOG.warn("getAccessControlEntity: could not resolve '{}' relationship attribute for type '{}' " +
+                             "— ES alias may be incomplete if this is not a cold-start transient",
+                             REL_ATTR_POLICIES, parentEntity.getTypeName());
                 }
-                // Populate REL_ATTR_POLICIES on the parent entity so that getPolicies() in
-                // ESAliasStore (which reads this relationship attribute) continues to work unchanged.
-                parentEntity.setRelationshipAttribute(REL_ATTR_POLICIES, policyObjectIds);
 
             } catch (AtlasBaseException abe) {
                 AtlasErrorCode code = abe.getAtlasErrorCode();
