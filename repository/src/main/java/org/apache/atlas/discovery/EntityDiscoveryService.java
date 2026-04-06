@@ -584,18 +584,41 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 vertexEdgePropertiesCache = null;
             }
 
-            // Batch-prefetch classifications for all result vertices (TagV2 only, with per-vertex fallback)
+            // Batch-prefetch classifications only for vertices that actually have tags.
+            // Pre-filter using vertex properties (__classificationsText, __classificationNames,
+            // __propagatedClassificationNames) to skip CQL queries to tags_by_id for tagless
+            // vertices. Vertices with no tags get an empty list in the cache to prevent the
+            // per-vertex sync fallback in mapVertexToAtlasEntityHeader.
             Map<String, List<AtlasClassification>> classificationCache = null;
             if (useVertexEdgeBulkFetching && vertexEdgePropertiesCache != null
                     && RequestContext.get().includeClassifications()) {
-                List<AtlasVertex> resultVertices = new ArrayList<>(vertexIds.size());
+                List<AtlasVertex> verticesWithClassifications = new ArrayList<>();
+                classificationCache = new HashMap<>();
+
                 for (String vid : vertexIds) {
                     AtlasVertex v = vertexEdgePropertiesCache.getVertexById(vid);
-                    if (v != null) {
-                        resultVertices.add(v);
+                    if (v == null) {
+                        continue;
+                    }
+
+                    String clsText = vertexEdgePropertiesCache.getPropertyValue(vid, CLASSIFICATION_TEXT_KEY, String.class);
+                    String clsNames = vertexEdgePropertiesCache.getPropertyValue(vid, CLASSIFICATION_NAMES_KEY, String.class);
+                    String propClsNames = vertexEdgePropertiesCache.getPropertyValue(vid, PROPAGATED_CLASSIFICATION_NAMES_KEY, String.class);
+
+                    if (StringUtils.isNotEmpty(clsText) || StringUtils.isNotEmpty(clsNames) || StringUtils.isNotEmpty(propClsNames)) {
+                        verticesWithClassifications.add(v);
+                    } else {
+                        classificationCache.put(vid, Collections.emptyList());
                     }
                 }
-                classificationCache = entityRetriever.prefetchClassifications(resultVertices);
+
+                if (!verticesWithClassifications.isEmpty()) {
+                    Map<String, List<AtlasClassification>> fetched =
+                            entityRetriever.prefetchClassifications(verticesWithClassifications);
+                    if (fetched != null) {
+                        classificationCache.putAll(fetched);
+                    }
+                }
             }
 
             for(Result result : results) {
