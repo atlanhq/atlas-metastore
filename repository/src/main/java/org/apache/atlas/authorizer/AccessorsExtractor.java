@@ -8,7 +8,6 @@ import org.apache.atlas.authorize.AtlasAccessorResponse;
 import org.apache.atlas.authorize.AtlasEntityAccessRequest;
 import org.apache.atlas.authorize.AtlasRelationshipAccessRequest;
 import org.apache.atlas.authorizer.store.PoliciesStore;
-import org.apache.atlas.authorizer.trace.AccessDecisionContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.plugin.model.RangerPolicy;
@@ -124,12 +123,6 @@ public class AccessorsExtractor {
                     boolean matched = validateEntityFilterCriteria(entityFilterCriteriaNode, entity, vertex);
                     if (matched) {
                         matchedPolicies.add(policy);
-
-                        // Record trace if enabled
-                        if (AccessDecisionContext.isTraceEnabled()) {
-                            boolean isAllow = CollectionUtils.isNotEmpty(policy.getPolicyItems());
-                            AccessDecisionContext.getCurrentTrace().recordAbacMatch(policy, isAllow);
-                        }
                     }
                 }
             }
@@ -158,12 +151,6 @@ public class AccessorsExtractor {
                 }
                 if (matched) {
                     matchedPolicies.add(policy);
-
-                    // Record trace if enabled
-                    if (AccessDecisionContext.isTraceEnabled()) {
-                        boolean isAllow = CollectionUtils.isNotEmpty(policy.getPolicyItems());
-                        AccessDecisionContext.getCurrentTrace().recordAbacMatch(policy, isAllow);
-                    }
                 }
             }
         }

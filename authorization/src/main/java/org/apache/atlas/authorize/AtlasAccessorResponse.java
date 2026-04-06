@@ -20,7 +20,6 @@ package org.apache.atlas.authorize;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -50,9 +49,6 @@ public class AtlasAccessorResponse {
     private Set<String> denyUsers = new HashSet<>();
     private Set<String> denyGroups = new HashSet<>();
     private Set<String> denyRoles = new HashSet<>();
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    private List<AtlasAccessDecision> accessDecisions;
 
     public AtlasAccessorResponse() {
 
@@ -178,14 +174,6 @@ public class AtlasAccessorResponse {
 
     public void setDenyRoles(Set<String> denyRoles) {
         this.denyRoles = denyRoles;
-    }
-
-    public List<AtlasAccessDecision> getAccessDecisions() {
-        return accessDecisions;
-    }
-
-    public void setAccessDecisions(List<AtlasAccessDecision> accessDecisions) {
-        this.accessDecisions = accessDecisions;
     }
 
     @Override

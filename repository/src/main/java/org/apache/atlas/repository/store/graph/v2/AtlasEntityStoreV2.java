@@ -27,9 +27,6 @@ import org.apache.atlas.authorize.AtlasEntityAccessRequest.AtlasEntityAccessRequ
 import org.apache.atlas.bulkimport.BulkImportResponse;
 import org.apache.atlas.bulkimport.BulkImportResponse.ImportInfo;
 import org.apache.atlas.authorizer.AtlasAuthorizationUtils;
-import org.apache.atlas.authorizer.trace.AccessDecisionContext;
-import org.apache.atlas.authorizer.trace.DecisionTraceBuilder;
-import org.apache.atlas.authorizer.trace.DecisionTraceCollector;
 import org.apache.atlas.discovery.EntityDiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.featureflag.FeatureFlagStore;
@@ -2862,17 +2859,9 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         for (AtlasAccessorRequest accessorRequest : atlasAccessorRequestList) {
             try {
                 AtlasAccessorResponse result = null;
-                boolean traceEnabled = Boolean.TRUE.equals(accessorRequest.getIncludeDecisionTrace());
+                AtlasPrivilege action = AtlasPrivilege.valueOf(accessorRequest.getAction());;
 
-                // Start trace if requested
-                if (traceEnabled) {
-                    AccessDecisionContext.startTrace();
-                }
-
-                try {
-                    AtlasPrivilege action = AtlasPrivilege.valueOf(accessorRequest.getAction());
-
-                    switch (action) {
+                switch (action) {
                     case ENTITY_READ:
                     case ENTITY_CREATE:
                     case ENTITY_UPDATE:
@@ -2930,31 +2919,14 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
                     default:
                         LOG.error("No implementation found for action: {}", accessorRequest.getAction());
-                    }
-
-                    if (result == null) {
-                        throw new AtlasBaseException();
-                    }
-                    result.populateRequestDetails(accessorRequest);
-
-                    // Build trace if enabled
-                    if (traceEnabled) {
-                        DecisionTraceCollector collector = AccessDecisionContext.getCurrentTrace();
-                        List<AtlasAccessDecision> decisions = DecisionTraceBuilder.buildDecisions(
-                            result,
-                            collector.getRangerPolicies(),
-                            collector.getAbacPolicies()
-                        );
-                        result.setAccessDecisions(decisions);
-                    }
-
-                    ret.add(result);
-
-                } finally {
-                    if (traceEnabled) {
-                        AccessDecisionContext.endTrace();
-                    }
                 }
+
+                if (result == null) {
+                    throw new AtlasBaseException();
+                }
+                result.populateRequestDetails(accessorRequest);
+                ret.add(result);
+
             } catch (AtlasBaseException e) {
                 e.getErrorDetailsMap().put("accessorRequest", AtlasType.toJson(accessorRequest));
                 throw e;
