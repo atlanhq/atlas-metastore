@@ -43,56 +43,63 @@ public class DecisionTraceBuilder {
             return Collections.emptyList();
         }
 
-        Set<String> allPrincipals = collectAllPrincipals(response);
         List<AtlasAccessDecision> decisions = new ArrayList<>();
 
-        for (String principal : allPrincipals) {
-            decisions.add(buildDecisionForPrincipal(principal, response, rangerPolicies, abacPolicies));
+        // Process each principal type separately to avoid name collisions
+        if (response.getUsers() != null) {
+            for (String user : response.getUsers()) {
+                decisions.add(buildDecisionForPrincipal(user, PrincipalType.USER, false, response, rangerPolicies, abacPolicies));
+            }
+        }
+        if (response.getGroups() != null) {
+            for (String group : response.getGroups()) {
+                decisions.add(buildDecisionForPrincipal(group, PrincipalType.GROUP, false, response, rangerPolicies, abacPolicies));
+            }
+        }
+        if (response.getRoles() != null) {
+            for (String role : response.getRoles()) {
+                decisions.add(buildDecisionForPrincipal(role, PrincipalType.ROLE, false, response, rangerPolicies, abacPolicies));
+            }
+        }
+        if (response.getDenyUsers() != null) {
+            for (String user : response.getDenyUsers()) {
+                decisions.add(buildDecisionForPrincipal(user, PrincipalType.USER, true, response, rangerPolicies, abacPolicies));
+            }
+        }
+        if (response.getDenyGroups() != null) {
+            for (String group : response.getDenyGroups()) {
+                decisions.add(buildDecisionForPrincipal(group, PrincipalType.GROUP, true, response, rangerPolicies, abacPolicies));
+            }
+        }
+        if (response.getDenyRoles() != null) {
+            for (String role : response.getDenyRoles()) {
+                decisions.add(buildDecisionForPrincipal(role, PrincipalType.ROLE, true, response, rangerPolicies, abacPolicies));
+            }
         }
 
         return decisions;
     }
 
     /**
-     * Collects all unique principals (users, groups, roles) from the response.
-     */
-    private static Set<String> collectAllPrincipals(AtlasAccessorResponse response) {
-        Set<String> principals = new HashSet<>();
-
-        if (response.getUsers() != null) {
-            principals.addAll(response.getUsers());
-        }
-        if (response.getGroups() != null) {
-            principals.addAll(response.getGroups());
-        }
-        if (response.getRoles() != null) {
-            principals.addAll(response.getRoles());
-        }
-        if (response.getDenyUsers() != null) {
-            principals.addAll(response.getDenyUsers());
-        }
-        if (response.getDenyGroups() != null) {
-            principals.addAll(response.getDenyGroups());
-        }
-        if (response.getDenyRoles() != null) {
-            principals.addAll(response.getDenyRoles());
-        }
-
-        return principals;
-    }
-
-    /**
-     * Builds an access decision for a single principal.
+     * Builds an access decision for a single principal with known type and decision.
+     * @param principal The principal name
+     * @param principalType The type (USER, GROUP, or ROLE)
+     * @param isDenied True if this principal is denied access
+     * @param response The accessor response
+     * @param rangerPolicies Map of Ranger policy traces
+     * @param abacPolicies Map of ABAC policy traces
      */
     private static AtlasAccessDecision buildDecisionForPrincipal(
         String principal,
+        PrincipalType principalType,
+        boolean isDenied,
         AtlasAccessorResponse response,
         Map<String, PolicyTrace> rangerPolicies,
         Map<String, PolicyTrace> abacPolicies
     ) {
         AtlasAccessDecision decision = new AtlasAccessDecision();
         decision.setPrincipal(principal);
-        decision.setPrincipalType(inferPrincipalType(principal, response));
+        decision.setPrincipalType(principalType);
 
         // Collect all policies (both allow and deny)
         List<PolicyTrace> allPolicies = new ArrayList<>();
@@ -112,30 +119,11 @@ public class DecisionTraceBuilder {
 
         decision.setPolicies(allPolicies);
 
-        // Determine final decision based on which list the principal is in
-        boolean isDenied = (response.getDenyUsers() != null && response.getDenyUsers().contains(principal)) ||
-                          (response.getDenyGroups() != null && response.getDenyGroups().contains(principal)) ||
-                          (response.getDenyRoles() != null && response.getDenyRoles().contains(principal));
-
-        decision.setDecision(isDenied ? AccessDecision.DENY : AccessDecision.ALLOW);
-        decision.setFinalReason(explainPrecedenceRule(allPolicies, decision.getDecision()));
+        AccessDecision finalDecision = isDenied ? AccessDecision.DENY : AccessDecision.ALLOW;
+        decision.setDecision(finalDecision);
+        decision.setFinalReason(explainPrecedenceRule(allPolicies, finalDecision));
 
         return decision;
-    }
-
-    /**
-     * Infers the principal type based on which list it appears in.
-     */
-    private static PrincipalType inferPrincipalType(String principal, AtlasAccessorResponse response) {
-        if ((response.getUsers() != null && response.getUsers().contains(principal)) ||
-            (response.getDenyUsers() != null && response.getDenyUsers().contains(principal))) {
-            return PrincipalType.USER;
-        } else if ((response.getGroups() != null && response.getGroups().contains(principal)) ||
-                   (response.getDenyGroups() != null && response.getDenyGroups().contains(principal))) {
-            return PrincipalType.GROUP;
-        } else {
-            return PrincipalType.ROLE;
-        }
     }
 
     /**
@@ -163,24 +151,45 @@ public class DecisionTraceBuilder {
 
     /**
      * Generates a human-readable explanation of the final decision.
+     * @param policies List of policies sorted by precedence
+     * @param finalDecision The actual final decision (ALLOW or DENY)
      */
     private static String explainPrecedenceRule(List<PolicyTrace> policies, AccessDecision finalDecision) {
         if (policies == null || policies.isEmpty()) {
-            return "Implicit DENY (no matching policies)";
+            if (finalDecision == AccessDecision.DENY) {
+                return "Implicit DENY (no matching policies)";
+            } else {
+                return "ALLOW (no deny policies matched)";
+            }
         }
 
         PolicyTrace highestPrecedence = policies.get(0);
         String policyName = highestPrecedence.getPolicyName() != null ? highestPrecedence.getPolicyName() : "unknown";
         String enforcer = highestPrecedence.getEnforcer() != null ? highestPrecedence.getEnforcer() : "unknown";
 
-        if (highestPrecedence.getPolicyPriority() == 100 && !highestPrecedence.isAllowPolicy()) {
-            return "Override DENY from " + policyName;
-        } else if (highestPrecedence.getPolicyPriority() == 100 && highestPrecedence.isAllowPolicy()) {
-            return "Override ALLOW from " + policyName;
-        } else if (!highestPrecedence.isAllowPolicy()) {
-            return "Explicit DENY from " + policyName;
+        // Use the actual final decision to determine the explanation
+        if (finalDecision == AccessDecision.DENY) {
+            // Find the highest precedence deny policy
+            for (PolicyTrace policy : policies) {
+                if (!policy.isAllowPolicy()) {
+                    String denyPolicyName = policy.getPolicyName() != null ? policy.getPolicyName() : "unknown";
+                    if (policy.getPolicyPriority() == 100) {
+                        return "Override DENY from " + denyPolicyName;
+                    } else {
+                        return "Explicit DENY from " + denyPolicyName;
+                    }
+                }
+            }
+            return "DENY (policy evaluation)";
         } else {
-            return "Normal ALLOW from " + enforcer + " " + policyName;
+            // ALLOW decision
+            if (highestPrecedence.getPolicyPriority() == 100 && highestPrecedence.isAllowPolicy()) {
+                return "Override ALLOW from " + policyName;
+            } else if (highestPrecedence.isAllowPolicy()) {
+                return "Normal ALLOW from " + enforcer + " " + policyName;
+            } else {
+                return "ALLOW (no deny policies matched)";
+            }
         }
     }
 }
