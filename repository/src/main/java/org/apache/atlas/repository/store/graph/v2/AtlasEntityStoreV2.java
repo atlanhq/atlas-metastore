@@ -2938,10 +2938,12 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                     // Build trace if enabled
                     if (traceEnabled) {
                         DecisionTraceCollector collector = AccessDecisionContext.getCurrentTrace();
+                        String forUser = accessorRequest.getForUser();
                         List<AtlasAccessDecision> decisions = DecisionTraceBuilder.buildDecisions(
                             result,
                             collector.getRangerPolicies(),
-                            collector.getAbacPolicies()
+                            collector.getAbacPolicies(),
+                            forUser
                         );
                         result.setAccessDecisions(decisions);
                     }

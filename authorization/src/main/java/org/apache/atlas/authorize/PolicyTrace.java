@@ -17,7 +17,11 @@
  */
 package org.apache.atlas.authorize;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
+
+import java.util.HashSet;
+import java.util.Set;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class PolicyTrace {
@@ -27,6 +31,15 @@ public class PolicyTrace {
     private int policyPriority;     // 0=normal, 100=override
     private boolean isAllowPolicy;  // true=allow, false=deny
     private String enforcer;        // "ranger" or "abac"
+
+    // Internal tracking of which principals this policy applies to
+    // Not serialized to JSON
+    @JsonIgnore
+    private Set<String> applicableUsers = new HashSet<>();
+    @JsonIgnore
+    private Set<String> applicableGroups = new HashSet<>();
+    @JsonIgnore
+    private Set<String> applicableRoles = new HashSet<>();
 
     public PolicyTrace() {
     }
@@ -77,6 +90,60 @@ public class PolicyTrace {
 
     public void setEnforcer(String enforcer) {
         this.enforcer = enforcer;
+    }
+
+    @JsonIgnore
+    public Set<String> getApplicableUsers() {
+        return applicableUsers;
+    }
+
+    @JsonIgnore
+    public void setApplicableUsers(Set<String> applicableUsers) {
+        this.applicableUsers = applicableUsers;
+    }
+
+    @JsonIgnore
+    public Set<String> getApplicableGroups() {
+        return applicableGroups;
+    }
+
+    @JsonIgnore
+    public void setApplicableGroups(Set<String> applicableGroups) {
+        this.applicableGroups = applicableGroups;
+    }
+
+    @JsonIgnore
+    public Set<String> getApplicableRoles() {
+        return applicableRoles;
+    }
+
+    @JsonIgnore
+    public void setApplicableRoles(Set<String> applicableRoles) {
+        this.applicableRoles = applicableRoles;
+    }
+
+    /**
+     * Checks if this policy applies to a specific principal.
+     * @param principal The principal name
+     * @param principalType The principal type (USER, GROUP, ROLE)
+     * @return true if this policy applies to the principal
+     */
+    @JsonIgnore
+    public boolean appliesToPrincipal(String principal, PrincipalType principalType) {
+        if (principal == null || principalType == null) {
+            return false;
+        }
+
+        switch (principalType) {
+            case USER:
+                return applicableUsers.contains(principal);
+            case GROUP:
+                return applicableGroups.contains(principal);
+            case ROLE:
+                return applicableRoles.contains(principal);
+            default:
+                return false;
+        }
     }
 
     @Override
