@@ -178,7 +178,10 @@ public class EntityREST {
      */
     @POST
     @Path("/accessors")
-    public List<AtlasAccessorResponse> getAccessors(List<AtlasAccessorRequest> atlasAccessorRequestList) throws AtlasBaseException {
+    public List<AtlasAccessorResponse> getAccessors(
+            List<AtlasAccessorRequest> atlasAccessorRequestList,
+            @QueryParam("includeTrace") @DefaultValue("false") boolean includeTrace,
+            @QueryParam("forUser") String forUser) throws AtlasBaseException {
         AtlasPerfTracer perf = null;
         List<AtlasAccessorResponse> ret;
 
@@ -188,6 +191,16 @@ public class EntityREST {
 
         try {
             validateAccessorRequest(atlasAccessorRequestList);
+
+            // Set trace flag and forUser on requests if enabled
+            if (includeTrace) {
+                atlasAccessorRequestList.forEach(r -> {
+                    r.setIncludeDecisionTrace(true);
+                    if (forUser != null && !forUser.isEmpty()) {
+                        r.setForUser(forUser);
+                    }
+                });
+            }
 
             ret = entitiesStore.getAccessors(atlasAccessorRequestList);
 

@@ -22,6 +22,7 @@ package org.apache.atlas.authorization.atlas.authorizer;
 import org.apache.atlas.authorize.AtlasAccessorResponse;
 import org.apache.atlas.authorize.AtlasEntityAccessRequest;
 import org.apache.atlas.authorize.AtlasPrivilege;
+import org.apache.atlas.authorizer.trace.AccessDecisionContext;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.atlas.plugin.model.RangerPolicy;
@@ -77,12 +78,12 @@ public class RangerAtlasAuthorizerUtil {
         if (result != null && CollectionUtils.isNotEmpty(result.getMatchedItemEvaluators())) {
 
             result.getMatchedItemEvaluators().forEach(x -> {
-                collectSubjects(response, x);
+                collectSubjects(response, x, result);
             });
         }
     }
 
-    static private void collectSubjects(AtlasAccessorResponse response, RangerPolicyItemEvaluator evaluator) {
+    static private void collectSubjects(AtlasAccessorResponse response, RangerPolicyItemEvaluator evaluator, RangerAccessResult result) {
 
         RangerPolicy.RangerPolicyItem policyItem = evaluator.getPolicyItem();
 
@@ -95,6 +96,19 @@ public class RangerAtlasAuthorizerUtil {
             response.getDenyUsers().addAll(policyItem.getUsers());
             response.getDenyRoles().addAll(policyItem.getRoles());
             response.getDenyGroups().addAll(policyItem.getGroups());
+        }
+
+        // Record trace if enabled - with principal information
+        if (AccessDecisionContext.isTraceEnabled() && result != null && result.getPolicyId() != null && !result.getPolicyId().equals("-1")) {
+            boolean isAllow = evaluator.getPolicyItemType() == RangerPolicyItemEvaluator.POLICY_ITEM_TYPE_ALLOW;
+            AccessDecisionContext.getCurrentTrace().recordRangerMatchFromResult(
+                result.getPolicyId(),
+                result.getPolicyPriority(),
+                isAllow,
+                policyItem.getUsers(),
+                policyItem.getGroups(),
+                policyItem.getRoles()
+            );
         }
     }
 
@@ -109,11 +123,11 @@ public class RangerAtlasAuthorizerUtil {
 
         // Collect lists of accessors for both results
         resultEnd1.getMatchedItemEvaluators().forEach(x -> {
-            collectSubjects(accessorsEnd1, x);
+            collectSubjects(accessorsEnd1, x, resultEnd1);
         });
 
         resultEnd2.getMatchedItemEvaluators().forEach(x -> {
-            collectSubjects(accessorsEnd2, x);
+            collectSubjects(accessorsEnd2, x, resultEnd2);
         });
 
         // Retain only common accessors
