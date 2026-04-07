@@ -38,15 +38,34 @@ public class DecisionTraceCollector {
      * @param policyId The policy ID
      * @param policyPriority The policy priority
      * @param isAllow True if this is an allow policy, false if deny
+     * @param users List of users this policy applies to
+     * @param groups List of groups this policy applies to
+     * @param roles List of roles this policy applies to
      */
-    public void recordRangerMatchFromResult(String policyId, int policyPriority, boolean isAllow) {
+    public void recordRangerMatchFromResult(String policyId, int policyPriority, boolean isAllow,
+                                           java.util.List<String> users,
+                                           java.util.List<String> groups,
+                                           java.util.List<String> roles) {
         if (policyId == null || policyId.equals("-1")) {
             return;
         }
 
-        // Use cache to avoid duplicate processing
-        if (!rangerPolicyCache.containsKey(policyId)) {
-            rangerPolicyCache.put(policyId, createRangerPolicyTraceFromResult(policyId, policyPriority, isAllow));
+        // Use cache to avoid duplicate processing, but merge principals if already exists
+        PolicyTrace trace = rangerPolicyCache.get(policyId);
+        if (trace == null) {
+            trace = createRangerPolicyTraceFromResult(policyId, policyPriority, isAllow);
+            rangerPolicyCache.put(policyId, trace);
+        }
+
+        // Add principals from this policy item
+        if (users != null) {
+            trace.getApplicableUsers().addAll(users);
+        }
+        if (groups != null) {
+            trace.getApplicableGroups().addAll(groups);
+        }
+        if (roles != null) {
+            trace.getApplicableRoles().addAll(roles);
         }
     }
 
@@ -65,9 +84,27 @@ public class DecisionTraceCollector {
             return;
         }
 
-        // Use cache to avoid duplicate processing
-        if (!abacPolicyCache.containsKey(policyId)) {
-            abacPolicyCache.put(policyId, createAbacPolicyTrace(policy, isAllow));
+        // Use cache to avoid duplicate processing, but merge principals if already exists
+        PolicyTrace trace = abacPolicyCache.get(policyId);
+        if (trace == null) {
+            trace = createAbacPolicyTrace(policy, isAllow);
+            abacPolicyCache.put(policyId, trace);
+        }
+
+        // Extract principals from policy items
+        java.util.List<RangerPolicy.RangerPolicyItem> policyItems = isAllow ? policy.getPolicyItems() : policy.getDenyPolicyItems();
+        if (policyItems != null) {
+            for (RangerPolicy.RangerPolicyItem item : policyItems) {
+                if (item.getUsers() != null) {
+                    trace.getApplicableUsers().addAll(item.getUsers());
+                }
+                if (item.getGroups() != null) {
+                    trace.getApplicableGroups().addAll(item.getGroups());
+                }
+                if (item.getRoles() != null) {
+                    trace.getApplicableRoles().addAll(item.getRoles());
+                }
+            }
         }
     }
 
@@ -111,9 +148,17 @@ public class DecisionTraceCollector {
         trace.setPolicyId(policy.getGuid());
         trace.setPolicyName(policy.getName());
 
-        // Infer policy type from name pattern
+        // Infer policy type from service type or policy name
         String policyName = policy.getName();
-        if (policyName != null) {
+        String serviceType = policy.getServiceType();
+
+        // Try to use service type first (more reliable)
+        if (serviceType != null && serviceType.contains("persona")) {
+            trace.setPolicyType("persona");
+        } else if (serviceType != null && serviceType.contains("purpose")) {
+            trace.setPolicyType("purpose");
+        } else if (policyName != null) {
+            // Fall back to name-based inference
             if (policyName.contains("persona")) {
                 trace.setPolicyType("persona");
             } else if (policyName.contains("purpose")) {

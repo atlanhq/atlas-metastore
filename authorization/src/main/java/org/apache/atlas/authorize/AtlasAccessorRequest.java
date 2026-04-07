@@ -57,6 +57,7 @@ public class AtlasAccessorRequest {
     private AtlasEntityHeader entity = null;
 
     private Boolean includeDecisionTrace;
+    private String forUser;
 
     public String getGuid() {
         return guid;
@@ -156,6 +157,14 @@ public class AtlasAccessorRequest {
 
     public void setIncludeDecisionTrace(Boolean includeDecisionTrace) {
         this.includeDecisionTrace = includeDecisionTrace;
+    }
+
+    public String getForUser() {
+        return forUser;
+    }
+
+    public void setForUser(String forUser) {
+        this.forUser = forUser;
     }
 
     @Override
