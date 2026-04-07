@@ -140,6 +140,7 @@ public class DecisionTraceCollector {
         return trace;
     }
 
+
     /**
      * Creates a PolicyTrace from an ABAC policy.
      */
