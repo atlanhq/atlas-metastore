@@ -377,14 +377,13 @@ public class AuthPolicyPreProcessorLatencyTest {
     // =========================================================================
 
     /**
-     * [BUG DOCUMENTATION — MS-752 Bug #2]
+     * [REGRESSION GUARD — MS-752 Fix B]
      *
-     * <p>On master, getAccessControlEntity() calls toAtlasEntityWithExtInfo() once for
-     * every new policy being created.  For a batch of N=3 policies this results in
-     * 3 full Persona fetches (each involving O(K × attrs) JanusGraph reads).
+     * <p>Before the fix, getAccessControlEntity() called toAtlasEntityWithExtInfo() once per
+     * new policy (N times for a batch of N), triggering O(K × attrs) JanusGraph reads each time.
      *
-     * <p>After the optimisation the expected count drops to 1 (persona cached) or 0
-     * (vertex-based path on the optimised branch).
+     * <p>After Fix B the vertex-based path is used instead: toAtlasEntityWithExtInfo(ObjectId)
+     * must not be called at all — 0 calls for any batch size N.
      */
     @Test
     public void masterBehavior_personaFetchedOncePerNewPolicy() throws Exception {
@@ -397,22 +396,19 @@ public class AuthPolicyPreProcessorLatencyTest {
             preProcessor.processAttributes(buildDomainPolicy("p-" + i, PERSONA_GUID), mutationContext, CREATE);
         }
 
-        // MASTER BEHAVIOUR (bug): persona fetched N=3 times — once per new policy
-        // OPTIMISED BEHAVIOUR (ms-752): vertex path used, toAtlasEntityWithExtInfo(ObjectId) = 0 calls
-        //   Switch the assertion below to match the branch under test:
-        //   master  → times(N)
-        //   ms-752+ → times(0)  (uses entityRetriever.getEntityVertex + noRelAttrRetriever.toAtlasEntity)
+        // Fix B: vertex path used — toAtlasEntityWithExtInfo(ObjectId) must never be called
         verify(entityRetriever, times(0)).toAtlasEntityWithExtInfo(any(AtlasObjectId.class));
     }
 
     /**
-     * [BUG DOCUMENTATION — MS-752 Bug #2 continued]
+     * [REGRESSION GUARD — MS-752 Fix B]
      *
-     * <p>On master, each call to getAccessControlEntity() also loops K existing policies
-     * and calls toAtlasEntity() for each.  For N=3 new policies and K=5 existing ones this
-     * produces N×K = 15 redundant fetches of the same policy entities.
+     * <p>Before the fix, each call to getAccessControlEntity() looped K existing policies and
+     * called toAtlasEntity(ObjectId) for each, producing N×K = 15 redundant fetches for
+     * N=3 new policies and K=5 existing ones.
      *
-     * <p>After the optimisation the expected count drops to K (fetched once, then cached).
+     * <p>After Fix B the edge-traversal path is used instead: toAtlasEntity(ObjectId) must
+     * not be called at all — policy vertices are loaded via noRelAttrRetriever.toAtlasEntity(vertex).
      */
     @Test
     public void masterBehavior_existingPoliciesFetchedNxKTimes() throws Exception {
@@ -425,11 +421,7 @@ public class AuthPolicyPreProcessorLatencyTest {
             preProcessor.processAttributes(buildDomainPolicy("p-" + i, PERSONA_GUID), mutationContext, CREATE);
         }
 
-        // MASTER BEHAVIOUR (bug): N×K = 15 toAtlasEntity(ObjectId) calls for existing policies
-        // OPTIMISED BEHAVIOUR (ms-752): edge traversal used instead, toAtlasEntity(ObjectId) = 0 calls
-        //   Switch the assertion below to match the branch under test:
-        //   master  → times(N * K) = times(15)
-        //   ms-752+ → times(0)  (uses GraphHelper.getActiveCollectionElementsUsingRelationship)
+        // Fix B: edge traversal used — toAtlasEntity(ObjectId) must never be called
         verify(entityRetriever, times(0)).toAtlasEntity(any(AtlasObjectId.class));
     }
 
