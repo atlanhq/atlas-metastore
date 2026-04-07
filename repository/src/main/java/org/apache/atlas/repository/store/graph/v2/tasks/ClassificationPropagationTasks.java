@@ -58,6 +58,8 @@ public class ClassificationPropagationTasks {
                 LOG.info("Using v1 tag flow (JanusGraph) for Add propagation task");
                 String classificationVertexId = (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
                 String relationshipGuid = (String) parameters.get(PARAM_RELATIONSHIP_GUID);
+                Boolean previousRestrictPropagationThroughLineage = (Boolean) parameters.get(PARAM_PREVIOUS_CLASSIFICATION_RESTRICT_PROPAGATE_THROUGH_LINEAGE);
+                Boolean previousRestrictPropagationThroughHierarchy = (Boolean) parameters.get(PARAM_PREVIOUS_CLASSIFICATION_RESTRICT_PROPAGATE_THROUGH_HIERARCHY);
                 int assetsAffected = entityGraphMapper.propagateClassification(entityGuid, classificationVertexId, relationshipGuid, previousRestrictPropagationThroughLineage, previousRestrictPropagationThroughHierarchy);
                 context.incrementAssetsAffected(assetsAffected);
             }
