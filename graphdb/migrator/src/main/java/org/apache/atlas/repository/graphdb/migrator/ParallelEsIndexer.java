@@ -288,6 +288,19 @@ public class ParallelEsIndexer implements AutoCloseable {
                 if (key.contains(".")) {
                     key = key.replace('.', '_');
                 }
+                // Skip typedef attribute metadata — these create thousands of unique
+                // field names in ES (one per type-attribute combination) causing field
+                // explosion. Matches CassandraGraph.isExcludedPropertyKey() filter.
+                if (key.startsWith("__type_") || key.startsWith("__type.")) {
+                    continue;
+                }
+                // Skip relationship typedef fields — not indexed by JanusGraph,
+                // only present on relationship typedef vertices
+                if (key.equals("endDef1") || key.equals("endDef2") ||
+                    key.equals("relationshipCategory") || key.equals("relationshipLabel") ||
+                    key.equals("tagPropagation")) {
+                    continue;
+                }
                 // Clamp rank_feature fields: ES rejects values <= 0
                 if (value instanceof Number && rankFeatureFields.contains(key)) {
                     float fv = ((Number) value).floatValue();
