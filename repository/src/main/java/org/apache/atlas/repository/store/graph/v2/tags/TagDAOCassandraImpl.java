@@ -472,7 +472,7 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
         }
     }
 
-    private static final int ASYNC_READ_BATCH_SIZE = 50;
+    private static final int ASYNC_READ_BATCH_SIZE = 30;
 
     @Override
     public Map<String, List<Tag>> getAllTagsByVertexIds(Collection<String> vertexIds) throws AtlasBaseException {

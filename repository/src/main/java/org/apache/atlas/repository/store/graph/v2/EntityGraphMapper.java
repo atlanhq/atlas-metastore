@@ -217,6 +217,7 @@ public class EntityGraphMapper {
     private final TagDenormDLQProducer      tagDenormDLQProducer;
     private Counter tagDenormEsFlushSuccess;
     private Counter tagDenormEsFlushFailure;
+    private io.micrometer.core.instrument.MeterRegistry meterRegistry;
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_GLOSSARY, TYPE_CATEGORY, TYPE_TERM, TYPE_PRODUCT, TYPE_DOMAIN));
     public static final Set<String> CLASSIFICATION_ADD_EXCLUDE_LIST = new HashSet<>(Arrays.asList(ATLAS_GLOSSARY_ENTITY_TYPE, ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE, DATA_DOMAIN_ENTITY_TYPE));
 
@@ -245,13 +246,13 @@ public class EntityGraphMapper {
         this.tagDenormDLQProducer = tagDenormDLQProducer;
 
         try {
-            io.micrometer.core.instrument.MeterRegistry registry = MetricUtils.getMeterRegistry();
+            this.meterRegistry = MetricUtils.getMeterRegistry();
             this.tagDenormEsFlushSuccess = Counter.builder("tag.denorm.es.flush.success")
                     .description("Successful tag denorm ES flush count (vertices)")
-                    .register(registry);
+                    .register(meterRegistry);
             this.tagDenormEsFlushFailure = Counter.builder("tag.denorm.es.flush.failure")
                     .description("Failed tag denorm ES flush count (vertices)")
-                    .register(registry);
+                    .register(meterRegistry);
         } catch (Exception e) {
             LOG.warn("Failed to register tag denorm ES flush metrics", e);
         }
@@ -264,6 +265,28 @@ public class EntityGraphMapper {
             } catch (Exception e) {
                 LOG.warn("Failed to increment Prometheus counter", e);
             }
+        }
+    }
+
+    /**
+     * Emits a detailed Prometheus counter for ES flush failures, with labels for debugging.
+     * Labels: reason (what failed), dlq_status (emitted/lost), error_type (exception class on total failure).
+     */
+    private void emitEsFlushFailureMetric(String reason, String dlqStatus, String errorType, double count) {
+        if (meterRegistry == null) {
+            return;
+        }
+        try {
+            Counter.Builder builder = Counter.builder("tag.denorm.es.flush.failure.detail")
+                    .description("Detailed tag denorm ES flush failures with reason labels")
+                    .tag("reason", reason)
+                    .tag("dlq_status", dlqStatus);
+            if (errorType != null) {
+                builder.tag("error_type", errorType);
+            }
+            builder.register(meterRegistry).increment(count);
+        } catch (Exception e) {
+            LOG.warn("Failed to emit ES flush failure detail metric", e);
         }
     }
 
@@ -6215,6 +6238,9 @@ public class EntityGraphMapper {
                 tagDenormDLQProducer.emitFailedVertices(cassandraFailedVertexIds, snapshotMap);
                 RequestContext.get().addTagDenormEsFailureCount(cassandraFailedVertexIds.size());
                 incrementCounter(tagDenormEsFlushFailure, cassandraFailedVertexIds.size());
+                emitEsFlushFailureMetric("cassandra_read_failed", "emitted", null, cassandraFailedVertexIds.size());
+                updateTaskEsStatus(AtlasTask.EsStatus.PARTIAL_FAILURE,
+                        "Events added to DLQ: Cassandra read failed for " + cassandraFailedVertexIds.size() + " vertices");
             }
 
             // Compute denorm only for successfully read vertices
@@ -6238,6 +6264,11 @@ public class EntityGraphMapper {
                 incrementCounter(tagDenormEsFlushFailure, result.getFailedVertexIds().size());
                 // Emit partially failed vertex IDs + GUIDs to DLQ for later repair
                 tagDenormDLQProducer.emitFailedVertices(result.getFailedVertexIds(), snapshotMap);
+                emitEsFlushFailureMetric("es_write_partial_failure", "emitted", null, result.getFailedVertexIds().size());
+                updateTaskEsStatus(AtlasTask.EsStatus.PARTIAL_FAILURE,
+                        "Events added to DLQ: ES write failed for " + result.getFailedVertexIds().size() + " vertices");
+            } else {
+                updateTaskEsStatus(AtlasTask.EsStatus.COMPLETE, null);
             }
 
             return result;
@@ -6248,13 +6279,19 @@ public class EntityGraphMapper {
             // DLQ repair is idempotent, so emitting all vertices is safe even if some reads succeeded.
             LOG.error("flushTagDenormToES failed for {} vertices ({}), emitting all to DLQ",
                     snapshotMap.size(), e.getClass().getSimpleName(), e);
+            boolean dlqEmitSucceeded = false;
             try {
                 tagDenormDLQProducer.emitFailedVertices(new ArrayList<>(snapshotMap.keySet()), snapshotMap);
+                dlqEmitSucceeded = true;
             } catch (Exception dlqError) {
                 LOG.error("Failed to emit to DLQ as well. Vertices needing repair: {}", snapshotMap.keySet(), dlqError);
             }
             RequestContext.get().addTagDenormEsFailureCount(snapshotMap.size());
             incrementCounter(tagDenormEsFlushFailure, snapshotMap.size());
+            emitEsFlushFailureMetric("total_failure", dlqEmitSucceeded ? "emitted" : "lost",
+                    e.getClass().getSimpleName(), snapshotMap.size());
+            updateTaskEsStatus(AtlasTask.EsStatus.FAILED,
+                    (dlqEmitSucceeded ? "Events added to DLQ: " : "DLQ emit also failed: ") + e.getMessage());
             return ESConnector.TagDenormESWriteResult.allFailed(snapshotMap.keySet());
         } finally {
             // Always clear the buffer, even on exception (idempotent — DLQ handles recovery)
@@ -6297,6 +6334,38 @@ public class EntityGraphMapper {
         } catch (Exception e) {
             LOG.error("flushTagDenormToES failed during {}, DLQ handles recovery", operation, e);
         }
+    }
+
+    /**
+     * Updates the current task's ES status. Only escalates — never downgrades.
+     * E.g., a PARTIAL_FAILURE from an earlier chunk is not overwritten by COMPLETE from a later chunk.
+     *
+     * @param esStatus       the new ES status
+     * @param esErrorMessage error message (null for success)
+     */
+    private void updateTaskEsStatus(AtlasTask.EsStatus esStatus, String esErrorMessage) {
+        AtlasTask currentTask = RequestContext.get().getCurrentTask();
+        if (currentTask == null) {
+            return;
+        }
+
+        if (shouldEscalateEsStatus(currentTask.getEsStatus(), esStatus)) {
+            currentTask.setEsStatus(esStatus);
+        }
+
+        // Always update error message on failure — append cumulative failed count
+        if (esErrorMessage != null) {
+            int totalFailed = RequestContext.get().getTagDenormEsFailureCount();
+            currentTask.setEsErrorMessage(esErrorMessage + " (total failed vertices: " + totalFailed + ")");
+        }
+    }
+
+    private static boolean shouldEscalateEsStatus(AtlasTask.EsStatus current, AtlasTask.EsStatus incoming) {
+        if (current == null || current == AtlasTask.EsStatus.NOT_ATTEMPTED) {
+            return true;
+        }
+        // Ordinal: NOT_ATTEMPTED(0) < COMPLETE(1) < PARTIAL_FAILURE(2) < FAILED(3)
+        return incoming.ordinal() > current.ordinal();
     }
 
     /**
