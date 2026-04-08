@@ -32,6 +32,14 @@ public class PolicyTrace {
     private boolean isAllowPolicy;  // true=allow, false=deny
     private String enforcer;        // "ranger" or "abac"
 
+    // Atlas policy details (populated for ABAC persona/purpose policies)
+    private String atlasPolicyGuid;        // Original Atlas policy GUID
+    private String atlasPolicyName;        // Human-readable policy name from Atlas
+    private String atlasPolicyCategory;    // "persona", "purpose", "datamesh"
+    private String atlasPolicySubCategory; // "metadata", "data", "glossary", etc.
+    private java.util.List<String> atlasPolicyActions;    // Original Atlas actions
+    private Object atlasPolicyConditions;  // Original Atlas policy conditions
+
     // Internal tracking of which principals this policy applies to
     // Not serialized to JSON
     @JsonIgnore
@@ -120,6 +128,54 @@ public class PolicyTrace {
     @JsonIgnore
     public void setApplicableRoles(Set<String> applicableRoles) {
         this.applicableRoles = applicableRoles;
+    }
+
+    public String getAtlasPolicyGuid() {
+        return atlasPolicyGuid;
+    }
+
+    public void setAtlasPolicyGuid(String atlasPolicyGuid) {
+        this.atlasPolicyGuid = atlasPolicyGuid;
+    }
+
+    public String getAtlasPolicyName() {
+        return atlasPolicyName;
+    }
+
+    public void setAtlasPolicyName(String atlasPolicyName) {
+        this.atlasPolicyName = atlasPolicyName;
+    }
+
+    public String getAtlasPolicyCategory() {
+        return atlasPolicyCategory;
+    }
+
+    public void setAtlasPolicyCategory(String atlasPolicyCategory) {
+        this.atlasPolicyCategory = atlasPolicyCategory;
+    }
+
+    public String getAtlasPolicySubCategory() {
+        return atlasPolicySubCategory;
+    }
+
+    public void setAtlasPolicySubCategory(String atlasPolicySubCategory) {
+        this.atlasPolicySubCategory = atlasPolicySubCategory;
+    }
+
+    public java.util.List<String> getAtlasPolicyActions() {
+        return atlasPolicyActions;
+    }
+
+    public void setAtlasPolicyActions(java.util.List<String> atlasPolicyActions) {
+        this.atlasPolicyActions = atlasPolicyActions;
+    }
+
+    public Object getAtlasPolicyConditions() {
+        return atlasPolicyConditions;
+    }
+
+    public void setAtlasPolicyConditions(Object atlasPolicyConditions) {
+        this.atlasPolicyConditions = atlasPolicyConditions;
     }
 
     /**

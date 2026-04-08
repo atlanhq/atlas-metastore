@@ -33,7 +33,45 @@ public class DecisionTraceCollector {
     private final Map<String, PolicyTrace> abacPolicyCache = new ConcurrentHashMap<>();
 
     /**
-     * Records a Ranger policy match from RangerAccessResult.
+     * Records a Ranger policy match with full policy object.
+     * This is the preferred method as it has access to the actual policy name and metadata.
+     * @param policy The full Ranger policy object
+     * @param isAllow True if this is an allow policy, false if deny
+     * @param users List of users from the matched policy item
+     * @param groups List of groups from the matched policy item
+     * @param roles List of roles from the matched policy item
+     */
+    public void recordRangerMatch(RangerPolicy policy, boolean isAllow,
+                                   java.util.List<String> users,
+                                   java.util.List<String> groups,
+                                   java.util.List<String> roles) {
+        if (policy == null || policy.getGuid() == null) {
+            return;
+        }
+
+        String policyId = policy.getGuid();
+
+        // Use cache to avoid duplicate processing, but merge principals if already exists
+        PolicyTrace trace = rangerPolicyCache.get(policyId);
+        if (trace == null) {
+            trace = createRangerPolicyTrace(policy, isAllow);
+            rangerPolicyCache.put(policyId, trace);
+        }
+
+        // Add principals from this policy item
+        if (users != null) {
+            trace.getApplicableUsers().addAll(users);
+        }
+        if (groups != null) {
+            trace.getApplicableGroups().addAll(groups);
+        }
+        if (roles != null) {
+            trace.getApplicableRoles().addAll(roles);
+        }
+    }
+
+    /**
+     * Records a Ranger policy match from RangerAccessResult (legacy method).
      * Used when we don't have access to the full RangerPolicy object.
      * @param policyId The policy ID
      * @param policyPriority The policy priority
@@ -41,7 +79,9 @@ public class DecisionTraceCollector {
      * @param users List of users this policy applies to
      * @param groups List of groups this policy applies to
      * @param roles List of roles this policy applies to
+     * @deprecated Use recordRangerMatch(RangerPolicy, boolean, List, List, List) instead
      */
+    @Deprecated
     public void recordRangerMatchFromResult(String policyId, int policyPriority, boolean isAllow,
                                            java.util.List<String> users,
                                            java.util.List<String> groups,
@@ -125,9 +165,58 @@ public class DecisionTraceCollector {
     }
 
     /**
-     * Creates a PolicyTrace from RangerAccessResult information.
-     * Used when we don't have access to the full RangerPolicy object.
+     * Creates a PolicyTrace from a full RangerPolicy object.
+     * Determines policy type based on service type and policy name.
      */
+    private PolicyTrace createRangerPolicyTrace(RangerPolicy policy, boolean isAllow) {
+        PolicyTrace trace = new PolicyTrace();
+        trace.setPolicyId(policy.getGuid());
+        trace.setPolicyName(policy.getName());  // Use actual policy name (Atlas qualifiedName for persona/purpose)
+
+        // Determine policy type from service type or policy name
+        String serviceType = policy.getServiceType();
+        String policyName = policy.getName();
+
+        // Try to use service type first (more reliable)
+        if (serviceType != null && serviceType.contains("persona")) {
+            trace.setPolicyType("persona");
+        } else if (serviceType != null && serviceType.contains("purpose")) {
+            trace.setPolicyType("purpose");
+        } else if (policyName != null) {
+            // Fall back to name-based inference
+            // Persona/purpose policies have qualifiedName patterns like "default/persona123/policy456"
+            if (policyName.contains("/") && !policyName.startsWith("ranger-")) {
+                // This is likely an Atlas policy (persona/purpose) with a qualifiedName
+                // Try to infer from the QN pattern
+                if (policyName.matches(".*persona.*")) {
+                    trace.setPolicyType("persona");
+                } else if (policyName.matches(".*purpose.*")) {
+                    trace.setPolicyType("purpose");
+                } else {
+                    // Generic Atlas policy
+                    trace.setPolicyType("atlas");
+                }
+            } else {
+                // Bootstrap Ranger policy
+                trace.setPolicyType("ranger");
+            }
+        } else {
+            trace.setPolicyType("ranger");
+        }
+
+        trace.setPolicyPriority(policy.getPolicyPriority() != null ? policy.getPolicyPriority() : 0);
+        trace.setAllowPolicy(isAllow);
+        trace.setEnforcer("ranger");
+
+        return trace;
+    }
+
+    /**
+     * Creates a PolicyTrace from RangerAccessResult information (legacy method).
+     * Used when we don't have access to the full RangerPolicy object.
+     * @deprecated Use createRangerPolicyTrace(RangerPolicy, boolean) instead
+     */
+    @Deprecated
     private PolicyTrace createRangerPolicyTraceFromResult(String policyId, int policyPriority, boolean isAllow) {
         PolicyTrace trace = new PolicyTrace();
         trace.setPolicyId(policyId);
