@@ -70,8 +70,8 @@ public class TagDenormDLQReplayService {
     private int maxRetries = 3;
 
     // Kafka consumer configuration
-    @Value("${atlas.kafka.tag.denorm.dlq.maxPollRecords:10}")
-    private int maxPollRecords = 10;
+    @Value("${atlas.kafka.tag.denorm.dlq.maxPollRecords:1}")
+    private int maxPollRecords = 1;
 
     @Value("${atlas.kafka.tag.denorm.dlq.maxPollIntervalMs:600000}")
     private int maxPollIntervalMs = 600000; // 10 minutes
