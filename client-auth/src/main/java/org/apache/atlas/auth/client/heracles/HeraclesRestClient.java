@@ -6,6 +6,9 @@ import org.apache.atlas.auth.client.heracles.models.HeraclesGroupViewRepresentat
 import org.apache.atlas.auth.client.heracles.models.HeraclesGroupsResponse;
 import org.apache.atlas.auth.client.heracles.models.HeraclesRoleViewRepresentation;
 import org.apache.atlas.auth.client.heracles.models.HeraclesUserViewRepresentation;
+import org.apache.atlas.auth.client.heracles.models.IdentityGroupRepresentation;
+import org.apache.atlas.auth.client.heracles.models.IdentityRoleRepresentation;
+import org.apache.atlas.auth.client.heracles.models.IdentityUserRepresentation;
 import org.apache.atlas.exception.AtlasBaseException;
 import retrofit2.Response;
 
@@ -39,5 +42,17 @@ public class HeraclesRestClient extends AbstractAuthClient {
      */
     public Response<HeraclesGroupsResponse> getGroupsV2(int offset, int limit, String[] sort, String[] columns, String filter, Boolean count, String[] relations) throws AtlasBaseException {
         return processResponse(this.retrofitHeraclesClient.getGroupsV2(offset, limit, sort, columns, filter, count, relations));
+    }
+
+    public List<IdentityUserRepresentation> getIdentityUsers(String filter, String... columns) throws AtlasBaseException {
+        return processResponse(this.retrofitHeraclesClient.getIdentityUsers(filter, columns)).body();
+    }
+
+    public List<IdentityRoleRepresentation> getIdentityRoles(String filter, String... columns) throws AtlasBaseException {
+        return processResponse(this.retrofitHeraclesClient.getIdentityRoles(filter, columns)).body();
+    }
+
+    public List<IdentityGroupRepresentation> getIdentityGroups(String filter, String... columns) throws AtlasBaseException {
+        return processResponse(this.retrofitHeraclesClient.getIdentityGroups(filter, columns)).body();
     }
 }

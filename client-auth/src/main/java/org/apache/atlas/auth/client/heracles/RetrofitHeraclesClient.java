@@ -4,6 +4,9 @@ import org.apache.atlas.auth.client.heracles.models.HeraclesGroupViewRepresentat
 import org.apache.atlas.auth.client.heracles.models.HeraclesGroupsResponse;
 import org.apache.atlas.auth.client.heracles.models.HeraclesRoleViewRepresentation;
 import org.apache.atlas.auth.client.heracles.models.HeraclesUserViewRepresentation;
+import org.apache.atlas.auth.client.heracles.models.IdentityGroupRepresentation;
+import org.apache.atlas.auth.client.heracles.models.IdentityRoleRepresentation;
+import org.apache.atlas.auth.client.heracles.models.IdentityUserRepresentation;
 import retrofit2.Call;
 import retrofit2.http.GET;
 import retrofit2.http.Headers;
@@ -44,4 +47,16 @@ public interface RetrofitHeraclesClient {
                                              @Query("filter") String filter,
                                              @Query("count") Boolean count,
                                              @Query("relations") String[] relations);
+
+    @Headers({"Accept: application/json,text/plain", "Cache-Control: no-store", "Cache-Control: no-cache"})
+    @GET("/identity/users")
+    Call<List<IdentityUserRepresentation>> getIdentityUsers(@Query("filter") String filter, @Query("columns") String... columns);
+
+    @Headers({"Accept: application/json,text/plain", "Cache-Control: no-store", "Cache-Control: no-cache"})
+    @GET("/identity/roles")
+    Call<List<IdentityRoleRepresentation>> getIdentityRoles(@Query("filter") String filter, @Query("columns") String... columns);
+
+    @Headers({"Accept: application/json,text/plain", "Cache-Control: no-store", "Cache-Control: no-cache"})
+    @GET("/identity/groups")
+    Call<List<IdentityGroupRepresentation>> getIdentityGroups(@Query("filter") String filter, @Query("columns") String... columns);
 }
