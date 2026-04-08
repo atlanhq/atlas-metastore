@@ -175,13 +175,16 @@ public class EntityREST {
 
     /**
      * API to get accessors info such as roles/groups/users who can perform specific action
+     *
+     * SECURITY: When includeTrace=true, the trace is generated for the AUTHENTICATED USER ONLY
+     * (extracted from the authentication token). This prevents unauthorized users from querying
+     * access decisions for other users.
      */
     @POST
     @Path("/accessors")
     public List<AtlasAccessorResponse> getAccessors(
             List<AtlasAccessorRequest> atlasAccessorRequestList,
-            @QueryParam("includeTrace") @DefaultValue("false") boolean includeTrace,
-            @QueryParam("forUser") String forUser) throws AtlasBaseException {
+            @QueryParam("includeTrace") @DefaultValue("false") boolean includeTrace) throws AtlasBaseException {
         AtlasPerfTracer perf = null;
         List<AtlasAccessorResponse> ret;
 
@@ -192,13 +195,17 @@ public class EntityREST {
         try {
             validateAccessorRequest(atlasAccessorRequestList);
 
-            // Set trace flag and forUser on requests if enabled
+            // Set trace flag and authenticated user on requests if enabled
             if (includeTrace) {
+                String authenticatedUser = AtlasAuthorizationUtils.getCurrentUserName();
+
+                if (authenticatedUser == null || authenticatedUser.isEmpty()) {
+                    throw new AtlasBaseException(AtlasErrorCode.UNAUTHORIZED_ACCESS, "Decision trace requires authentication");
+                }
+
                 atlasAccessorRequestList.forEach(r -> {
                     r.setIncludeDecisionTrace(true);
-                    if (forUser != null && !forUser.isEmpty()) {
-                        r.setForUser(forUser);
-                    }
+                    r.setForUser(authenticatedUser);
                 });
             }
 
