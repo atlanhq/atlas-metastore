@@ -168,7 +168,8 @@ public class PersonaPreProcessor extends AccessControlPreProcessor {
         validateNoPoliciesAttached(persona);
         AtlasVertex vertex = context.getVertex(persona.getGuid());
 
-        AtlasEntity existingPersonaEntity = entityRetriever.toAtlasEntityWithExtInfo(vertex).getEntity();
+        AtlasEntity.AtlasEntityWithExtInfo existingPersonaWithExtInfo = entityRetriever.toAtlasEntityWithExtInfo(vertex);
+        AtlasEntity existingPersonaEntity = existingPersonaWithExtInfo.getEntity();
 
         if (!AtlasEntity.Status.ACTIVE.equals(existingPersonaEntity.getStatus())) {
             throw new AtlasBaseException(OPERATION_NOT_SUPPORTED, "Persona not Active");
@@ -185,7 +186,24 @@ public class PersonaPreProcessor extends AccessControlPreProcessor {
 
         updateKeycloakRole(persona, existingPersonaEntity);
 
+        //ensure ES alias exists (recreates alias if lost due to ES operations)
+        ensureESAlias(existingPersonaWithExtInfo);
+
         RequestContext.get().endMetricRecord(metricRecorder);
+    }
+
+    private void ensureESAlias(AtlasEntity.AtlasEntityWithExtInfo personaWithExtInfo) {
+        try {
+            List<AtlasObjectId> policies = (List<AtlasObjectId>) personaWithExtInfo.getEntity().getRelationshipAttribute(REL_ATTR_POLICIES);
+            if (policies != null) {
+                for (AtlasObjectId policyObjectId : policies) {
+                    personaWithExtInfo.addReferredEntity(entityRetriever.toAtlasEntity(policyObjectId));
+                }
+            }
+            aliasStore.updateAlias(personaWithExtInfo, null);
+        } catch (AtlasBaseException e) {
+            LOG.error("Failed to ensure ES alias for persona {}", getESAliasName(personaWithExtInfo.getEntity()), e);
+        }
     }
 
     private void updatePoliciesIsEnabledAttr(EntityMutationContext context, AtlasEntity existingPersonaEntity,
