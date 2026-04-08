@@ -7081,10 +7081,38 @@ public class EntityGraphMapper {
             LOG.warn("Asset with GUID {} not found", assetGuid);
             return null;
         }
-        vertex.setProperty(assetAttributeInfo.getAttributeName(), assetAttributeInfo.getValue());
+        String vertexTypeName = AtlasGraphUtilsV2.getTypeName(vertex);
+        Object typedValue = coerceAttributeValue(vertexTypeName, assetAttributeInfo.getAttributeName(), assetAttributeInfo.getValue());
+        vertex.setProperty(assetAttributeInfo.getAttributeName(), typedValue);
         updateModificationMetadata(vertex);
         cacheDifferentialEntityAttributeUpdate(vertex, assetAttributeInfo.getAttributeName(), assetAttributeInfo.getValue());
         return vertex;
+    }
+
+    /**
+     * Coerce a string value to the correct Java type for the attribute.
+     * JanusGraph does this implicitly via its schema-aware property keys;
+     * CassandraGraph stores properties as-is, so passing a String where a
+     * float is expected causes the wrong type to be persisted in Cassandra
+     * and ES (e.g., "42.5" instead of 42.5).
+     */
+    private Object coerceAttributeValue(String entityTypeName, String attributeName, String value) {
+        AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entityTypeName);
+        if (entityType != null) {
+            AtlasStructType.AtlasAttribute attribute = entityType.getAttribute(attributeName);
+            if (attribute != null) {
+                String typeName = attribute.getAttributeDef().getTypeName();
+                switch (typeName) {
+                    case "float":   return Float.parseFloat(value);
+                    case "double":  return Double.parseDouble(value);
+                    case "int":     return Integer.parseInt(value);
+                    case "long":    return Long.parseLong(value);
+                    case "boolean": return Boolean.parseBoolean(value);
+                    default:        return value;
+                }
+            }
+        }
+        return value;
     }
 
     private void cacheDifferentialEntityAttributeUpdate(AtlasVertex ev, String property, String value) {
