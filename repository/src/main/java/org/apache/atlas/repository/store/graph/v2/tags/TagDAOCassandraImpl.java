@@ -211,6 +211,10 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
             // === Health check statement ===
             healthCheckStmt = prepare("SELECT release_version FROM system.local");
 
+            // Configurable async read batch size for tag denorm flush
+            this.asyncReadBatchSize = ApplicationProperties.get().getInt(ASYNC_READ_BATCH_SIZE_PROPERTY, DEFAULT_ASYNC_READ_BATCH_SIZE);
+            LOG.info("TagDAO initialized with asyncReadBatchSize={}", asyncReadBatchSize);
+
         } catch (Exception e) {
             LOG.error("Failed to initialize TagDAO", e);
             throw new AtlasBaseException("Failed to initialize TagDAO", e);
@@ -472,7 +476,9 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
         }
     }
 
-    private static final int ASYNC_READ_BATCH_SIZE = 30;
+    private static final int DEFAULT_ASYNC_READ_BATCH_SIZE = 30;
+    private static final String ASYNC_READ_BATCH_SIZE_PROPERTY = "atlas.tag.denorm.async.read.batch.size";
+    private final int asyncReadBatchSize;
 
     @Override
     public Map<String, List<Tag>> getAllTagsByVertexIds(Collection<String> vertexIds) throws AtlasBaseException {
@@ -487,8 +493,8 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
             List<String> vertexIdList = new ArrayList<>(vertexIds);
 
             // Phase 1: Fast async reads in sub-batches
-            for (int i = 0; i < vertexIdList.size(); i += ASYNC_READ_BATCH_SIZE) {
-                List<String> batch = vertexIdList.subList(i, Math.min(i + ASYNC_READ_BATCH_SIZE, vertexIdList.size()));
+            for (int i = 0; i < vertexIdList.size(); i += asyncReadBatchSize) {
+                List<String> batch = vertexIdList.subList(i, Math.min(i + asyncReadBatchSize, vertexIdList.size()));
 
                 Map<String, CompletionStage<AsyncResultSet>> futures = new LinkedHashMap<>();
                 for (String vertexId : batch) {
@@ -517,7 +523,7 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
                     result.put(vertexId, tags);
                     LOG.info("Sync retry succeeded for vertexId={}", vertexId);
                 } catch (Exception e) {
-                    LOG.error("Sync retry also failed for vertexId={}, skipping (caller will DLQ)", vertexId, e);
+                    LOG.warn("Sync retry also failed for vertexId={}, skipping (caller will DLQ)", vertexId, e);
                 }
             }
 

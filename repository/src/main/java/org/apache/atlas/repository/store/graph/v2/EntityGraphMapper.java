@@ -258,38 +258,6 @@ public class EntityGraphMapper {
         }
     }
 
-    private static void incrementCounter(Counter counter, double amount) {
-        if (counter != null) {
-            try {
-                counter.increment(amount);
-            } catch (Exception e) {
-                LOG.warn("Failed to increment Prometheus counter", e);
-            }
-        }
-    }
-
-    /**
-     * Emits a detailed Prometheus counter for ES flush failures, with labels for debugging.
-     * Labels: reason (what failed), dlq_status (emitted/lost), error_type (exception class on total failure).
-     */
-    private void emitEsFlushFailureMetric(String reason, String dlqStatus, String errorType, double count) {
-        if (meterRegistry == null) {
-            return;
-        }
-        try {
-            Counter.Builder builder = Counter.builder("tag.denorm.es.flush.failure.detail")
-                    .description("Detailed tag denorm ES flush failures with reason labels")
-                    .tag("reason", reason)
-                    .tag("dlq_status", dlqStatus);
-            if (errorType != null) {
-                builder.tag("error_type", errorType);
-            }
-            builder.register(meterRegistry).increment(count);
-        } catch (Exception e) {
-            LOG.warn("Failed to emit ES flush failure detail metric", e);
-        }
-    }
-
     @VisibleForTesting
     public void setTasksUseFlag(boolean value) {
         DEFERRED_ACTION_ENABLED = value;
@@ -6233,7 +6201,7 @@ public class EntityGraphMapper {
                     cassandraFailedVertexIds.add(vertexId);
                 }
             }
-            if (!cassandraFailedVertexIds.isEmpty()) {
+            if (CollectionUtils.isNotEmpty(cassandraFailedVertexIds)) {
                 LOG.warn("Cassandra read failed for {} vertices, sending to DLQ", cassandraFailedVertexIds.size());
                 tagDenormDLQProducer.emitFailedVertices(cassandraFailedVertexIds, snapshotMap);
                 RequestContext.get().addTagDenormEsFailureCount(cassandraFailedVertexIds.size());
@@ -7285,6 +7253,38 @@ public class EntityGraphMapper {
             update.setRestrictPropagationThroughHierarchy(current.getRestrictPropagationThroughHierarchy() != null
                     ? current.getRestrictPropagationThroughHierarchy()
                     : RESTRICT_PROPAGATION_THROUGH_HIERARCHY_DEFAULT);
+        }
+    }
+
+    private static void incrementCounter(Counter counter, double amount) {
+        if (counter != null) {
+            try {
+                counter.increment(amount);
+            } catch (Exception e) {
+                LOG.warn("Failed to increment Prometheus counter", e);
+            }
+        }
+    }
+
+    /**
+     * Emits a detailed Prometheus counter for ES flush failures, with labels for debugging.
+     * Labels: reason (what failed), dlq_status (emitted/lost), error_type (exception class on total failure).
+     */
+    private void emitEsFlushFailureMetric(String reason, String dlqStatus, String errorType, double count) {
+        if (meterRegistry == null) {
+            return;
+        }
+        try {
+            Counter.Builder builder = Counter.builder("tag.denorm.es.flush.failure.detail")
+                    .description("Detailed tag denorm ES flush failures with reason labels")
+                    .tag("reason", reason)
+                    .tag("dlq_status", dlqStatus);
+            if (errorType != null) {
+                builder.tag("error_type", errorType);
+            }
+            builder.register(meterRegistry).increment(count);
+        } catch (Exception e) {
+            LOG.warn("Failed to emit ES flush failure detail metric", e);
         }
     }
 
