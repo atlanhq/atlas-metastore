@@ -505,6 +505,7 @@ public abstract class AtlasInProcessBaseIT {
         LOG.info("AtlasClientV2 created (http://localhost:{})", atlasPort);
     }
 
+
     /**
      * Diagnostic: verify that TypeDefs were loaded during bootstrap.
      * Logs counts of each TypeDef category so GHA logs show whether

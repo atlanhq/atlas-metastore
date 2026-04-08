@@ -41,7 +41,9 @@ public enum AtlasConfiguration {
 
     NOTIFICATION_HOOK_TOPIC_NAME("atlas.notification.hook.topic.name", "ATLAS_HOOK"),
     NOTIFICATION_ENTITIES_TOPIC_NAME("atlas.notification.entities.topic.name", "ATLAS_ENTITIES"),
+    NOTIFICATION_ENTITIES_FULL_TOPIC_NAME("atlas.notification.entities.full.topic.name", "ATLAS_ENTITIES_FULL"),
     NOTIFICATION_RELATIONSHIPS_TOPIC_NAME("atlas.notification.relationships.topic.name", "ATLAS_RELATIONSHIPS"),
+    NOTIFICATION_COMPLETE_ASSETS_TOPIC_NAME("atlas.notification.complete.assets.topic.name", "ATLAS_COMPLETE_ASSETS"),
     NOTIFICATION_ATLAS_DISTRIBUTED_TASKS_TOPIC_NAME("atlas.notification.distributed.tasks.topic.name", "ATLAS_DISTRIBUTED_TASKS"),
     NOTIFICATION_TASK_EVENTS_TOPIC_NAME("atlas.notification.task.events.topic.name", "ATLAS_TASK_EVENTS"),
 
