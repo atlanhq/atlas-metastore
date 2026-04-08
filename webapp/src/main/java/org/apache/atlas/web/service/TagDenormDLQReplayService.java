@@ -52,6 +52,7 @@ public class TagDenormDLQReplayService {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String PROPERTY_PREFIX = "atlas.kafka";
     private static final String MESSAGE_TYPE_TAG_DENORM_SYNC = "TAG_DENORM_SYNC";
+    private static final int REPAIR_BATCH_SIZE = 100;
 
     private String bootstrapServers;
 
@@ -514,26 +515,34 @@ public class TagDenormDLQReplayService {
 
         log.info("Repairing tag denorm for {} vertices from DLQ", guids.size());
 
-        // Delegate to existing repair — same pattern as EntityMutationService:345-355
-        try {
-            Map<String, String> errors = entityStore.repairClassificationMappingsV2(guids);
+        // Process in batches to bound memory (deferred ops accumulate per batch)
+        // Same pattern as EntityMutationService:341-355
+        Map<String, String> allErrors = new HashMap<>();
+        int batchSize = REPAIR_BATCH_SIZE;
 
-            // Flush deferred ES operations (same pattern as EntityMutationService:353-354)
-            List<ESDeferredOperation> deferredOps = RequestContext.get().getESDeferredOperations();
-            if (!deferredOps.isEmpty()) {
-                postProcessor.executeESOperations(deferredOps);
+        for (int i = 0; i < guids.size(); i += batchSize) {
+            List<String> batch = guids.subList(i, Math.min(i + batchSize, guids.size()));
+            try {
+                Map<String, String> errors = entityStore.repairClassificationMappingsV2(batch);
+                allErrors.putAll(errors);
+
+                // Flush deferred ES operations after each batch (same pattern as EntityMutationService:353-354)
+                List<ESDeferredOperation> deferredOps = RequestContext.get().getESDeferredOperations();
+                if (!deferredOps.isEmpty()) {
+                    postProcessor.executeESOperations(deferredOps);
+                }
+            } finally {
+                // Always clear deferred ops to prevent leakage between batches
+                RequestContext.get().getESDeferredOperations().clear();
             }
-
-            if (!errors.isEmpty()) {
-                log.warn("Tag denorm DLQ repair completed with {} errors: {}", errors.size(), errors);
-                throw new AtlasBaseException("Repair failed for " + errors.size() + " vertices: " + errors.keySet());
-            }
-
-            log.info("Successfully repaired tag denorm for {} vertices from DLQ", guids.size());
-        } finally {
-            // Always clear deferred ops to prevent leakage between messages
-            RequestContext.get().getESDeferredOperations().clear();
         }
+
+        if (!allErrors.isEmpty()) {
+            log.warn("Tag denorm DLQ repair completed with {} errors: {}", allErrors.size(), allErrors);
+            throw new AtlasBaseException("Repair failed for " + allErrors.size() + " vertices: " + allErrors.keySet());
+        }
+
+        log.info("Successfully repaired tag denorm for {} vertices from DLQ", guids.size());
     }
 
     /**
