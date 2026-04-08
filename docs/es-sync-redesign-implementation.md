@@ -185,34 +185,70 @@ tagDAO.putPropagatedTags() throws
 | Audit | Not created |
 | Recovery | Manual retry via `PUT /task/retry/{guid}` |
 
-### Scenario 2: ES write fails (partial or total)
+### Scenario 2: ES bulk write partial failure
+
+Example: chunk of 200 vertices, bulk request sent to ES, 195 docs succeed, 5 get 429/field limit errors.
 
 ```
-tagDAO.putPropagatedTags() ✅
-safeFlushTagDenormToES():
-  flushTagDenormToES() → ES write fails
-  → DLQ emit ✅
-  → updateTaskEsStatus(PARTIAL_FAILURE/FAILED, "Events added to DLQ: ...")
-  → exception CAUGHT, not rethrown
-entityChangeNotifier.onClassificationPropagation*() ✅ audit created
-→ Task completes: status=COMPLETE, esStatus=PARTIAL_FAILURE/FAILED
+flushTagDenormToES():
+  tagDAO.getAllTagsByVertexIds(200) ✅ all read
+  computeAllDenormAttributes() ✅
+  ESConnector.writeTagPropertiesWithResult(200 docs):
+    → ES bulk response: 195 OK, 5 failed (429 throttled)
+    → Retries retryable failures (429, 5xx) with exponential backoff
+    → After max retries: 5 still failed
+  → result.hasFailures() = true, failedVertexIds = [5 vertices]
+  → 5 failed vertices → DLQ
+  → updateTaskEsStatus(PARTIAL_FAILURE, "ES write failed for 5 vertices")
+  → exception NOT thrown — task continues
+notification ✅ audit created
 ```
 
 | Aspect | State |
 |--------|-------|
 | Task status | COMPLETE |
-| esStatus | PARTIAL_FAILURE or FAILED |
-| Cassandra | Tags written correctly |
-| ES | Stale (temporarily) |
-| Audit | Created ✅ |
-| DLQ | Failed vertices emitted |
-| Recovery | TagDenormDLQReplayService repairs ES automatically |
+| esStatus | PARTIAL_FAILURE |
+| Cassandra | All 200 tags correct |
+| ES | 195 updated, 5 stale |
+| Audit | Created for all 200 ✅ |
+| DLQ | 5 vertex IDs emitted |
+| Recovery | TagDenormDLQReplayService repairs 5 vertices |
 
-### Scenario 3: ES write fails AND DLQ emit also fails
+**Handled correctly.** ES bulk response is parsed per-doc. Retryable failures (429, 5xx) are retried with backoff. Permanently failed docs are DLQ'd. Successfully written docs are counted. Task continues. ✅
+
+### Scenario 3: ES write total failure (exception)
+
+ES cluster unreachable, network error, or non-retryable HTTP status.
+
+```
+flushTagDenormToES():
+  tagDAO.getAllTagsByVertexIds(200) ✅
+  ESConnector.writeTagPropertiesWithResult() throws RuntimeException
+  → catch (Exception e):
+    → ALL 200 vertices → DLQ
+    → updateTaskEsStatus(FAILED, "Events added to DLQ: ...")
+    → return allFailed(...)
+  → safeFlushTagDenormToES catches, logs, doesn't rethrow
+notification ✅ audit created
+```
+
+| Aspect | State |
+|--------|-------|
+| Task status | COMPLETE |
+| esStatus | FAILED |
+| Cassandra | All 200 tags correct |
+| ES | Nothing written for this chunk |
+| Audit | Created for all 200 ✅ |
+| DLQ | All 200 vertex IDs emitted |
+| Recovery | TagDenormDLQReplayService repairs all 200 |
+
+**Handled correctly.** Total failure DLQs all vertices in the chunk. Task continues to next chunk. ✅
+
+### Scenario 4: ES + DLQ both fail
 
 ```
 flushTagDenormToES() → ES write throws
-  → tagDenormDLQProducer.emitFailedVertices() also throws
+  → tagDenormDLQProducer.emitFailedVertices() also throws (Kafka down)
     → inner catch: LOG.error("Failed to emit to DLQ as well. Vertices needing repair: {vertexIds}")
   → updateTaskEsStatus(FAILED, "DLQ emit also failed: ...")
 ```
@@ -227,7 +263,37 @@ flushTagDenormToES() → ES write throws
 | DLQ | Message lost |
 | Recovery | **Manual** — vertex IDs logged in error message, use `repairClassificationMappings` API |
 
-### Scenario 4: Pod restart after partial progress
+**Handled correctly.** DLQ failure is caught and logged with vertex IDs. Not ideal (manual repair needed) but no crash, no data loss in Cassandra. ✅
+
+### Scenario 5: Cassandra write fails mid-task
+
+Task has 1000 vertices, 5 chunks of 200. Chunk 3's `putPropagatedTags` fails.
+
+```
+Chunk 1: putPropagatedTags ✅ → ES flush ✅ → notification ✅
+Chunk 2: putPropagatedTags ✅ → ES flush ✅ → notification ✅
+Chunk 3: putPropagatedTags ❌ throws
+  → exception propagates → catch at line 4653 → throw
+  → ClassificationTask.perform() catches → FAILED
+  → AbstractTask.run() → incrementAttemptCount → throw
+  → TaskConsumer → updateStatus(FAILED) → persists to graph
+Chunks 4-5: NEVER EXECUTED
+```
+
+| Aspect | State |
+|--------|-------|
+| Task status | FAILED (not auto-retried) |
+| Cassandra | Chunks 1-2 written (400 vertices). Chunk 3 atomic (LOGGED batch with `BATCH_SIZE_LIMIT=200` = same as `CHUNK_SIZE`) — either all 200 committed or none. Chunks 4-5 not written. |
+| ES | Chunks 1-2 flushed. Chunk 3+ not attempted. |
+| Audit | Chunks 1-2 notified. Chunk 3+ no audit. |
+| DLQ | Nothing — Cassandra write failure, not ES failure |
+| Recovery | Manual retry via `PUT /task/retry/{guid}`. Re-executes from beginning. Chunks 1-2 re-written (idempotent upsert). |
+
+**Note:** `putPropagatedTags` uses LOGGED batches with `BATCH_SIZE_LIMIT = 200`, same as `CHUNK_SIZE = 200`. So each chunk is ONE atomic LOGGED batch — no partial commit within a chunk. Either all 200 rows commit or none do.
+
+**Handled correctly.** Same behavior as master — Cassandra write failure has always failed the task. No partial commit within a chunk due to matching batch sizes. ✅
+
+### Scenario 6: Pod restart after partial progress
 
 Example: 4 chunks, chunk 1 succeeds, pod crashes before chunk 2.
 
@@ -240,13 +306,13 @@ Example: 4 chunks, chunk 1 succeeds, pod crashes before chunk 2.
 | Re-execution | All chunks replay. Cassandra writes idempotent (upsert). ES writes idempotent (full snapshot). Safe. |
 | Side effect | Duplicate notifications for chunk 1 vertices |
 
-### Scenario 5: Cassandra async read fails for some vertices
+### Scenario 7: Cassandra async read fails for some vertices during ES flush
 
 ```
 flushTagDenormToES():
   tagDAO.getAllTagsByVertexIds(200 vertices):
     Phase 1 (async): 198 succeed, 2 timeout
-    Phase 2 (sync retry): 1 succeeds, 1 still fails
+    Phase 2 (sync retry): 1 succeeds on retry, 1 still fails
   → Result map: 199 vertices. 1 missing.
   → 1 vertex → DLQ
   → 199 vertices → compute denorm → write to ES ✅
@@ -256,11 +322,16 @@ flushTagDenormToES():
 |--------|-------|
 | Task status | COMPLETE |
 | esStatus | PARTIAL_FAILURE |
-| Cassandra | All 200 tags correct |
+| Cassandra | All 200 tags correct (write succeeded earlier) |
 | ES | 199 updated, 1 stale |
+| DLQ | 1 vertex emitted |
 | Recovery | DLQ replay service repairs the 1 vertex |
 
-### Scenario 6: Maintenance mode enabled mid-task
+**Note:** The DLQ here is for a Cassandra READ failure during ES flush, not a Cassandra WRITE failure. The tag was already written to Cassandra successfully (`putPropagatedTags` completed). The read failure is transient — the DLQ consumer re-reads from Cassandra (which has recovered) and writes to ES.
+
+**Handled correctly.** Phase 1 async + Phase 2 sync retry gives 4 attempts per vertex. Only permanently failed vertices go to DLQ. ✅
+
+### Scenario 8: Maintenance mode enabled mid-task
 
 ```
 checkMaintenanceModeOrInterrupt() throws MAINTENANCE_MODE_ENABLED
