@@ -17,6 +17,10 @@
  */
 package org.apache.atlas.repository.store.graph.v2;
 
+import org.apache.atlas.ApplicationProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * Standalone replacement for org.janusgraph.util.encoding.LongEncoding.
  * Encodes/decodes long values to/from compact string representation
@@ -29,8 +33,26 @@ package org.apache.atlas.repository.store.graph.v2;
  */
 public final class LongEncodingUtil {
 
+    private static final Logger LOG = LoggerFactory.getLogger(LongEncodingUtil.class);
+
     private static final String BASE_SYMBOLS = "0123456789abcdefghijklmnopqrstuvwxyz";
     private static final int    BASE         = BASE_SYMBOLS.length(); // 36
+
+    private static final boolean IS_CASSANDRA_BACKEND;
+
+    static {
+        boolean cassandra = false;
+        try {
+            String backend = ApplicationProperties.get().getString(
+                    ApplicationProperties.GRAPHDB_BACKEND_CONF,
+                    ApplicationProperties.DEFAULT_GRAPHDB_BACKEND);
+            cassandra = ApplicationProperties.GRAPHDB_BACKEND_CASSANDRA.equalsIgnoreCase(backend);
+        } catch (Exception e) {
+            LOG.warn("Failed to read graphdb backend config, defaulting to JanusGraph encoding", e);
+        }
+        IS_CASSANDRA_BACKEND = cassandra;
+        LOG.info("LongEncodingUtil: IS_CASSANDRA_BACKEND={}", IS_CASSANDRA_BACKEND);
+    }
 
     private LongEncodingUtil() {
         // utility class
@@ -75,23 +97,27 @@ public final class LongEncodingUtil {
     /**
      * Compute the ES document ID from a vertex ID string.
      *
-     * Two cases:
-     * 1. JanusGraph (existing tenants): vertex IDs are numeric longs (e.g., "4096").
-     *    The ES doc ID is the base-36 encoding (e.g., "38g"), matching JanusGraph's
-     *    LongEncoding.encode() output. This preserves backward compatibility with
-     *    existing ES indices.
+     * The mapping depends on the graph backend:
      *
-     * 2. Cassandra backend (new tenants): vertex IDs are UUIDs
-     *    (e.g., "550e8400-e29b-41d4-a716-446655440000"). The ES doc ID is the UUID
-     *    returned as-is, matching the _id that CassandraGraph.appendESIndexAction()
-     *    writes to Elasticsearch during commit.
+     * <b>JanusGraph mode:</b> vertex IDs are numeric longs (e.g., "4096").
+     * JanusGraph internally base-36 encodes them for ES doc IDs (e.g., "38g").
+     * We replicate that encoding here.
+     *
+     * <b>CassandraGraph mode:</b> CassandraGraph.syncVerticesToElasticsearch()
+     * always uses the vertex ID string as-is for the ES doc _id, regardless of
+     * whether the vertex ID is a migrated JanusGraph numeric long (e.g., "41996504")
+     * or a new deterministic SHA-256 hex / UUID. So we return as-is.
      */
     public static String vertexIdToDocId(String vertexId) {
+        if (IS_CASSANDRA_BACKEND) {
+            return vertexId;
+        }
+
+        // JanusGraph mode: base-36 encode numeric vertex IDs
         try {
             return encode(Long.parseLong(vertexId));
         } catch (NumberFormatException e) {
-            // Non-numeric vertex ID (e.g., UUID from Cassandra graph backend)
-            // Return as-is to match the _id used by CassandraGraph's ES sync
+            // Non-numeric vertex ID — return as-is
             return vertexId;
         }
     }
