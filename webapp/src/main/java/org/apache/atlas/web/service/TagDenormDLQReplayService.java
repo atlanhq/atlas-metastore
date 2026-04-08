@@ -163,6 +163,15 @@ public class TagDenormDLQReplayService {
             return;
         }
 
+        try {
+            startConsumer();
+        } catch (Exception e) {
+            log.error("Failed to start tag denorm DLQ replay service. Service will be unavailable but pod will not crash.", e);
+            isHealthy.set(false);
+        }
+    }
+
+    private void startConsumer() {
         log.info("Starting tag denorm DLQ replay service for topic: {} with consumer group: {}", dlqTopic, consumerGroupId);
 
         Properties consumerProps = new Properties();
