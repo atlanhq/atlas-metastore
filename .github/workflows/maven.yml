@@ -35,6 +35,7 @@ on:
       - hotfix-reindex-refresh
       - ms-864-keycloak-jwks-internal-url
       - ms-610-ranges-policy-cache
+      - ms-922-staled-tag-tasks
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
