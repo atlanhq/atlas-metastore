@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
+import org.apache.atlas.GraphTransactionInterceptor;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.ESDeferredOperation;
@@ -334,94 +335,101 @@ public class TagDenormDLQReplayService {
                             String retryKey = record.partition() + "-" + record.offset();
 
                             try {
-                                log.info("Processing tag denorm DLQ entry at offset: {} from partition: {}",
-                                        record.offset(), record.partition());
+                                try {
+                                    log.info("Processing tag denorm DLQ entry at offset: {} from partition: {}",
+                                            record.offset(), record.partition());
 
-                                long processingStartTime = System.currentTimeMillis();
-                                replayTagDenormDLQEntry(record.value());
-                                long processingTime = System.currentTimeMillis() - processingStartTime;
+                                    long processingStartTime = System.currentTimeMillis();
+                                    replayTagDenormDLQEntry(record.value());
+                                    long processingTime = System.currentTimeMillis() - processingStartTime;
 
-                                processedCount.incrementAndGet();
+                                    processedCount.incrementAndGet();
 
-                                // Success - remove from retry tracker, reset backoff, and commit offset
-                                retryTracker.remove(retryKey);
-                                resetExponentialBackoff(retryKey);
-
-                                Map<TopicPartition, OffsetAndMetadata> offsets = Collections.singletonMap(
-                                        new TopicPartition(record.topic(), record.partition()),
-                                        new OffsetAndMetadata(record.offset() + 1)
-                                );
-                                consumer.commitSync(offsets);
-
-                                log.debug("Successfully replayed tag denorm DLQ entry (offset: {}, partition: {}) in {}ms",
-                                        record.offset(), record.partition(), processingTime);
-
-                            } catch (AtlasBaseException atlasBaseException) {
-                                // Treat as transient — Cassandra/graph failure, will retry with exponential backoff
-                                errorCount.incrementAndGet();
-
-                                long backoffDelay = calculateExponentialBackoff(retryKey);
-
-                                log.warn("AtlasBaseException while replaying tag denorm DLQ entry (offset: {}, partition: {}). " +
-                                                "Will retry on next poll after {}ms backoff (exponential). " +
-                                                "STOPPING batch processing to prevent skipping this message. Error: {}",
-                                        record.offset(), record.partition(), backoffDelay, atlasBaseException.getMessage());
-
-                                failedOffset = record.offset();
-                                failedPartition = new TopicPartition(record.topic(), record.partition());
-
-                                Thread.sleep(backoffDelay);
-                                break;
-                            } catch (Exception e) {
-                                errorCount.incrementAndGet();
-
-                                // Track retry attempts with timestamp for this specific offset
-                                RetryTrackerEntry entry = retryTracker.get(retryKey);
-                                int retryCount;
-                                if (entry == null) {
-                                    retryCount = 1;
-                                    retryTracker.put(retryKey, new RetryTrackerEntry(retryCount));
-                                } else {
-                                    retryCount = entry.retryCount + 1;
-                                    entry.retryCount = retryCount;
-                                    entry.lastAttemptTime = System.currentTimeMillis();
-                                }
-
-                                if (retryCount >= maxRetries) {
-                                    // Clean up both trackers for poison pill
-                                    log.error("Tag denorm DLQ entry at offset {} partition {} failed {} times (max retries reached). " +
-                                                    "SKIPPING this message to prevent partition blockage. Error: {}",
-                                            record.offset(), record.partition(), retryCount, e.getMessage(), e);
-
-                                    skippedCount.incrementAndGet();
+                                    // Success - remove from retry tracker, reset backoff, and commit offset
                                     retryTracker.remove(retryKey);
                                     resetExponentialBackoff(retryKey);
 
-                                    // Commit offset to move past poison pill
                                     Map<TopicPartition, OffsetAndMetadata> offsets = Collections.singletonMap(
                                             new TopicPartition(record.topic(), record.partition()),
                                             new OffsetAndMetadata(record.offset() + 1)
                                     );
-                                    try {
-                                        consumer.commitSync(offsets);
-                                        log.warn("Committed offset {} to skip poison pill", record.offset() + 1);
-                                    } catch (Exception commitEx) {
-                                        log.error("Failed to commit offset after skipping poison pill", commitEx);
-                                    }
-                                    // Continue to next record after skipping poison pill
-                                } else {
-                                    // Add delay before retrying to avoid tight retry loop
-                                    log.warn("Failed to replay tag denorm DLQ entry (offset: {}, partition: {}). Retry {}/{}. " +
-                                                    "STOPPING batch processing to prevent skipping this message. " +
-                                                    "Will retry on next poll after {}ms delay. Error: {}",
-                                            record.offset(), record.partition(), retryCount, maxRetries, retryDelayMs, e.getMessage());
+                                    consumer.commitSync(offsets);
+
+                                    log.debug("Successfully replayed tag denorm DLQ entry (offset: {}, partition: {}) in {}ms",
+                                            record.offset(), record.partition(), processingTime);
+
+                                } catch (AtlasBaseException atlasBaseException) {
+                                    // Treat as transient — Cassandra/graph failure, will retry with exponential backoff
+                                    errorCount.incrementAndGet();
+
+                                    long backoffDelay = calculateExponentialBackoff(retryKey);
+
+                                    log.warn("AtlasBaseException while replaying tag denorm DLQ entry (offset: {}, partition: {}). " +
+                                                    "Will retry on next poll after {}ms backoff (exponential). " +
+                                                    "STOPPING batch processing to prevent skipping this message. Error: {}",
+                                            record.offset(), record.partition(), backoffDelay, atlasBaseException.getMessage());
 
                                     failedOffset = record.offset();
                                     failedPartition = new TopicPartition(record.topic(), record.partition());
 
-                                    Thread.sleep(retryDelayMs);
+                                    Thread.sleep(backoffDelay);
                                     break;
+                                } catch (Exception e) {
+                                    errorCount.incrementAndGet();
+
+                                    // Track retry attempts with timestamp for this specific offset
+                                    RetryTrackerEntry entry = retryTracker.get(retryKey);
+                                    int retryCount;
+                                    if (entry == null) {
+                                        retryCount = 1;
+                                        retryTracker.put(retryKey, new RetryTrackerEntry(retryCount));
+                                    } else {
+                                        retryCount = entry.retryCount + 1;
+                                        entry.retryCount = retryCount;
+                                        entry.lastAttemptTime = System.currentTimeMillis();
+                                    }
+
+                                    if (retryCount >= maxRetries) {
+                                        // Clean up both trackers for poison pill
+                                        log.error("Tag denorm DLQ entry at offset {} partition {} failed {} times (max retries reached). " +
+                                                        "SKIPPING this message to prevent partition blockage. Error: {}",
+                                                record.offset(), record.partition(), retryCount, e.getMessage(), e);
+
+                                        skippedCount.incrementAndGet();
+                                        retryTracker.remove(retryKey);
+                                        resetExponentialBackoff(retryKey);
+
+                                        // Commit offset to move past poison pill
+                                        Map<TopicPartition, OffsetAndMetadata> offsets = Collections.singletonMap(
+                                                new TopicPartition(record.topic(), record.partition()),
+                                                new OffsetAndMetadata(record.offset() + 1)
+                                        );
+                                        try {
+                                            consumer.commitSync(offsets);
+                                            log.warn("Committed offset {} to skip poison pill", record.offset() + 1);
+                                        } catch (Exception commitEx) {
+                                            log.error("Failed to commit offset after skipping poison pill", commitEx);
+                                        }
+                                        // Continue to next record after skipping poison pill
+                                    } else {
+                                        // Add delay before retrying to avoid tight retry loop
+                                        log.warn("Failed to replay tag denorm DLQ entry (offset: {}, partition: {}). Retry {}/{}. " +
+                                                        "STOPPING batch processing to prevent skipping this message. " +
+                                                        "Will retry on next poll after {}ms delay. Error: {}",
+                                                record.offset(), record.partition(), retryCount, maxRetries, retryDelayMs, e.getMessage());
+
+                                        failedOffset = record.offset();
+                                        failedPartition = new TopicPartition(record.topic(), record.partition());
+
+                                        Thread.sleep(retryDelayMs);
+                                        break;
+                                    }
                                 }
+                            } finally {
+                                // Clear RequestContext and graph vertex cache between messages to prevent accumulation
+                                // Same pattern as TaskConsumer.run() finally block (TaskExecutor.java:213)
+                                RequestContext.get().clearCache();
+                                GraphTransactionInterceptor.clearCache();
                             }
                         }
                     } finally {
