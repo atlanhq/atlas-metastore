@@ -838,6 +838,10 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
             }
         }
 
+        public LinkedHashMap<String, Object> getRawHit() {
+            return hit;
+        }
+
         @Override
         @SuppressWarnings("unchecked")
         public AtlasVertex<CassandraVertex, CassandraEdge> getVertex() {
