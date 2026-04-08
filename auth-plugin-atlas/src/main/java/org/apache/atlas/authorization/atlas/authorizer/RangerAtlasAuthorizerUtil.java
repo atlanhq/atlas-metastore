@@ -98,17 +98,38 @@ public class RangerAtlasAuthorizerUtil {
             response.getDenyGroups().addAll(policyItem.getGroups());
         }
 
-        // Record trace if enabled - with principal information
-        if (AccessDecisionContext.isTraceEnabled() && result != null && result.getPolicyId() != null && !result.getPolicyId().equals("-1")) {
-            boolean isAllow = evaluator.getPolicyItemType() == RangerPolicyItemEvaluator.POLICY_ITEM_TYPE_ALLOW;
-            AccessDecisionContext.getCurrentTrace().recordRangerMatchFromResult(
-                result.getPolicyId(),
-                result.getPolicyPriority(),
-                isAllow,
-                policyItem.getUsers(),
-                policyItem.getGroups(),
-                policyItem.getRoles()
-            );
+         // Record trace if enabled - with full policy information
+        if (AccessDecisionContext.isTraceEnabled()) {
+            try {
+                // Use reflection to access the protected 'policy' field from RangerAbstractPolicyItemEvaluator
+                java.lang.reflect.Field policyField = evaluator.getClass().getSuperclass().getDeclaredField("policy");
+                policyField.setAccessible(true);
+                RangerPolicy policy = (RangerPolicy) policyField.get(evaluator);
+
+                if (policy != null) {
+                    boolean isAllow = evaluator.getPolicyItemType() == RangerPolicyItemEvaluator.POLICY_ITEM_TYPE_ALLOW;
+                    AccessDecisionContext.getCurrentTrace().recordRangerMatch(
+                        policy,
+                        isAllow,
+                        policyItem.getUsers(),
+                        policyItem.getGroups(),
+                        policyItem.getRoles()
+                    );
+                }
+            } catch (Exception e) {
+                // Fallback to result-based recording if reflection fails
+                if (result != null && result.getPolicyId() != null && !result.getPolicyId().equals("-1")) {
+                    boolean isAllow = evaluator.getPolicyItemType() == RangerPolicyItemEvaluator.POLICY_ITEM_TYPE_ALLOW;
+                    AccessDecisionContext.getCurrentTrace().recordRangerMatchFromResult(
+                        result.getPolicyId(),
+                        result.getPolicyPriority(),
+                        isAllow,
+                        policyItem.getUsers(),
+                        policyItem.getGroups(),
+                        policyItem.getRoles()
+                    );
+                }
+            }
         }
     }
 
