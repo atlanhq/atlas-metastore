@@ -362,6 +362,15 @@ Removing a label doesn't trigger cleanup. Tenants from that cohort stay on the r
 
 **Mitigation:** Re-add the label, or use `manual-cohort-cleanup.yml`.
 
+### Edge Case 5: Stale state file from a closed PR
+
+State files (`atlan-releases/atlas-ring-<branch>.json`) are created when a release completes and persist after a PR is closed. If a developer closes a ring PR (triggering cleanup) and later opens a **new PR** from the same branch:
+
+- **Deployment is fine.** The `CohortID` includes the PR URL (e.g., `source:github-pr:atlanhq/atlas-metastore/pull/6500-path:...`), so the new PR's CohortID won't match the old entry keyed to the previous PR number. `GetTenantNamesActivity` falls through to read from the cohort file.
+- **Cleanup is problematic.** When the new PR is closed, `pr-close-release.yml` triggers with empty `cohortSource` and empty `imageTag`. The cleanup path in `GetTenantNamesActivity` aggregates tenants from **all entries** in the state file — including the old PR's entry. This means cleanup processes hundreds of stale tenants (all no-ops since overrides were already removed, but wasteful and confusing in results).
+
+**Mitigation:** Delete the state file from `atlan-releases` before starting a new release from the same branch.
+
 ### Limitation: ArgoCD behaviour (tenant umbrella app)
 
 Verification depends on the tenant's ArgoCD application. Today, atlas is deployed as part of a **large umbrella chart** (many subcharts: redis, kafka, cassandra, keycloak, etc.). This leads to two limitations:
