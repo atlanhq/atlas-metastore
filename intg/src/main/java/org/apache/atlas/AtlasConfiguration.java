@@ -207,7 +207,13 @@ public enum AtlasConfiguration {
     BULK_PURGE_BATCH_SIZE("atlas.bulk.purge.batch.size", 500),
     BULK_PURGE_WORKER_COUNT("atlas.bulk.purge.worker.count", 4),
     BULK_PURGE_REDIS_TTL_SECONDS("atlas.bulk.purge.redis.ttl.seconds", 86400),
-    BULK_PURGE_ORPHAN_CHECK_ENABLED("atlas.bulk.purge.orphan.check.enabled", true);
+    BULK_PURGE_ORPHAN_CHECK_ENABLED("atlas.bulk.purge.orphan.check.enabled", true),
+
+    // Index repair configuration (Phase 2b — reindex entities after self-healing)
+    INDEX_REPAIR_ENABLED("atlas.index.repair.enabled", true),
+    INDEX_REPAIR_BATCH_SIZE("atlas.index.repair.batch.size", 50),
+    INDEX_REPAIR_BATCH_DELAY_MS("atlas.index.repair.batch.delay.ms", 500),
+    INDEX_REPAIR_CONSUMER_ENABLED("atlas.index.repair.consumer.enabled", true);
 
     private static final Configuration APPLICATION_PROPERTIES;
 

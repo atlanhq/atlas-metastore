@@ -59,6 +59,12 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.*;
 
+import org.apache.atlas.AtlasConfiguration;
+import org.apache.atlas.model.notification.AtlasDistributedTaskNotification;
+import org.apache.atlas.notification.NotificationException;
+import org.apache.atlas.notification.NotificationInterface;
+import org.springframework.beans.factory.annotation.Autowired;
+
 import static org.apache.atlas.ApplicationProperties.INDEX_BACKEND_CONF;
 import static org.apache.atlas.model.typedef.AtlasBaseTypeDef.*;
 import static org.apache.atlas.repository.Constants.*;
@@ -106,6 +112,14 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
     private boolean     recomputeIndexedKeys = true;
     private Set<String> vertexIndexKeys      = new HashSet<>();
     private IndexHealthMetricService indexHealthMetricService;
+
+    // Phase 2b: optional sender for reindex messages — may be null during early startup
+    @Autowired(required = false)
+    private NotificationInterface notificationInterface;
+
+    // Collects repair records during a single onChange()/onLoadCompletion() cycle.
+    // Cleared at the start of each cycle. Safe because management transactions are serialized.
+    private final List<Map<String, Object>> pendingRepairs = new ArrayList<>();
 
     // Self-healing guard: only auto-repair missing property keys on established schemas.
     // On a fresh environment, null property keys are normal — they haven't been created yet.
@@ -184,6 +198,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
             LOG.debug("Processing changed typedefs {}", changedTypeDefs);
         }
 
+        pendingRepairs.clear();
         AtlasGraphManagement management = null;
 
         try {
@@ -218,10 +233,14 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
 
             //Commit indexes
             commit(management);
+
+            // Phase 2b: after successful commit, send reindex message for any repaired attributes
+            sendReindexMessageIfNeeded();
         } catch (RepositoryException | IndexException e) {
             LOG.error("Failed to update indexes for changed typedefs", e);
             attemptRollback(changedTypeDefs, management);
         } finally {
+            pendingRepairs.clear();
             // Always audit — even if commit failed or rollback re-threw
             runIndexHealthAudit();
         }
@@ -235,6 +254,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
             LOG.debug("Type definition load completed. Informing the completion to IndexChangeListeners.");
         }
 
+        pendingRepairs.clear();
         Collection<AtlasBaseTypeDef> typeDefs = new ArrayList<>();
 
         typeDefs.addAll(typeRegistry.getAllEntityDefs());
@@ -252,11 +272,15 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
             //Commit indexes
             commit(management);
 
+            // Phase 2b: after successful commit, send reindex message for any repaired attributes
+            sendReindexMessageIfNeeded();
+
             notifyInitializationCompletion(changedTypeDefs);
         } catch (RepositoryException | IndexException e) {
             LOG.error("Failed to update indexes for changed typedefs", e);
             attemptRollback(changedTypeDefs, management);
         } finally {
+            pendingRepairs.clear();
             runIndexHealthAudit();
         }
     }
@@ -302,6 +326,55 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
         }, "index-health-audit");
         auditThread.setDaemon(true);
         auditThread.start();
+    }
+
+    /**
+     * Sends a REINDEX_REPAIRED_ATTRIBUTES message to Kafka if any attributes were
+     * self-healed during this onChange()/onLoadCompletion() cycle.
+     *
+     * Called AFTER successful management commit — only sends if repairs actually persisted.
+     * Fire-and-forget: Kafka failure does NOT fail the Cedar push. The repair details are
+     * already logged at WARN level, so ops can trigger manual reindex if Kafka is down.
+     *
+     * During early startup (onLoadCompletion), notificationInterface may be null because
+     * Spring hasn't wired all beans yet — in that case, logs a WARN and skips.
+     */
+    private void sendReindexMessageIfNeeded() {
+        if (pendingRepairs.isEmpty()) {
+            return;
+        }
+
+        if (!AtlasConfiguration.INDEX_REPAIR_ENABLED.getBoolean()) {
+            LOG.info("Index repair is disabled (atlas.index.repair.enabled=false). "
+                    + "Skipping reindex for {} repaired attributes.", pendingRepairs.size());
+            return;
+        }
+
+        if (notificationInterface == null) {
+            LOG.warn("INDEX REPAIR: NotificationInterface not available (early startup?). "
+                    + "Cannot send reindex message for {} repaired attributes. "
+                    + "Manual reindex may be needed.", pendingRepairs.size());
+            return;
+        }
+
+        try {
+            Map<String, Object> params = new HashMap<>();
+            params.put("repairs", new ArrayList<>(pendingRepairs));
+            params.put("podId", System.getenv().getOrDefault("HOSTNAME", "unknown-pod"));
+            params.put("timestamp", System.currentTimeMillis());
+
+            AtlasDistributedTaskNotification notification = new AtlasDistributedTaskNotification(
+                    AtlasDistributedTaskNotification.AtlasTaskType.REINDEX_REPAIRED_ATTRIBUTES, params);
+
+            notificationInterface.send(
+                    NotificationInterface.NotificationType.ATLAS_DISTRIBUTED_TASKS, notification);
+
+            LOG.info("INDEX REPAIR: Sent reindex message for {} repaired attributes to Kafka",
+                    pendingRepairs.size());
+        } catch (NotificationException e) {
+            LOG.error("INDEX REPAIR: Failed to send reindex message to Kafka for {} repaired attributes. "
+                    + "Manual reindex may be needed. Repairs: {}", pendingRepairs.size(), pendingRepairs, e);
+        }
     }
 
     public Set<String> getVertexIndexKeys() {
@@ -648,17 +721,26 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                                     }
                                 }
 
+                                long repairTimestamp = System.currentTimeMillis();
                                 LOG.warn("INDEX AUTO-REPAIR: Repaired missing property key for attribute={}, "
                                         + "vertexPropertyName={}, indexFieldName={}, definedInType={}, "
                                         + "affectedEntityTypes={}, repairTimestamp={}. "
                                         + "Future writes will include this field in ES. "
-                                        + "Existing entities need manual repairIndex (Phase 2b).",
+                                        + "Queuing reindex for existing entities (Phase 2b).",
                                         attribute.getQualifiedName(),
                                         attribute.getVertexPropertyName(),
                                         indexFieldName,
                                         definedInTypeName,
                                         affectedEntityTypes,
-                                        System.currentTimeMillis());
+                                        repairTimestamp);
+
+                                // Collect repair record for Phase 2b reindex
+                                Map<String, Object> repairRecord = new HashMap<>();
+                                repairRecord.put("vertexPropertyName", attribute.getVertexPropertyName());
+                                repairRecord.put("affectedEntityTypes", new ArrayList<>(affectedEntityTypes));
+                                repairRecord.put("repairTimestamp", repairTimestamp);
+                                repairRecord.put("attributeName", attribute.getQualifiedName());
+                                pendingRepairs.add(repairRecord);
                             } else {
                                 LOG.error("CRITICAL: Failed to auto-repair index for attribute={}. "
                                         + "ES sync WILL BE BROKEN for this field.",
