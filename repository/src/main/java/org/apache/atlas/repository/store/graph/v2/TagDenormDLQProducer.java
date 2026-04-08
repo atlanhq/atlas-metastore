@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.micrometer.core.instrument.Counter;
 import org.apache.atlas.ApplicationProperties;
+import org.apache.atlas.RequestContext;
+import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.service.metrics.MetricUtils;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.configuration.ConfigurationConverter;
@@ -103,6 +105,11 @@ public class TagDenormDLQProducer {
             ObjectNode message = MAPPER.createObjectNode();
             message.put("type", "TAG_DENORM_SYNC");
             message.put("timestamp", System.currentTimeMillis());
+
+            AtlasTask currentTask = RequestContext.get().getCurrentTask();
+            if (currentTask != null) {
+                message.put("taskGuid", currentTask.getGuid());
+            }
 
             ObjectNode vertices = message.putObject("vertices");
             for (String vertexId : failedVertexIds) {
