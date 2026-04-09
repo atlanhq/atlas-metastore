@@ -2,8 +2,9 @@ package org.apache.atlas.repository.graphdb.cassandra;
 
 import org.apache.atlas.repository.graphdb.*;
 
-import java.util.*;
-import java.util.stream.StreamSupport;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.function.Function;
 
 public class CassandraVertexQuery implements AtlasVertexQuery<CassandraVertex, CassandraEdge> {
 
@@ -78,71 +79,63 @@ public class CassandraVertexQuery implements AtlasVertexQuery<CassandraVertex, C
             return total;
         }
 
-        // Has-predicates require property inspection — fall back to materialise-and-count
-        Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> edges = getMatchingEdges(-1);
-        return StreamSupport.stream(edges.spliterator(), false).count();
+        // Has-predicates require property inspection — stream lazily and count
+        long count = 0;
+        for (AtlasEdge<CassandraVertex, CassandraEdge> ignored : getMatchingEdges(-1)) {
+            count++;
+        }
+        return count;
     }
 
     private Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> getMatchingEdges(int limit) {
-        List<AtlasEdge<CassandraVertex, CassandraEdge>> result = new ArrayList<>();
+        // Source: already-lazy iterable from CassandraVertex (PaginatedEdgeIterable/MergedEdgeIterable)
+        Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> rawEdges =
+                (labels != null && labels.length > 0)
+                        ? vertex.getEdges(direction, labels)
+                        : vertex.getEdges(direction);
 
-        if (labels != null && labels.length > 0) {
-            for (String label : labels) {
-                Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> edges = vertex.getEdges(direction, label);
-                for (AtlasEdge<CassandraVertex, CassandraEdge> edge : edges) {
-                    if (matchesHasPredicates(edge)) {
-                        result.add(edge);
-                        if (limit > 0 && result.size() >= limit) {
-                            return result;
-                        }
-                    }
-                }
-            }
-        } else {
-            Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> edges = vertex.getEdges(direction);
-            for (AtlasEdge<CassandraVertex, CassandraEdge> edge : edges) {
-                if (matchesHasPredicates(edge)) {
-                    result.add(edge);
-                    if (limit > 0 && result.size() >= limit) {
-                        return result;
-                    }
-                }
-            }
-        }
+        // Filter: lazy predicate filter (common case: no predicates → no wrapping)
+        Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> filtered =
+                hasPredicates.isEmpty()
+                        ? rawEdges
+                        : new FilteredEdgeIterable(rawEdges, this::matchesHasPredicates);
 
-        return result;
+        // Limit: lazy truncation (limit <= 0 means unlimited)
+        return limit > 0
+                ? new LimitedIterable<>(filtered, limit)
+                : filtered;
     }
 
+    @SuppressWarnings("unchecked")
     private Iterable<AtlasVertex<CassandraVertex, CassandraEdge>> getAdjacentVertices(int limit) {
-        List<AtlasVertex<CassandraVertex, CassandraEdge>> result = new ArrayList<>();
+        // Edges: already-lazy from getMatchingEdges (no limit — let vertex limit handle it)
         Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> edges = getMatchingEdges(-1);
 
-        for (AtlasEdge<CassandraVertex, CassandraEdge> edge : edges) {
-            AtlasVertex<CassandraVertex, CassandraEdge> adjacent;
-            if (direction == AtlasEdgeDirection.OUT) {
-                adjacent = edge.getInVertex();
-            } else if (direction == AtlasEdgeDirection.IN) {
-                adjacent = edge.getOutVertex();
-            } else {
-                // BOTH: return the other vertex
-                String vertexId = vertex.getIdString();
-                CassandraEdge ce = (CassandraEdge) edge;
-                if (ce.getOutVertexId().equals(vertexId)) {
-                    adjacent = edge.getInVertex();
-                } else {
-                    adjacent = edge.getOutVertex();
-                }
-            }
+        // Map edge → adjacent vertex lazily; nulls are skipped by MappedIterable
+        Function<AtlasEdge<CassandraVertex, CassandraEdge>, AtlasVertex<CassandraVertex, CassandraEdge>> edgeToVertex =
+                edge -> {
+                    if (direction == AtlasEdgeDirection.OUT) {
+                        return edge.getInVertex();
+                    } else if (direction == AtlasEdgeDirection.IN) {
+                        return edge.getOutVertex();
+                    } else {
+                        // BOTH: return the other vertex
+                        String vertexId = vertex.getIdString();
+                        CassandraEdge ce = (CassandraEdge) edge;
+                        if (ce.getOutVertexId().equals(vertexId)) {
+                            return edge.getInVertex();
+                        } else {
+                            return edge.getOutVertex();
+                        }
+                    }
+                };
 
-            if (adjacent != null) {
-                result.add(adjacent);
-                if (limit > 0 && result.size() >= limit) {
-                    break;
-                }
-            }
-        }
+        Iterable<AtlasVertex<CassandraVertex, CassandraEdge>> vertices =
+                (Iterable) new MappedIterable<>(edges, edgeToVertex);
 
-        return result;
+        return limit > 0
+                ? new LimitedIterable<>(vertices, limit)
+                : vertices;
     }
 
     private boolean matchesHasPredicates(AtlasEdge<CassandraVertex, CassandraEdge> edge) {

@@ -211,7 +211,11 @@ public enum AtlasConfiguration {
     BULK_PURGE_ORPHAN_CHECK_ENABLED("atlas.bulk.purge.orphan.check.enabled", true),
 
     // Cassandra edge pagination: page size for lazy edge iteration (super vertex mitigation)
-    CASSANDRA_EDGE_PAGE_SIZE("atlas.cassandra.edge.page.size", 500);
+    CASSANDRA_EDGE_PAGE_SIZE("atlas.cassandra.edge.page.size", 500),
+
+    // When getEdges(direction, labels) is called with more labels than this threshold,
+    // switch from N per-label CQL queries to a single partition scan + client-side filter.
+    CASSANDRA_EDGE_LABEL_BATCH_THRESHOLD("atlas.cassandra.edge.label.batch.threshold", 5);
 
     private static final Configuration APPLICATION_PROPERTIES;
 

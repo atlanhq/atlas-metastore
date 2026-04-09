@@ -42,6 +42,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     static final Set<String> EXCLUDE_ES_INDEXES_PREFIXING = new HashSet<>(Arrays.asList("search_logs"));
 
     private static final int EDGE_PAGE_SIZE = AtlasConfiguration.CASSANDRA_EDGE_PAGE_SIZE.getInt();
+    private static final int EDGE_LABEL_BATCH_THRESHOLD = AtlasConfiguration.CASSANDRA_EDGE_LABEL_BATCH_THRESHOLD.getInt();
 
     /**
      * Max vertices per LOGGED batch in commit(). Prevents exceeding Cassandra's
@@ -502,6 +503,43 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
         // Lazy merge: yields buffered edges first, then streams persisted edges
         // while filtering out duplicates (buffered overrides) and removed edges.
+        return (Iterable) new MergedEdgeIterable(bufferedEdges, persistedEdges, txBuffer.get());
+    }
+
+    /**
+     * Returns the configured threshold for switching from per-label CQL queries
+     * to a single partition scan with client-side label filtering.
+     */
+    int getEdgeLabelBatchThreshold() {
+        return EDGE_LABEL_BATCH_THRESHOLD;
+    }
+
+    /**
+     * Fetch edges for a vertex filtered by a set of labels, using a single partition scan
+     * with client-side label filtering instead of N per-label CQL queries.
+     *
+     * <p>Use when the number of requested labels exceeds the batch threshold.
+     * Memory usage is still O(pageSize + bufferSize).
+     *
+     * @param labelFilter set of labels to include
+     */
+    @SuppressWarnings("unchecked")
+    Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> getEdgesForVertexFiltered(
+            String vertexId, AtlasEdgeDirection direction, Set<String> labelFilter) {
+        // Snapshot buffered edges (all labels for this vertex/direction), then filter by label set
+        List<CassandraEdge> allBuffered = txBuffer.get().getEdgesForVertex(vertexId, direction, null);
+        List<CassandraEdge> bufferedEdges = new ArrayList<>();
+        for (CassandraEdge edge : allBuffered) {
+            if (labelFilter.contains(edge.getLabel())) {
+                bufferedEdges.add(edge);
+            }
+        }
+
+        // Single partition scan with client-side label filter
+        Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> persistedEdges =
+                edgeRepository.getEdgesForVertexPagedWithFilter(
+                        vertexId, direction, labelFilter, this, EDGE_PAGE_SIZE);
+
         return (Iterable) new MergedEdgeIterable(bufferedEdges, persistedEdges, txBuffer.get());
     }
 

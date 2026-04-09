@@ -1819,6 +1819,8 @@ public final class GraphHelper {
         AtlasRelationshipEdgeDirection edgeDirection = attribute.getRelationshipEdgeDirection();
         Iterator<AtlasEdge>            edgesForLabel = getEdgesForLabel(vertex, edgeLabel, edgeDirection);
 
+        // TODO(supervertex): IteratorUtils.toList() materializes ALL edges into memory.
+        //  For vertices with 1M+ map-value edges this will OOM. Replace with lazy streaming.
         return (List<AtlasEdge>) IteratorUtils.toList(edgesForLabel);
     }
 
@@ -1850,6 +1852,8 @@ public final class GraphHelper {
         AtlasRelationshipEdgeDirection edgeDirection = attribute.getRelationshipEdgeDirection();
         Iterator<AtlasEdge>            edgesForLabel = getActiveEdges(vertex, edgeLabel, AtlasEdgeDirection.valueOf(edgeDirection.name()));
 
+        // TODO(supervertex): IteratorUtils.toList() materializes ALL active collection edges into memory.
+        //  For vertices with 1M+ collection edges this will OOM. Replace with lazy streaming.
         ret = IteratorUtils.toList(edgesForLabel);
 
         sortCollectionElements(attribute, ret);
@@ -1863,6 +1867,8 @@ public final class GraphHelper {
         AtlasRelationshipEdgeDirection edgeDirection = attribute.getRelationshipEdgeDirection();
         Iterator<AtlasEdge>            edgesForLabel = getEdgesForLabel(vertex, edgeLabel, edgeDirection);
 
+        // TODO(supervertex): IteratorUtils.toList() materializes ALL collection edges into memory.
+        //  For vertices with 1M+ collection edges this will OOM. Replace with lazy streaming.
         ret = IteratorUtils.toList(edgesForLabel);
 
         sortCollectionElements(attribute, ret);

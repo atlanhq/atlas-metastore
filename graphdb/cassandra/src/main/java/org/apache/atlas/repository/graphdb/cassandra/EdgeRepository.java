@@ -474,6 +474,76 @@ public class EdgeRepository {
     }
 
     /**
+     * Lazy paginated edge fetch with client-side label filtering.
+     * Fires a <b>single full-partition scan</b> (no {@code edge_label} in WHERE clause)
+     * and filters by label set inside {@link PaginatedEdgeIterable}, skipping
+     * non-matching rows before JSON property parsing.
+     *
+     * <p>Use this instead of N per-label queries when the number of requested labels
+     * exceeds the batch threshold (default 5). For 50 labels, this is 1 CQL query
+     * (or 2 for BOTH) instead of 50 sequential round-trips.
+     *
+     * @param labelFilter set of labels to include (must not be null or empty)
+     * @param pageSize    Cassandra driver page size (rows per page fetch)
+     * @return lazy single-use Iterable
+     */
+    @SuppressWarnings("unchecked")
+    public Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> getEdgesForVertexPagedWithFilter(
+            String vertexId, AtlasEdgeDirection direction, Set<String> labelFilter,
+            CassandraGraph graph, int pageSize) {
+
+        if (direction == AtlasEdgeDirection.BOTH) {
+            Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> outIterable =
+                getEdgesForVertexPagedWithFilter(vertexId, AtlasEdgeDirection.OUT, labelFilter, graph, pageSize);
+            Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> inIterable =
+                getEdgesForVertexPagedWithFilter(vertexId, AtlasEdgeDirection.IN, labelFilter, graph, pageSize);
+
+            return () -> new Iterator<AtlasEdge<CassandraVertex, CassandraEdge>>() {
+                private final Iterator<AtlasEdge<CassandraVertex, CassandraEdge>> outIter = outIterable.iterator();
+                private Iterator<AtlasEdge<CassandraVertex, CassandraEdge>> inIter = null;
+
+                @Override
+                public boolean hasNext() {
+                    if (outIter.hasNext()) {
+                        return true;
+                    }
+                    return inIterator().hasNext();
+                }
+
+                @Override
+                public AtlasEdge<CassandraVertex, CassandraEdge> next() {
+                    if (outIter.hasNext()) {
+                        return outIter.next();
+                    }
+                    return inIterator().next();
+                }
+
+                private Iterator<AtlasEdge<CassandraVertex, CassandraEdge>> inIterator() {
+                    if (inIter == null) {
+                        inIter = inIterable.iterator();
+                    }
+                    return inIter;
+                }
+            };
+        }
+
+        boolean isOut = (direction == AtlasEdgeDirection.OUT);
+        String tableName    = isOut ? "edges_out" : "edges_in";
+        String partitionCol = isOut ? "out_vertex_id" : "in_vertex_id";
+        String otherCol     = isOut ? "in_vertex_id" : "out_vertex_id";
+
+        // Full partition scan — no edge_label in WHERE clause
+        String cql = "SELECT edge_id, edge_label, " + otherCol + ", properties, state " +
+                     "FROM " + tableName + " WHERE " + partitionCol + " = ?";
+        SimpleStatement stmt = SimpleStatement.builder(cql)
+                .setPageSize(pageSize)
+                .addPositionalValue(vertexId)
+                .build();
+
+        return new PaginatedEdgeIterable(() -> session.execute(stmt), vertexId, isOut, graph, labelFilter);
+    }
+
+    /**
      * Discover distinct edge labels along with the typeName from the first edge of each label.
      * Combines label discovery with typeName extraction in a single skip-scan pass.
      *
@@ -971,13 +1041,6 @@ public class EdgeRepository {
         batch.addStatement(deleteEdgeByIdStmt.bind(edge.getIdString()));
 
         session.execute(batch.build());
-    }
-
-    public void deleteEdgesForVertex(String vertexId, CassandraGraph graph) {
-        List<CassandraEdge> allEdges = getEdgesForVertex(vertexId, AtlasEdgeDirection.BOTH, null, graph);
-        if (!allEdges.isEmpty()) {
-            batchDeleteEdges(allEdges);
-        }
     }
 
     /**

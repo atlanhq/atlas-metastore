@@ -11,6 +11,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Set;
 import java.util.function.Supplier;
 
 /**
@@ -19,6 +20,10 @@ import java.util.function.Supplier;
  * fetching automatically via the page size configured on the statement.
  *
  * <p>Memory usage is O(pageSize) instead of O(totalEdges).
+ *
+ * <p>When a {@code labelFilter} is supplied, rows whose {@code edge_label} is
+ * not in the filter set are skipped <b>before</b> JSON property parsing,
+ * avoiding wasted deserialization on non-matching rows.
  *
  * <p>This iterable is <b>re-iterable</b> — each call to {@link #iterator()}
  * re-executes the CQL query via the supplied {@link Supplier}, producing a
@@ -32,6 +37,7 @@ public class PaginatedEdgeIterable implements Iterable<AtlasEdge<CassandraVertex
     private final String              vertexId;
     private final boolean             isOut;
     private final CassandraGraph      graph;
+    private final Set<String>         labelFilter;  // null = no filtering
 
     /**
      * @param resultSetSupplier supplier that executes the CQL query and returns a fresh ResultSet
@@ -42,10 +48,24 @@ public class PaginatedEdgeIterable implements Iterable<AtlasEdge<CassandraVertex
      */
     public PaginatedEdgeIterable(Supplier<ResultSet> resultSetSupplier, String vertexId,
                                  boolean isOut, CassandraGraph graph) {
+        this(resultSetSupplier, vertexId, isOut, graph, null);
+    }
+
+    /**
+     * @param resultSetSupplier supplier that executes the CQL query and returns a fresh ResultSet
+     * @param vertexId    the vertex ID that owns these edges
+     * @param isOut       true if these are OUT edges, false if IN edges
+     * @param graph       the graph instance for edge construction
+     * @param labelFilter if non-null, only edges whose label is in this set are yielded;
+     *                    rows with non-matching labels are skipped before JSON parsing
+     */
+    public PaginatedEdgeIterable(Supplier<ResultSet> resultSetSupplier, String vertexId,
+                                 boolean isOut, CassandraGraph graph, Set<String> labelFilter) {
         this.resultSetSupplier = resultSetSupplier;
-        this.vertexId  = vertexId;
-        this.isOut     = isOut;
-        this.graph     = graph;
+        this.vertexId    = vertexId;
+        this.isOut       = isOut;
+        this.graph       = graph;
+        this.labelFilter = labelFilter;
     }
 
     @Override
@@ -56,6 +76,7 @@ public class PaginatedEdgeIterable implements Iterable<AtlasEdge<CassandraVertex
 
     private class PaginatedEdgeIterator implements Iterator<CassandraEdge> {
         private final Iterator<Row> rowIterator;
+        private CassandraEdge nextEdge;
 
         PaginatedEdgeIterator(ResultSet resultSet) {
             this.rowIterator = resultSet.iterator();
@@ -63,16 +84,41 @@ public class PaginatedEdgeIterable implements Iterable<AtlasEdge<CassandraVertex
 
         @Override
         public boolean hasNext() {
-            return rowIterator.hasNext();
+            if (nextEdge != null) {
+                return true;
+            }
+            nextEdge = advance();
+            return nextEdge != null;
         }
 
         @Override
         public CassandraEdge next() {
-            if (!rowIterator.hasNext()) {
+            if (nextEdge == null) {
+                nextEdge = advance();
+            }
+            if (nextEdge == null) {
                 throw new NoSuchElementException();
             }
-            Row row = rowIterator.next();
-            return mapRowToEdge(row);
+            CassandraEdge result = nextEdge;
+            nextEdge = null;
+            return result;
+        }
+
+        private CassandraEdge advance() {
+            while (rowIterator.hasNext()) {
+                Row row = rowIterator.next();
+
+                // Check label filter BEFORE expensive JSON parsing
+                if (labelFilter != null) {
+                    String label = row.getString("edge_label");
+                    if (!labelFilter.contains(label)) {
+                        continue;
+                    }
+                }
+
+                return mapRowToEdge(row);
+            }
+            return null;
         }
 
         private CassandraEdge mapRowToEdge(Row row) {
