@@ -221,6 +221,7 @@ public class TagReconciliationService {
 
         List<String> directTagNames = new ArrayList<>();
         List<String> propagatedTagNames = new ArrayList<>();
+        List<Tag> orphanTags = new ArrayList<>();
 
         for (Tag tag : allTags) {
             boolean isPropagated = !vertexId.equals(tag.getSourceVertexId());
@@ -241,18 +242,24 @@ public class TagReconciliationService {
                 if (sourceCache.get(cacheKey)) {
                     propagatedTagNames.add(tag.getTagTypeName());
                 } else {
-                    // Orphan — clean up
-                    try {
-                        tagDAO.deleteTags(Collections.singletonList(tag));
-                        result.orphansCleaned++;
-                        LOG.info("TagReconciler: cleaned orphan tag {} on vertex {} from source {}",
-                                tag.getTagTypeName(), vertexId, tag.getSourceVertexId());
-                    } catch (Exception e) {
-                        LOG.warn("TagReconciler: failed to clean orphan on vertex {}", vertexId, e);
-                    }
+                    orphanTags.add(tag);
                 }
             } else {
                 directTagNames.add(tag.getTagTypeName());
+            }
+        }
+
+        // Batch-delete all orphans in one call
+        if (!orphanTags.isEmpty()) {
+            try {
+                tagDAO.deleteTags(orphanTags);
+                result.orphansCleaned = orphanTags.size();
+                for (Tag orphan : orphanTags) {
+                    LOG.info("TagReconciler: cleaned orphan tag {} on vertex {} from source {}",
+                            orphan.getTagTypeName(), vertexId, orphan.getSourceVertexId());
+                }
+            } catch (Exception e) {
+                LOG.warn("TagReconciler: failed to clean {} orphans on vertex {}", orphanTags.size(), vertexId, e);
             }
         }
 
@@ -267,11 +274,11 @@ public class TagReconciliationService {
 
         fields.put(TRAIT_NAMES_PROPERTY_KEY, new ArrayList<>(directNames));
         fields.put(CLASSIFICATION_NAMES_KEY, directNames.isEmpty() ? null
-                : CLASSIFICATION_NAME_DELIMITER + String.join(CLASSIFICATION_NAME_DELIMITER, directNames));
+                : CLASSIFICATION_NAME_DELIMITER + String.join(CLASSIFICATION_NAME_DELIMITER, directNames) + CLASSIFICATION_NAME_DELIMITER);
 
         fields.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, new ArrayList<>(propagatedNames));
         fields.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, propagatedNames.isEmpty() ? null
-                : CLASSIFICATION_NAME_DELIMITER + String.join(CLASSIFICATION_NAME_DELIMITER, propagatedNames));
+                : CLASSIFICATION_NAME_DELIMITER + String.join(CLASSIFICATION_NAME_DELIMITER, propagatedNames) + CLASSIFICATION_NAME_DELIMITER);
 
         Set<String> allNames = new LinkedHashSet<>();
         allNames.addAll(directNames);
