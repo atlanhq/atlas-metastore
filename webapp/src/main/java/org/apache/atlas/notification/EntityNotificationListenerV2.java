@@ -43,7 +43,7 @@ import org.apache.atlas.utils.AtlasPerfMetrics.MetricRecorder;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.configuration.Configuration;
-import org.janusgraph.util.encoding.LongEncoding;
+import org.apache.atlas.repository.store.graph.v2.LongEncodingUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -339,10 +339,10 @@ public class EntityNotificationListenerV2 implements EntityChangeListenerV2 {
                 } else if (CollectionUtils.isNotEmpty(context.getESDeferredOperations())) {
                     List<ESDeferredOperation> esDefferredOperations = context.getESDeferredOperations();
                     if (CollectionUtils.isNotEmpty(esDefferredOperations)) {
-                        Long vertexId = LongEncoding.decode(docId);
                         for (ESDeferredOperation esDeferredOperation : esDefferredOperations) {
-                            if (Long.parseLong(esDeferredOperation.getEntityId()) == vertexId) {
-                                Map<String, Object> classificationInternalAttributes = esDeferredOperation.getPayload().get(String.valueOf(vertexId));
+                            String entityVertexId = esDeferredOperation.getEntityId();
+                            if (docId.equals(LongEncodingUtil.vertexIdToDocId(entityVertexId))) {
+                                Map<String, Object> classificationInternalAttributes = esDeferredOperation.getPayload().get(entityVertexId);
                                 if (MapUtils.isNotEmpty(classificationInternalAttributes)) {
                                     ret.getInternalAttributes().putAll(classificationInternalAttributes);
                                 }
