@@ -411,7 +411,7 @@ public class EdgeRepository {
             CassandraGraph graph, int pageSize) {
 
         if (direction == AtlasEdgeDirection.BOTH) {
-            // Chain OUT + IN lazily
+            // Chain OUT + IN lazily — IN query is deferred until OUT is exhausted
             Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> outIterable =
                 getEdgesForVertexPaged(vertexId, AtlasEdgeDirection.OUT, edgeLabel, graph, pageSize);
             Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> inIterable =
@@ -419,16 +419,29 @@ public class EdgeRepository {
 
             return () -> new Iterator<AtlasEdge<CassandraVertex, CassandraEdge>>() {
                 private final Iterator<AtlasEdge<CassandraVertex, CassandraEdge>> outIter = outIterable.iterator();
-                private final Iterator<AtlasEdge<CassandraVertex, CassandraEdge>> inIter  = inIterable.iterator();
+                private Iterator<AtlasEdge<CassandraVertex, CassandraEdge>> inIter = null;
 
                 @Override
                 public boolean hasNext() {
-                    return outIter.hasNext() || inIter.hasNext();
+                    if (outIter.hasNext()) {
+                        return true;
+                    }
+                    return inIterator().hasNext();
                 }
 
                 @Override
                 public AtlasEdge<CassandraVertex, CassandraEdge> next() {
-                    return outIter.hasNext() ? outIter.next() : inIter.next();
+                    if (outIter.hasNext()) {
+                        return outIter.next();
+                    }
+                    return inIterator().next();
+                }
+
+                private Iterator<AtlasEdge<CassandraVertex, CassandraEdge>> inIterator() {
+                    if (inIter == null) {
+                        inIter = inIterable.iterator();
+                    }
+                    return inIter;
                 }
             };
         }
@@ -480,6 +493,7 @@ public class EdgeRepository {
     }
 
     private static final int DELETED_EDGE_SCAN_LIMIT = 1000;
+    private static final int MAX_DISTINCT_LABELS     = 10_000;
 
     private void collectDistinctLabelsWithTypeName(String vertexId, String tableName, String partitionCol,
                                                     Map<String, String> labelToTypeName) {
@@ -487,7 +501,14 @@ public class EdgeRepository {
                      " WHERE " + partitionCol + " = ? AND edge_label > ? LIMIT 1";
 
         String currentLabel = "";
+        int iterations = 0;
         while (true) {
+            if (++iterations > MAX_DISTINCT_LABELS) {
+                LOG.warn("collectDistinctLabelsWithTypeName: exceeded {} iterations for vertex {} in {}, stopping",
+                         MAX_DISTINCT_LABELS, vertexId, tableName);
+                break;
+            }
+
             SimpleStatement stmt = SimpleStatement.newInstance(cql, vertexId, currentLabel);
             ResultSet rs = session.execute(stmt);
             Row row = rs.one();
