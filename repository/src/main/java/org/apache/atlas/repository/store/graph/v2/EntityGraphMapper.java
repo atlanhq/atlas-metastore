@@ -7275,14 +7275,13 @@ public class EntityGraphMapper {
             return;
         }
         try {
-            Counter.Builder builder = Counter.builder("tag.denorm.es.flush.failure.detail")
+            Counter.builder("tag.denorm.es.flush.failure.detail")
                     .description("Detailed tag denorm ES flush failures with reason labels")
                     .tag("reason", reason)
-                    .tag("dlq_status", dlqStatus);
-            if (errorType != null) {
-                builder.tag("error_type", errorType);
-            }
-            builder.register(meterRegistry).increment(count);
+                    .tag("dlq_status", dlqStatus)
+                    .tag("error_type", errorType != null ? errorType : "none")
+                    .register(meterRegistry)
+                    .increment(count);
         } catch (Exception e) {
             LOG.warn("Failed to emit ES flush failure detail metric", e);
         }
