@@ -357,6 +357,14 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
         AtlasGraphManagement management = null;
 
         try {
+            // Ensure janusgraph_vertex_index has required analysis settings before field mapping registration.
+            // Fields use atlan_normalizer which must be defined on the index. JanusGraph creates the index
+            // with empty settings — this call ensures correctness before any PUT mapping requests are sent.
+            AtlasGraphIndexClient indexClient = graph.getGraphIndexClient();
+            if (!indexClient.ensureVertexIndexSettings()) {
+                LOG.warn("GraphBackedSearchIndexer: could not verify vertex index analysis settings — field registration may fail.");
+            }
+
             management = graph.getManagementSystem();
             LOG.debug("Creating indexes for graph.");
 

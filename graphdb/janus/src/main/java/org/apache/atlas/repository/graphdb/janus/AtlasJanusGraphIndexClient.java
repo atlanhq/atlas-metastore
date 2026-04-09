@@ -113,6 +113,12 @@ public class AtlasJanusGraphIndexClient implements AtlasGraphIndexClient {
         return Collections.EMPTY_LIST;
     }
 
+    @Override
+    public boolean ensureVertexIndexSettings() {
+        // Not applicable for Solr/Janus backend — settings are managed externally.
+        return true;
+    }
+
     private boolean isSolrHealthy() throws SolrServerException, IOException {
         return true;
     }

@@ -3,6 +3,7 @@ package org.apache.atlas.repository.graphdb.cassandra;
 import org.apache.atlas.model.discovery.AtlasAggregationEntry;
 import org.apache.atlas.repository.graphdb.AggregationContext;
 import org.apache.atlas.repository.graphdb.AtlasGraphIndexClient;
+import org.apache.atlas.repository.graphdb.elasticsearch.AtlasElasticsearchIndexClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,5 +56,10 @@ public class CassandraGraphIndexClient implements AtlasGraphIndexClient {
             LOG.warn("ES health check failed: {}", e.getMessage());
             return false;
         }
+    }
+
+    @Override
+    public boolean ensureVertexIndexSettings() {
+        return new AtlasElasticsearchIndexClient(null).ensureVertexIndexSettings();
     }
 }
