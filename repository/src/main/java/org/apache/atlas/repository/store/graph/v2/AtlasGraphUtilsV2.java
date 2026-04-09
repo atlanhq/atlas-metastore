@@ -749,7 +749,7 @@ public class AtlasGraphUtilsV2 {
             return hasInstance;
         } catch (Exception e) {
             LOG.error("Error checking type instances for {}: {}", typeName, e.getMessage(), e);
-            // Conservative: if ES query fails, assume references exist to prevent accidental deletion
+            // If ES fails, assume the type is still linked to entities to prevent accidental deletion
             return true;
         }
     }
