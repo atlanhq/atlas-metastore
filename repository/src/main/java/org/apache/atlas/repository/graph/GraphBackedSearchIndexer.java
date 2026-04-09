@@ -37,6 +37,7 @@ import org.apache.atlas.model.typedef.AtlasEntityDef;
 import org.apache.atlas.model.typedef.AtlasEnumDef;
 import org.apache.atlas.model.typedef.AtlasRelationshipDef;
 import org.apache.atlas.model.typedef.AtlasStructDef;
+import org.apache.atlas.repository.store.graph.v2.ESConnector;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.IndexException;
@@ -183,6 +184,11 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
 
         try {
             management = provider.get().getManagementSystem();
+
+            // MS-928: Apply ES-native nested mappings BEFORE JanusGraph processing.
+            // JanusGraph's commit creates keyword mappings for all properties it touches.
+            // If we apply the nested mapping first, ES preserves it (can't change type).
+            applyESNestedMappings(changedTypeDefs);
 
             // Update index for newly created types
             if (CollectionUtils.isNotEmpty(changedTypeDefs.getCreatedTypeDefs())) {
@@ -694,6 +700,17 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
         boolean          isMapType      = isMapType(attribTypeName);
         final String     uniqPropName   = isUnique ? AtlasGraphUtilsV2.encodePropertyKey(UNIQUE_ATTRIBUTE_SHADE_PROPERTY_PREFIX + attributeDef.getName()) : null;
         final AtlasAttributeDef.IndexType indexType      = attributeDef.getIndexType();
+        // MS-928: Skip JanusGraph index creation for attributes with indexTypeESMapping.
+        // These need ES-native mappings (e.g., "nested") that JanusGraph can't create.
+        // If JanusGraph creates the field first (as keyword), ES rejects the nested mapping.
+        // The mapping is applied by applyESNestedMappings() after commit.
+        String indexTypeESMapping = attributeDef.getIndexTypeESMapping();
+        if (org.apache.commons.lang.StringUtils.isNotEmpty(indexTypeESMapping)) {
+            LOG.info("Skipping JanusGraph index for attribute '{}' — ES mapping '{}' will be applied directly",
+                    attributeDef.getName(), indexTypeESMapping);
+            return;
+        }
+
         HashMap<String, Object> indexTypeESConfig = attributeDef.getIndexTypeESConfig();
         HashMap<String, HashMap<String, Object>> indexTypeESFields = attributeDef.getIndexTypeESFields();
 
@@ -1139,6 +1156,48 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
         return !(INDEX_EXCLUSION_CLASSES.contains(propertyClass) || cardinality.isMany());
     }
     
+    /**
+     * MS-928: Scan changed typedefs for attributes with indexTypeESMapping="nested"
+     * and apply the mapping directly to ES. This bridges the gap between what the
+     * typedef declares and what JanusGraph can create (JanusGraph only supports
+     * multi-fields, not ES nested types).
+     */
+    private void applyESNestedMappings(ChangedTypeDefs changedTypeDefs) {
+        try {
+            Map<String, Map<String, Object>> nestedMappings = new LinkedHashMap<>();
+
+            List<AtlasBaseTypeDef> allChanged = new ArrayList<>();
+            if (changedTypeDefs.getCreatedTypeDefs() != null) allChanged.addAll(changedTypeDefs.getCreatedTypeDefs());
+            if (changedTypeDefs.getUpdatedTypeDefs() != null) allChanged.addAll(changedTypeDefs.getUpdatedTypeDefs());
+
+            for (AtlasBaseTypeDef typeDef : allChanged) {
+                if (typeDef instanceof AtlasStructDef) {
+                    for (AtlasStructDef.AtlasAttributeDef attrDef : ((AtlasStructDef) typeDef).getAttributeDefs()) {
+                        String esMapping = attrDef.getIndexTypeESMapping();
+                        if ("nested".equalsIgnoreCase(esMapping)) {
+                            // Build the nested properties from indexTypeESFields
+                            HashMap<String, HashMap<String, Object>> esFields = attrDef.getIndexTypeESFields();
+                            Map<String, Object> nestedProps = new LinkedHashMap<>();
+                            if (esFields != null) {
+                                for (Map.Entry<String, HashMap<String, Object>> field : esFields.entrySet()) {
+                                    nestedProps.put(field.getKey(), new LinkedHashMap<>(field.getValue()));
+                                }
+                            }
+                            nestedMappings.put(attrDef.getName(), nestedProps);
+                        }
+                    }
+                }
+            }
+
+            if (!nestedMappings.isEmpty()) {
+                LOG.info("Applying ES nested mappings for: {}", nestedMappings.keySet());
+                ESConnector.ensureNestedMappings(nestedMappings);
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to apply ES nested mappings — non-fatal", e);
+        }
+    }
+
     public void commit(AtlasGraphManagement management) throws IndexException {
         try {
             management.commit();
