@@ -668,13 +668,12 @@ public class TagDenormDLQReplayService {
             return;
         }
         try {
-            Counter.Builder builder = Counter.builder("tag.denorm.dlq.replay.messages")
+            Counter.builder("tag.denorm.dlq.replay.messages")
                     .description("Tag denorm DLQ replay message outcomes")
-                    .tag("outcome", outcome);
-            if (reason != null) {
-                builder.tag("reason", reason);
-            }
-            builder.register(meterRegistry).increment();
+                    .tag("outcome", outcome)
+                    .tag("reason", reason != null ? reason : "none")
+                    .register(meterRegistry)
+                    .increment();
         } catch (Exception e) {
             log.warn("Failed to emit DLQ replay message metric", e);
         }
@@ -689,13 +688,12 @@ public class TagDenormDLQReplayService {
             return;
         }
         try {
-            Counter.Builder builder = Counter.builder("tag.denorm.dlq.replay.vertices")
+            Counter.builder("tag.denorm.dlq.replay.vertices")
                     .description("Tag denorm DLQ replay vertex outcomes")
-                    .tag("outcome", outcome);
-            if (reason != null) {
-                builder.tag("reason", reason);
-            }
-            builder.register(meterRegistry).increment(count);
+                    .tag("outcome", outcome)
+                    .tag("reason", reason != null ? reason : "none")
+                    .register(meterRegistry)
+                    .increment(count);
         } catch (Exception e) {
             log.warn("Failed to emit DLQ replay vertex metric", e);
         }
