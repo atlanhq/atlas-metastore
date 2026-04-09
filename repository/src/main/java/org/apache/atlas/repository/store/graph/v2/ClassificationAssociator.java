@@ -294,13 +294,8 @@ public class ClassificationAssociator {
             if (CollectionUtils.isEmpty(incomingRaw)) {
                 incomingRaw = incomingEntityHeader.getClassifications();
             }
-            List<AtlasClassification> filteredClassifications = Optional.ofNullable(incomingRaw)
-                    .orElse(Collections.emptyList())
-                    .stream()
-                    .filter(classification -> classification.getEntityGuid().equals(entityToBeChanged.getGuid()))
-                    .collect(Collectors.toList());
-
-            List<AtlasClassification> incomingClassifications = listOps.filter(incomingEntityHeader.getGuid(), filteredClassifications);
+            List<AtlasClassification> incomingClassifications = listOps.filter(entityToBeChanged.getGuid(),
+                    Optional.ofNullable(incomingRaw).orElse(Collections.emptyList()));
             List<AtlasClassification> entityClassifications = listOps.filter(entityToBeChanged.getGuid(), entityToBeChanged.getClassifications());
 
             bucket(PROCESS_DELETE, operationListMap, filteredRemoveClassifications);
