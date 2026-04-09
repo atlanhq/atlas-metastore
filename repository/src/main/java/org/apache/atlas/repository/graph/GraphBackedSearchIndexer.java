@@ -124,11 +124,19 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
     // management transactions — only one thread calls onChange()/onLoadCompletion() at a time.
     private final List<Map<String, Object>> pendingRepairs = new ArrayList<>();
 
-    // Producer-side dedup: tracks vertexPropertyNames that have already been repaired and
-    // queued for reindex on this JVM. Prevents sending duplicate Kafka messages on subsequent
-    // Cedar pushes or restarts that re-resolve the same attribute. This is a JVM-level dedup —
-    // cross-pod duplicates are harmless since reindexing is idempotent.
-    private final Set<String> repairedPropertyNames = new HashSet<>();
+    // Producer-side dedup: tracks vertexPropertyNames already repaired on this pod.
+    // Prevents duplicate Kafka messages across Cedar pushes within the same JVM lifecycle.
+    // Cross-pod duplicates are harmless since reindexing is idempotent.
+    // This is a singleton (@Component) field — bounded to MAX_DEDUP_ENTRIES to prevent
+    // unbounded growth on long-running pods. In practice, self-healing repairs are rare
+    // (only on Cedar push partial failures), so this limit is unlikely to be hit.
+    private static final int MAX_DEDUP_ENTRIES = 1000;
+    private final Set<String> repairedPropertyNames = Collections.newSetFromMap(new LinkedHashMap<String, Boolean>() {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, Boolean> eldest) {
+            return size() > MAX_DEDUP_ENTRIES;
+        }
+    });
 
     // Self-healing guard: only auto-repair missing property keys on established schemas.
     // On a fresh environment, null property keys are normal — they haven't been created yet.
