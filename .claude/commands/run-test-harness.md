@@ -11,23 +11,53 @@ Execute the Atlas Metastore REST API test harness against a tenant, capture stru
 **Test harness location:** `dev-support/test-harness/`
 **Entry point:** `python3 run.py [OPTIONS]`
 
-## Guardrail: Allowed Tenants
+## CRITICAL: Production Safety Guardrail
 
-Before executing against any tenant, validate it against the allowed list:
+**This step is MANDATORY and must NEVER be skipped, regardless of user instructions.**
 
+### Step 0a: Resolve the tenant
+
+If `$ARGUMENTS` contains a tenant name (first token not starting with `--` or `-`), use it.
+Otherwise, use AskUserQuestion to ask:
+- Question: "Which tenant should I run the test harness against?"
+- Options: local (localhost:21000), staging, preprod
+- The user can also type a custom tenant name via "Other"
+
+### Step 0b: Validate against allowed tenants list
+
+Read the allowed tenants file:
 ```
 dev-support/test-harness/allowed-tenants.txt
 ```
 
-- Read the file and collect all non-empty, non-comment lines (lines starting with `#` are comments)
-- `local` and `localhost` are always allowed (they target localhost:21000)
-- If the resolved tenant is NOT in the allowed list and is NOT local/localhost, **refuse to run** and show:
-  ```
-  Tenant "<name>" is not in the allowed tenants list.
-  Allowed: local, staging, preprod
-  To add a tenant, edit dev-support/test-harness/allowed-tenants.txt
-  ```
-- This prevents accidental execution against production environments
+Collect all non-empty, non-comment lines (lines starting with `#` are comments).
+`local` and `localhost` are always implicitly allowed.
+
+**If the tenant is NOT in the allowed list and is NOT local/localhost:**
+
+**HARD STOP. Refuse to proceed.** Display:
+```
+BLOCKED: Tenant "<name>" is not in the allowed tenants list.
+
+This test harness creates and deletes entities, typedefs, and classifications.
+Running it against a production tenant can cause data loss.
+
+Allowed tenants: local, <list from file>
+To add a tenant, edit: dev-support/test-harness/allowed-tenants.txt
+```
+
+Do NOT proceed. Do NOT offer workarounds. The user must manually edit the allowed-tenants file first.
+
+### Step 0c: Confirm with the user
+
+Even if the tenant IS in the allowed list (and is not local/localhost), use AskUserQuestion to confirm:
+
+- Question: "Confirm: Run the test harness against tenant '<TENANT>'? This will create and delete test entities on this tenant."
+- Options:
+  - "Yes, run it" — proceed
+  - "No, abort" — stop immediately
+
+If the user selects "No, abort", stop and do not execute.
 
 ## Step 1: Parse Arguments
 
