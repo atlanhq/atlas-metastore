@@ -2,6 +2,10 @@ Answer questions about Atlas Metastore API endpoints using the official API refe
 
 ## Instructions
 
+**HARD RULE: Always read the relevant docs file before using, suggesting, or calling any repair endpoint. Never rely on memory or ticket comments for endpoint signatures, body format, or auth requirements — the local file is the source of truth.**
+
+If information is missing from the local file, fetch the live docs at `https://k.atlan.dev/metastore/master/api/<section>/` to supplement.
+
 **Do NOT load all docs upfront.** Read only the file(s) relevant to the user's question:
 
 | If the question is about… | Read this file |
