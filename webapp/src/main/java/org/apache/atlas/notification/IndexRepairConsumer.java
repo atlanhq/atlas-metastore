@@ -31,11 +31,9 @@ import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.service.Service;
-import org.apache.atlas.service.redis.RedisService;
 import org.apache.atlas.util.RepairIndex;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.DependsOn;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -55,8 +53,8 @@ import static org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry;
  * self-healed by Phase 2a.
  *
  * Key design decisions:
- * - Redis distributed lock ensures only ONE pod processes reindex at a time
- * - Redis deduplication key (TTL 7 days) prevents reprocessing the same repair
+ * - Kafka consumer group ensures only ONE pod receives each message (single-partition topic)
+ * - Reindexing is idempotent (restoreByIds re-writes same data to ES) — no dedup needed
  * - Batch-and-throttle pattern prevents ES overload (configurable batch size + delay)
  * - Fire-and-forget from producer side: if consumer can't process, repairs are logged
  *   at WARN level in GraphBackedSearchIndexer for manual intervention
@@ -67,28 +65,20 @@ import static org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry;
 public class IndexRepairConsumer implements Service, ActiveStateChangeHandler {
     private static final Logger LOG = LoggerFactory.getLogger(IndexRepairConsumer.class);
 
-    private static final String REDIS_LOCK_KEY = "atlas:index-repair:lock";
-    private static final String REDIS_DEDUP_PREFIX = "atlas:index-repair:done:";
-    private static final int REDIS_DEDUP_TTL_SECONDS = 7 * 24 * 3600; // 7 days
     private static final String METRIC_PREFIX = "atlas_index_repair";
 
     private final NotificationInterface notificationInterface;
     private final RepairIndex repairIndex;
     private final AtlasGraph graph;
 
-    // Optional — may not be available in all environments (requires atlas.redis.service.impl)
-    @Autowired(required = false)
-    private RedisService redisService;
-
     private ExecutorService executorService;
+    private volatile NotificationConsumer<AtlasDistributedTaskNotification> kafkaConsumer;
     private final AtomicBoolean shouldRun = new AtomicBoolean(false);
-    private final String podId;
 
     // Metrics
     private final Counter jobsStarted;
     private final Counter jobsCompleted;
     private final Counter jobsFailed;
-    private final Counter jobsSkippedDedup;
     private final Counter entitiesReindexed;
 
     @Inject
@@ -98,7 +88,6 @@ public class IndexRepairConsumer implements Service, ActiveStateChangeHandler {
         this.notificationInterface = notificationInterface;
         this.repairIndex = repairIndex;
         this.graph = graph;
-        this.podId = System.getenv().getOrDefault("HOSTNAME", "unknown-pod");
 
         MeterRegistry registry = getMeterRegistry();
         Tags tags = Tags.of("tenant", System.getenv().getOrDefault("DOMAIN_NAME", "default"));
@@ -110,8 +99,6 @@ public class IndexRepairConsumer implements Service, ActiveStateChangeHandler {
                 .tags(tags).tag("status", "completed").register(registry);
         this.jobsFailed = Counter.builder(METRIC_PREFIX + "_jobs_total")
                 .tags(tags).tag("status", "failed").register(registry);
-        this.jobsSkippedDedup = Counter.builder(METRIC_PREFIX + "_jobs_total")
-                .tags(tags).tag("status", "skipped_dedup").register(registry);
         this.entitiesReindexed = Counter.builder(METRIC_PREFIX + "_entities_reindexed_total")
                 .description("Total entities reindexed by index repair")
                 .tags(tags).register(registry);
@@ -167,6 +154,18 @@ public class IndexRepairConsumer implements Service, ActiveStateChangeHandler {
 
     private void shutdown() {
         shouldRun.set(false);
+
+        // Close Kafka consumer first — unblocks the poll() call and triggers
+        // immediate rebalance so the other pod gets the partition without waiting
+        // for session timeout (30s).
+        if (kafkaConsumer != null) {
+            try {
+                kafkaConsumer.close();
+            } catch (Exception e) {
+                LOG.warn("IndexRepairConsumer: Error closing Kafka consumer", e);
+            }
+        }
+
         if (executorService != null) {
             executorService.shutdownNow();
             try {
@@ -178,7 +177,8 @@ public class IndexRepairConsumer implements Service, ActiveStateChangeHandler {
     }
 
     private void consumerLoop() {
-        LOG.info("IndexRepairConsumer: Consumer loop started on pod {}", podId);
+        LOG.info("IndexRepairConsumer: Consumer loop started on pod {}",
+                System.getenv().getOrDefault("HOSTNAME", "unknown-pod"));
 
         List<NotificationConsumer<AtlasDistributedTaskNotification>> consumers = null;
 
@@ -196,6 +196,7 @@ public class IndexRepairConsumer implements Service, ActiveStateChangeHandler {
         }
 
         NotificationConsumer<AtlasDistributedTaskNotification> consumer = consumers.get(0);
+        this.kafkaConsumer = consumer; // Store ref for shutdown()
         long pollTimeoutMs = 5000L; // 5s Kafka poll
 
         while (shouldRun.get()) {
@@ -232,7 +233,7 @@ public class IndexRepairConsumer implements Service, ActiveStateChangeHandler {
             }
         }
 
-        LOG.info("IndexRepairConsumer: Consumer loop exited on pod {}", podId);
+        LOG.info("IndexRepairConsumer: Consumer loop exited");
     }
 
     @SuppressWarnings("unchecked")
@@ -253,18 +254,10 @@ public class IndexRepairConsumer implements Service, ActiveStateChangeHandler {
         LOG.info("IndexRepairConsumer: Processing reindex message from pod {} with {} repair(s)",
                 sourcePod, repairs.size());
 
-        // Acquire Redis lock — only one pod should process reindexes at a time
-        if (!acquireRedisLock()) {
-            LOG.info("IndexRepairConsumer: Could not acquire Redis lock — another pod is processing. Skipping.");
-            return;
-        }
-
-        try {
-            for (Map<String, Object> repair : repairs) {
-                processOneRepair(repair);
-            }
-        } finally {
-            releaseRedisLock();
+        // No Redis lock needed — Kafka consumer group already guarantees single-partition
+        // delivery to one consumer. Deduplication is handled per-repair in processOneRepair().
+        for (Map<String, Object> repair : repairs) {
+            processOneRepair(repair);
         }
     }
 
@@ -278,15 +271,6 @@ public class IndexRepairConsumer implements Service, ActiveStateChangeHandler {
 
         if (vertexPropertyName == null || affectedEntityTypes == null || affectedEntityTypes.isEmpty()) {
             LOG.warn("IndexRepairConsumer: Skipping incomplete repair record: {}", repair);
-            return;
-        }
-
-        // Deduplication check
-        String dedupKey = REDIS_DEDUP_PREFIX + vertexPropertyName + ":" + repairTimestamp;
-        if (isDeduplicated(dedupKey)) {
-            LOG.info("IndexRepairConsumer: Skipping already-processed repair for {} (dedupKey={})",
-                    vertexPropertyName, dedupKey);
-            jobsSkippedDedup.increment();
             return;
         }
 
@@ -304,7 +288,6 @@ public class IndexRepairConsumer implements Service, ActiveStateChangeHandler {
                 totalReindexed += reindexedForType;
             }
 
-            markAsProcessed(dedupKey);
             entitiesReindexed.increment(totalReindexed);
             jobsCompleted.increment();
 
@@ -331,22 +314,20 @@ public class IndexRepairConsumer implements Service, ActiveStateChangeHandler {
         int batchCount = 0;
 
         try {
-            Iterable<Object> vertexIds = graph.query()
+            // Use .vertices() directly — avoids a second Cassandra read that .vertexIds() + getVertex() would cause
+            Iterable<AtlasVertex> vertices = graph.query()
                     .has(Constants.ENTITY_TYPE_PROPERTY_KEY, typeName)
-                    .vertexIds();
+                    .vertices();
 
-            for (Object vertexId : vertexIds) {
+            for (AtlasVertex vertex : vertices) {
                 try {
-                    AtlasVertex vertex = graph.getVertex(vertexId.toString());
-                    if (vertex == null) continue;
-
                     String guid = vertex.getProperty(Constants.GUID_PROPERTY_KEY, String.class);
                     if (guid == null) continue;
 
                     guidBatch.add(guid);
                 } catch (Exception e) {
-                    LOG.warn("IndexRepairConsumer: Failed to get GUID for vertexId {}: {}",
-                            vertexId, e.getMessage());
+                    LOG.warn("IndexRepairConsumer: Failed to get GUID from vertex: {}",
+                            e.getMessage());
                     continue;
                 }
 
@@ -392,60 +373,4 @@ public class IndexRepairConsumer implements Service, ActiveStateChangeHandler {
         return totalReindexed;
     }
 
-    private boolean acquireRedisLock() {
-        if (redisService == null) {
-            LOG.info("IndexRepairConsumer: No RedisService available — proceeding without distributed lock");
-            return true;
-        }
-        try {
-            if (!redisService.isAvailable()) {
-                LOG.warn("IndexRepairConsumer: Redis unavailable — cannot acquire lock");
-                return false;
-            }
-            return redisService.acquireDistributedLock(REDIS_LOCK_KEY);
-        } catch (Exception e) {
-            LOG.error("IndexRepairConsumer: Failed to acquire Redis lock", e);
-            return false;
-        }
-    }
-
-    private void releaseRedisLock() {
-        if (redisService == null) {
-            return;
-        }
-        try {
-            redisService.releaseDistributedLock(REDIS_LOCK_KEY);
-        } catch (Exception e) {
-            LOG.warn("IndexRepairConsumer: Failed to release Redis lock", e);
-        }
-    }
-
-    private boolean isDeduplicated(String dedupKey) {
-        if (redisService == null) {
-            return false;
-        }
-        try {
-            if (!redisService.isAvailable()) {
-                return false;
-            }
-            String val = redisService.getValue(dedupKey);
-            return val != null;
-        } catch (Exception e) {
-            LOG.warn("IndexRepairConsumer: Failed to check dedup key {}", dedupKey, e);
-            return false;
-        }
-    }
-
-    private void markAsProcessed(String dedupKey) {
-        if (redisService == null) {
-            return;
-        }
-        try {
-            if (redisService.isAvailable()) {
-                redisService.putValue(dedupKey, podId, REDIS_DEDUP_TTL_SECONDS);
-            }
-        } catch (Exception e) {
-            LOG.warn("IndexRepairConsumer: Failed to set dedup key {}", dedupKey, e);
-        }
-    }
 }

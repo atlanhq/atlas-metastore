@@ -119,7 +119,16 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
     @Autowired(required = false)
     private NotificationInterface notificationInterface;
 
+    // Collects repair records during a single onChange()/onLoadCompletion() cycle.
+    // Thread-safety: safe because typedef change processing is serialized by JanusGraph
+    // management transactions — only one thread calls onChange()/onLoadCompletion() at a time.
     private final List<Map<String, Object>> pendingRepairs = new ArrayList<>();
+
+    // Producer-side dedup: tracks vertexPropertyNames that have already been repaired and
+    // queued for reindex on this JVM. Prevents sending duplicate Kafka messages on subsequent
+    // Cedar pushes or restarts that re-resolve the same attribute. This is a JVM-level dedup —
+    // cross-pod duplicates are harmless since reindexing is idempotent.
+    private final Set<String> repairedPropertyNames = new HashSet<>();
 
     // Self-healing guard: only auto-repair missing property keys on established schemas.
     // On a fresh environment, null property keys are normal — they haven't been created yet.
@@ -291,6 +300,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
         }
     }
 
+
     /**
      * Runs a read-only audit of the JanusGraph mixed index schema and publishes
      * Prometheus metrics reporting expected, indexed, and missing property keys.
@@ -334,14 +344,12 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
         auditThread.start();
     }
 
+    // Always send the Kafka message when repairs happen — the consumer-side flag
+    // (atlas.index.repair.consumer.enabled) controls whether messages are processed,
+    // not whether they are produced. This ensures messages queue up in Kafka even if
+    // the consumer is temporarily disabled, and get processed when re-enabled.
     private void sendReindexMessageIfNeeded() {
         if (pendingRepairs.isEmpty()) {
-            return;
-        }
-
-        if (!AtlasConfiguration.INDEX_REPAIR_CONSUMER_ENABLED.getBoolean()) {
-            LOG.info("Index repair consumer is disabled. Skipping reindex for {} repaired attributes.",
-                    pendingRepairs.size());
             return;
         }
 
@@ -728,12 +736,19 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                                         affectedEntityTypes,
                                         repairTimestamp);
 
-                                Map<String, Object> repairRecord = new HashMap<>();
-                                repairRecord.put("vertexPropertyName", attribute.getVertexPropertyName());
-                                repairRecord.put("affectedEntityTypes", new ArrayList<>(affectedEntityTypes));
-                                repairRecord.put("repairTimestamp", repairTimestamp);
-                                repairRecord.put("attributeName", attribute.getQualifiedName());
-                                pendingRepairs.add(repairRecord);
+                                // Producer-side dedup: only queue reindex if this property wasn't
+                                // already repaired on a previous cycle (restart or Cedar push)
+                                if (repairedPropertyNames.add(attribute.getVertexPropertyName())) {
+                                    Map<String, Object> repairRecord = new HashMap<>();
+                                    repairRecord.put("vertexPropertyName", attribute.getVertexPropertyName());
+                                    repairRecord.put("affectedEntityTypes", new ArrayList<>(affectedEntityTypes));
+                                    repairRecord.put("repairTimestamp", repairTimestamp);
+                                    repairRecord.put("attributeName", attribute.getQualifiedName());
+                                    pendingRepairs.add(repairRecord);
+                                } else {
+                                    LOG.info("INDEX AUTO-REPAIR: Skipping reindex for {} — already queued in a previous cycle",
+                                            attribute.getVertexPropertyName());
+                                }
                             } else {
                                 LOG.error("CRITICAL: Failed to auto-repair index for attribute={}. "
                                         + "ES sync WILL BE BROKEN for this field.",
