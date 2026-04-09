@@ -29,6 +29,7 @@ class HarnessConfig:
     kafka_bootstrap_servers: Optional[str] = None
     no_kafka: bool = False
     parallel: int = 1                               # max concurrent suites (1 = sequential)
+    html_report: Optional[str] = None                  # path for HTML report output
 
 
 def parse_args() -> HarnessConfig:
@@ -96,6 +97,8 @@ Examples:
                         help="Disable Kafka notification verification entirely")
     parser.add_argument("-P", "--parallel", type=int, default=1,
                         help="Max concurrent suites to run in parallel (default: 1 = sequential)")
+    parser.add_argument("--html", default=None, dest="html_report",
+                        help="Write HTML report to this file")
 
     args = parser.parse_args()
 
@@ -116,6 +119,7 @@ Examples:
     cfg.kafka_bootstrap_servers = args.kafka_bootstrap_servers
     cfg.no_kafka = args.no_kafka
     cfg.parallel = max(1, args.parallel)
+    cfg.html_report = args.html_report
 
     if args.tenant:
         cfg.env = "staging"

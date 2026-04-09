@@ -33,9 +33,10 @@ class TestResult:
 class Reporter:
     """Collects test results and produces console + JSON output."""
 
-    def __init__(self, verbose=False, output_file=None, tenant=None):
+    def __init__(self, verbose=False, output_file=None, tenant=None, html_file=None):
         self.verbose = verbose
         self.output_file = output_file
+        self.html_file = html_file
         self.tenant = tenant
         self.results: List[TestResult] = []
         self.start_time = time.time()
@@ -146,10 +147,8 @@ class Reporter:
             "p99_ms": round(s[int(n * 0.99)], 1) if n >= 100 else round(s[-1], 1),
         }
 
-    def write_json_report(self, client_latency_log=None):
-        if not self.output_file:
-            return
-
+    def _build_report_data(self, client_latency_log=None):
+        """Build the report dict used by both JSON and HTML reporters."""
         elapsed = time.time() - self.start_time
         total = len(self.results)
         passed = sum(1 for r in self.results if r.status == "PASS")
@@ -180,7 +179,7 @@ class Reporter:
             for key, latencies in by_endpoint.items():
                 endpoint_stats[key] = self._compute_latency_stats(latencies)
 
-        report = {
+        return {
             "timestamp": datetime.now().isoformat(),
             "duration_s": round(elapsed, 1),
             "summary": {
@@ -195,9 +194,21 @@ class Reporter:
             "endpoint_latency": endpoint_stats,
         }
 
+    def write_json_report(self, client_latency_log=None):
+        if not self.output_file:
+            return
+        report = self._build_report_data(client_latency_log)
         with open(self.output_file, "w") as f:
             json.dump(report, f, indent=2)
         print(f"\nJSON report written to: {self.output_file}", flush=True)
+
+    def write_html_report(self, client_latency_log=None):
+        if not self.html_file:
+            return
+        from core.html_reporter import generate_html_report
+        report = self._build_report_data(client_latency_log)
+        generate_html_report(report, self.html_file, tenant=self.tenant)
+        print(f"HTML report written to: {self.html_file}", flush=True)
 
     @property
     def all_passed(self):

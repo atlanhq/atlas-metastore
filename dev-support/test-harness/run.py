@@ -93,7 +93,7 @@ def main():
 
     # Reporter
     reporter = Reporter(verbose=config.verbose, output_file=config.output_file,
-                        tenant=config.tenant)
+                        html_file=config.html_report, tenant=config.tenant)
 
     # Signal handler for graceful cleanup
     def handle_signal(signum, frame):
@@ -104,6 +104,7 @@ def main():
                 print(f"  Cleanup errors: {len(errors)}")
         reporter.print_summary()
         reporter.write_json_report(client.latency_log)
+        reporter.write_html_report(client.latency_log)
         sys.exit(1)
 
     signal.signal(signal.SIGINT, handle_signal)
@@ -162,8 +163,9 @@ def main():
         if request_logger:
             request_logger.close()
 
-        # Write JSON report
+        # Write reports
         reporter.write_json_report(client.latency_log)
+        reporter.write_html_report(client.latency_log)
 
     sys.exit(0 if reporter.all_passed else 1)
 
