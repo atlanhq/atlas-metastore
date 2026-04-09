@@ -730,23 +730,28 @@ public class AtlasGraphUtilsV2 {
     }
 
     public static boolean typeHasInstanceVertex(String typeName) throws AtlasBaseException {
-        return typeHasInstanceVertex(getGraphInstance(), typeName);
-    }
+        try {
+            String indexName = Constants.VERTEX_INDEX_NAME;
+            AtlasIndexQuery indexQuery = getGraphInstance().elasticsearchQuery(indexName);
 
-    public static boolean typeHasInstanceVertex(AtlasGraph graph, String typeName) throws AtlasBaseException {
-        AtlasGraphQuery query = graph
-                .query()
-                .has(TYPE_NAME_PROPERTY_KEY, AtlasGraphQuery.ComparisionOperator.EQUAL, typeName);
+            String esQuery = String.format(
+                "{\"query\":{\"bool\":{\"filter\":[{\"term\":{\"%s\":\"%s\"}}]}}}",
+                Constants.TYPE_NAME_PROPERTY_KEY, typeName
+            );
+            Long count = indexQuery.countIndexQuery(esQuery);
 
-        Iterator<AtlasVertex> results = query.vertices().iterator();
+            boolean hasInstance = count != null && count > 0;
 
-        boolean hasInstanceVertex = results != null && results.hasNext();
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("typeName {} has instance vertex {} (ES count: {})", typeName, hasInstance, count);
+            }
 
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("typeName {} has instance vertex {}", typeName, hasInstanceVertex);
+            return hasInstance;
+        } catch (Exception e) {
+            LOG.error("Error checking type instances for {}: {}", typeName, e.getMessage(), e);
+            // Conservative: if ES query fails, assume references exist to prevent accidental deletion
+            return true;
         }
-
-        return hasInstanceVertex;
     }
 
     /**
