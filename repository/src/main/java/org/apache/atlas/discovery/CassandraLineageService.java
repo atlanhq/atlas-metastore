@@ -360,9 +360,27 @@ public class CassandraLineageService {
                     VertexData nextVertex = getVertexData(nextVertexId);
                     if (nextVertex == null) continue;
 
-                    // Add both edges to result (process is still in guidEntityMap)
-                    addClassicEdge(inEdge, ret, attributes);
-                    addClassicEdge(outEdge, ret, attributes);
+                    VertexData currentVertex = getVertexData(datasetVertexId);
+                    if (currentVertex == null) continue;
+
+                    // Add dataset vertices and process vertex to guidEntityMap
+                    if (!ret.getGuidEntityMap().containsKey(currentVertex.guid))
+                        ret.getGuidEntityMap().put(currentVertex.guid, buildEntityHeader(currentVertex, attributes));
+                    if (!ret.getGuidEntityMap().containsKey(nextVertex.guid))
+                        ret.getGuidEntityMap().put(nextVertex.guid, buildEntityHeader(nextVertex, attributes));
+                    if (!ret.getGuidEntityMap().containsKey(processVertex.guid))
+                        ret.getGuidEntityMap().put(processVertex.guid, buildEntityHeader(processVertex, attributes));
+
+                    // Create virtual dataset→dataset relation with processId hint
+                    // (mirrors EntityLineageService.processVirtualEdge semantics)
+                    boolean isInputEdge = inEdge.isInputEdge(inputLabel);
+                    if (isInputEdge) {
+                        ret.getRelations().add(new AtlasLineageInfo.LineageRelation(
+                                currentVertex.guid, nextVertex.guid, null, processVertex.guid));
+                    } else {
+                        ret.getRelations().add(new AtlasLineageInfo.LineageRelation(
+                                nextVertex.guid, currentVertex.guid, null, processVertex.guid));
+                    }
 
                     if (!visitedVertices.contains(nextVertexId)) {
                         classicTraverse(nextVertexId, isInput, depth - 1, visitedVertices, ret, context);

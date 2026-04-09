@@ -36,6 +36,7 @@ on:
       - nb-switchable-graph-provider
       - ms-864-keycloak-jwks-internal-url
       - ms-610-ranges-policy-cache
+      - ms-901-hidelineage
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
