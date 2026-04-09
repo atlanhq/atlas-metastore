@@ -69,8 +69,8 @@ public class TagDenormDLQReplayService {
     @Value("${atlas.kafka.tag.denorm.dlq.enabled:true}")
     private boolean enabled = true;
 
-    @Value("${atlas.kafka.tag.denorm.dlq.maxRetries:3}")
-    private int maxRetries = 3;
+    @Value("${atlas.kafka.tag.denorm.dlq.maxRetries:5}")
+    private int maxRetries = 5;
 
     // Kafka consumer configuration
     @Value("${atlas.kafka.tag.denorm.dlq.maxPollRecords:1}")
@@ -378,28 +378,11 @@ public class TagDenormDLQReplayService {
                                     log.debug("Successfully replayed tag denorm DLQ entry (offset: {}, partition: {}) in {}ms",
                                             record.offset(), record.partition(), processingTime);
 
-                                } catch (AtlasBaseException atlasBaseException) {
-                                    // Treat as transient — Cassandra/graph failure, will retry with exponential backoff
-                                    errorCount.incrementAndGet();
-                                    emitReplayMessageMetric("failed", atlasBaseException.getClass().getSimpleName());
-
-                                    long backoffDelay = calculateExponentialBackoff(retryKey);
-
-                                    log.warn("AtlasBaseException while replaying tag denorm DLQ entry (offset: {}, partition: {}). " +
-                                                    "Will retry on next poll after {}ms backoff (exponential). " +
-                                                    "STOPPING batch processing to prevent skipping this message. Error: {}",
-                                            record.offset(), record.partition(), backoffDelay, atlasBaseException.getMessage());
-
-                                    failedOffset = record.offset();
-                                    failedPartition = new TopicPartition(record.topic(), record.partition());
-
-                                    Thread.sleep(backoffDelay);
-                                    break;
                                 } catch (Exception e) {
                                     errorCount.incrementAndGet();
                                     emitReplayMessageMetric("failed", e.getClass().getSimpleName());
 
-                                    // Track retry attempts with timestamp for this specific offset
+                                    // Track retry attempts for ALL exceptions (AtlasBaseException + others)
                                     RetryTrackerEntry entry = retryTracker.get(retryKey);
                                     int retryCount;
                                     if (entry == null) {
@@ -412,7 +395,7 @@ public class TagDenormDLQReplayService {
                                     }
 
                                     if (retryCount >= maxRetries) {
-                                        // Clean up both trackers for poison pill
+                                        // Poison pill — skip after max retries to prevent partition blockage
                                         log.error("Tag denorm DLQ entry at offset {} partition {} failed {} times (max retries reached). " +
                                                         "SKIPPING this message to prevent partition blockage. Error: {}",
                                                 record.offset(), record.partition(), retryCount, e.getMessage(), e);
@@ -435,16 +418,18 @@ public class TagDenormDLQReplayService {
                                         }
                                         // Continue to next record after skipping poison pill
                                     } else {
-                                        // Add delay before retrying to avoid tight retry loop
-                                        log.warn("Failed to replay tag denorm DLQ entry (offset: {}, partition: {}). Retry {}/{}. " +
-                                                        "STOPPING batch processing to prevent skipping this message. " +
-                                                        "Will retry on next poll after {}ms delay. Error: {}",
-                                                record.offset(), record.partition(), retryCount, maxRetries, retryDelayMs, e.getMessage());
+                                        // Retry with exponential backoff
+                                        long backoffDelay = calculateExponentialBackoff(retryKey);
+
+                                        log.warn("Failed to replay tag denorm DLQ entry (offset: {}, partition: {}). " +
+                                                        "Retry {}/{}. Will retry after {}ms backoff. Error: {}",
+                                                record.offset(), record.partition(), retryCount, maxRetries,
+                                                backoffDelay, e.getMessage());
 
                                         failedOffset = record.offset();
                                         failedPartition = new TopicPartition(record.topic(), record.partition());
 
-                                        Thread.sleep(retryDelayMs);
+                                        Thread.sleep(backoffDelay);
                                         break;
                                     }
                                 }
