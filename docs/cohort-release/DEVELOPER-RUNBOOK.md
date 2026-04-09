@@ -175,6 +175,7 @@ If something goes wrong with one ring but you want to keep the PR open for other
 | **Tenant in multiple cohorts** | Tenant can exist in both a custom and standard ring. The `ValidateManifestForReleaseActivity` prevents accidental overwrites — whichever ring deploys first "locks" the tenant. Remove from the other cohort file + state file to avoid confusion. |
 | **Changes to `.github/` only** | `maven.yml` has `paths-ignore: '.github/**'`. Workflow-only changes won't trigger a build. Include a dummy change to a source file if you need a new build on the same commit. |
 | **First push to new ring branch** | Build should trigger automatically. If it doesn't, check if the `paths-filter` detected changes correctly. |
+| **Stale state file from previous PR** | State files (`atlan-releases/atlas-ring-<branch>.json`) persist after a PR is closed. If a new PR is opened from the same ring branch, the old state file won't block deployment (CohortID includes the PR URL so keys don't collide), but cleanup will aggregate tenants from ALL entries in the state file — including the old PR's ~500 tenants. **Delete the state file before starting a new release from the same branch.** |
 
 ---
 
