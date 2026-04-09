@@ -703,7 +703,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
         // MS-928: Skip JanusGraph index creation for attributes with indexTypeESMapping.
         // These need ES-native mappings (e.g., "nested") that JanusGraph can't create.
         // If JanusGraph creates the field first (as keyword), ES rejects the nested mapping.
-        // The mapping is applied by applyESNestedMappings() after commit.
+        // The mapping is applied by applyESNestedMappings() BEFORE JanusGraph processing in onChange().
         String indexTypeESMapping = attributeDef.getIndexTypeESMapping();
         if (org.apache.commons.lang.StringUtils.isNotEmpty(indexTypeESMapping)) {
             LOG.info("Skipping JanusGraph index for attribute '{}' — ES mapping '{}' will be applied directly",
