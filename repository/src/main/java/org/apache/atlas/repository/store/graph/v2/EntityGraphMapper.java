@@ -1122,7 +1122,7 @@ public class EntityGraphMapper {
                         attrOldValue = vertex.getProperty(attribute.getVertexPropertyName(),attribute.getClass());
                     }
                     if (attrValue!= null && !attrValue.equals(attrOldValue)) {
-                        addValuesToAutoUpdateAttributesList(attribute, userAutoUpdateAttributes, timestampAutoUpdateAttributes);
+                        addValuesToAutoUpdateAttributesList(attribute, struct, userAutoUpdateAttributes, timestampAutoUpdateAttributes);
                     }
 
                     mapAttribute(attribute, attrValue, vertex, op, context);
@@ -1162,7 +1162,7 @@ public class EntityGraphMapper {
                         }
 
                         if (attrValue != null && !attrValue.equals(attrOldValue)) {
-                            addValuesToAutoUpdateAttributesList(attribute, userAutoUpdateAttributes, timestampAutoUpdateAttributes);
+                            addValuesToAutoUpdateAttributesList(attribute, struct, userAutoUpdateAttributes, timestampAutoUpdateAttributes);
                         }
 
                         mapAttribute(attribute, attrValue, vertex, op, context);
@@ -1201,18 +1201,38 @@ public class EntityGraphMapper {
                 && !attributeDef.getIsDefaultValueNull();
     }
 
-    private void addValuesToAutoUpdateAttributesList(AtlasAttribute attribute, List<String> userAutoUpdateAttributes, List<String> timestampAutoUpdateAttributes) {
-        HashMap<String, ArrayList> autoUpdateAttributes =  attribute.getAttributeDef().getAutoUpdateAttributes();
+    /**
+     * Collects auto-update target attributes (user / timestamp) for the given trigger attribute,
+     * skipping any target that the caller already supplied an explicit non-null value for.
+     * This lets connector payloads (e.g. Tableau's {@code certifierDisplayName → certificateUpdatedBy})
+     * take precedence over the default "stamp with API caller" behaviour.
+     */
+    private void addValuesToAutoUpdateAttributesList(AtlasAttribute attribute, AtlasStruct struct,
+                                                     List<String> userAutoUpdateAttributes,
+                                                     List<String> timestampAutoUpdateAttributes) {
+        HashMap<String, ArrayList> autoUpdateAttributes = attribute.getAttributeDef().getAutoUpdateAttributes();
         if (autoUpdateAttributes != null) {
             List<String> userAttributes = autoUpdateAttributes.get("user");
-            if (userAttributes != null && userAttributes.size() > 0) {
-                userAutoUpdateAttributes.addAll(userAttributes);
+            if (userAttributes != null) {
+                for (String target : userAttributes) {
+                    if (!hasExplicitValue(struct, target)) {
+                        userAutoUpdateAttributes.add(target);
+                    }
+                }
             }
             List<String> timestampAttributes = autoUpdateAttributes.get("timestamp");
-            if (timestampAttributes != null && timestampAttributes.size() > 0) {
-                timestampAutoUpdateAttributes.addAll(timestampAttributes);
+            if (timestampAttributes != null) {
+                for (String target : timestampAttributes) {
+                    if (!hasExplicitValue(struct, target)) {
+                        timestampAutoUpdateAttributes.add(target);
+                    }
+                }
             }
         }
+    }
+
+    private static boolean hasExplicitValue(AtlasStruct struct, String attrName) {
+        return struct != null && struct.hasAttribute(attrName) && struct.getAttribute(attrName) != null;
     }
 
     private void mapRelationshipAttributes(AtlasEntity entity, AtlasEntityType entityType, AtlasVertex vertex, EntityOperation op,
@@ -3725,19 +3745,7 @@ public class EntityGraphMapper {
 
 
     private AtlasEntityHeader constructHeader(AtlasEntity entity, AtlasVertex vertex, AtlasEntityType entityType) throws AtlasBaseException {
-        // MS-710: Read all primitive/enum attributes from the vertex (not just writtenAttrs).
-        // This ensures the entity cached in RequestContext includes attributes like
-        // connectorName — even if they weren't in the update request payload.
-        // Only primitive and enum types are fetched to keep the read lightweight.
-        Set<String> primitiveAttrs = new HashSet<>();
-        for (Map.Entry<String, AtlasAttribute> entry : entityType.getAllAttributes().entrySet()) {
-            TypeCategory typeCategory = entry.getValue().getAttributeType().getTypeCategory();
-            if (typeCategory == PRIMITIVE || typeCategory == TypeCategory.ENUM) {
-                primitiveAttrs.add(entry.getKey());
-            }
-        }
-
-        AtlasEntityHeader header = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex, primitiveAttrs);
+        AtlasEntityHeader header = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex, getAttrsToLoad(entityType));
 
         if (entity.getClassifications() == null) {
             entity.setClassifications(header.getClassifications());
@@ -3754,6 +3762,31 @@ public class EntityGraphMapper {
         }
 
         return header;
+    }
+
+    /**
+     * Returns the set of attribute names to load from the vertex during entity cache construction.
+     * Includes: primitive/enum types (lightweight reads) + attributes marked with
+     * includeInNotification or isUnique (required for CDC notification completeness, MS-695).
+     */
+    private Set<String> getAttrsToLoad(AtlasEntityType entityType) {
+        Set<String> ret = new HashSet<>();
+
+        for (Map.Entry<String, AtlasAttribute> entry : entityType.getAllAttributes().entrySet()) {
+            TypeCategory typeCategory = entry.getValue().getAttributeType().getTypeCategory();
+
+            if (typeCategory == PRIMITIVE || typeCategory == TypeCategory.ENUM) {
+                ret.add(entry.getKey());
+            }
+
+            AtlasAttributeDef attrDef = entry.getValue().getAttributeDef();
+
+            if (attrDef.getIncludeInNotification() || attrDef.getIsUnique()) {
+                ret.add(entry.getKey());
+            }
+        }
+
+        return ret;
     }
 
     private Set<String> getWrittenAttributeNames(AtlasEntity entity, AtlasEntityType entityType) {
