@@ -457,8 +457,7 @@ public class EdgeRepository {
                     .build();
         }
 
-        ResultSet rs = session.execute(stmt);
-        return new PaginatedEdgeIterable(rs, vertexId, isOut, graph);
+        return new PaginatedEdgeIterable(() -> session.execute(stmt), vertexId, isOut, graph);
     }
 
     /**

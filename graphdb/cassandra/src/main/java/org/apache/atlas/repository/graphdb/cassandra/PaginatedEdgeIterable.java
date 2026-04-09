@@ -11,37 +11,38 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.function.Supplier;
 
 /**
- * Lazy {@link Iterable} that wraps a Cassandra {@link ResultSet} and maps each
+ * Lazy {@link Iterable} that wraps a Cassandra query and maps each
  * row to a {@link CassandraEdge} on demand. The Cassandra driver handles page
  * fetching automatically via the page size configured on the statement.
  *
  * <p>Memory usage is O(pageSize) instead of O(totalEdges).
  *
- * <p>This is a <b>single-use</b> iterable — calling {@link #iterator()} more
- * than once throws {@link IllegalStateException}. All audited callsites
- * consume the iterable exactly once (verified in Risk 1 analysis).
+ * <p>This iterable is <b>re-iterable</b> — each call to {@link #iterator()}
+ * re-executes the CQL query via the supplied {@link Supplier}, producing a
+ * fresh result set.
  */
 public class PaginatedEdgeIterable implements Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> {
 
     private static final Logger LOG = LoggerFactory.getLogger(PaginatedEdgeIterable.class);
 
-    private final ResultSet     resultSet;
-    private final String        vertexId;
-    private final boolean       isOut;
-    private final CassandraGraph graph;
-    private volatile boolean    consumed = false;
+    private final Supplier<ResultSet> resultSetSupplier;
+    private final String              vertexId;
+    private final boolean             isOut;
+    private final CassandraGraph      graph;
 
     /**
-     * @param resultSet Cassandra result set with page size already configured
+     * @param resultSetSupplier supplier that executes the CQL query and returns a fresh ResultSet
      * @param vertexId  the vertex ID that owns these edges
      * @param isOut     true if these are OUT edges (vertexId is the out-vertex),
      *                  false if IN edges (vertexId is the in-vertex)
      * @param graph     the graph instance for edge construction
      */
-    public PaginatedEdgeIterable(ResultSet resultSet, String vertexId, boolean isOut, CassandraGraph graph) {
-        this.resultSet = resultSet;
+    public PaginatedEdgeIterable(Supplier<ResultSet> resultSetSupplier, String vertexId,
+                                 boolean isOut, CassandraGraph graph) {
+        this.resultSetSupplier = resultSetSupplier;
         this.vertexId  = vertexId;
         this.isOut     = isOut;
         this.graph     = graph;
@@ -50,17 +51,15 @@ public class PaginatedEdgeIterable implements Iterable<AtlasEdge<CassandraVertex
     @Override
     @SuppressWarnings("unchecked")
     public Iterator<AtlasEdge<CassandraVertex, CassandraEdge>> iterator() {
-        if (consumed) {
-            throw new IllegalStateException(
-                "PaginatedEdgeIterable has already been consumed. " +
-                "Each instance can only be iterated once.");
-        }
-        consumed = true;
-        return (Iterator) new PaginatedEdgeIterator();
+        return (Iterator) new PaginatedEdgeIterator(resultSetSupplier.get());
     }
 
     private class PaginatedEdgeIterator implements Iterator<CassandraEdge> {
-        private final Iterator<Row> rowIterator = resultSet.iterator();
+        private final Iterator<Row> rowIterator;
+
+        PaginatedEdgeIterator(ResultSet resultSet) {
+            this.rowIterator = resultSet.iterator();
+        }
 
         @Override
         public boolean hasNext() {

@@ -17,19 +17,19 @@ import java.util.*;
  * <p>Memory overhead: O(bufferSize) for the buffered-edge ID set. Persisted edges
  * are streamed lazily, so total memory is O(pageSize + bufferSize).
  *
- * <p>This is a <b>single-use</b> iterable because the underlying persisted iterable
- * ({@link PaginatedEdgeIterable}) is single-use.
+ * <p>This iterable is <b>re-iterable</b> — each call to {@link #iterator()}
+ * creates a fresh iterator that re-queries Cassandra via the underlying
+ * {@link PaginatedEdgeIterable}.
  */
 public class MergedEdgeIterable implements Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> {
 
     private final List<CassandraEdge>                                       bufferedEdges;
     private final Iterable<AtlasEdge<CassandraVertex, CassandraEdge>>       persistedEdges;
     private final TransactionBuffer                                         txBuffer;
-    private volatile boolean consumed = false;
 
     /**
      * @param bufferedEdges  snapshot of edges from the transaction buffer (already filtered)
-     * @param persistedEdges lazy iterable of edges from Cassandra
+     * @param persistedEdges lazy iterable of edges from Cassandra (must be re-iterable)
      * @param txBuffer       the transaction buffer, used for {@code isEdgeRemoved()} checks
      */
     public MergedEdgeIterable(List<CassandraEdge> bufferedEdges,
@@ -43,12 +43,6 @@ public class MergedEdgeIterable implements Iterable<AtlasEdge<CassandraVertex, C
     @Override
     @SuppressWarnings("unchecked")
     public Iterator<AtlasEdge<CassandraVertex, CassandraEdge>> iterator() {
-        if (consumed) {
-            throw new IllegalStateException(
-                "MergedEdgeIterable has already been consumed. " +
-                "Each instance can only be iterated once.");
-        }
-        consumed = true;
         return (Iterator) new MergedEdgeIterator();
     }
 
