@@ -461,33 +461,6 @@ public class EdgeRepository {
     }
 
     /**
-     * Discover distinct edge labels for a vertex using label-skip-scan.
-     *
-     * <p>Instead of scanning all 4.88M edges to collect labels, this executes
-     * ~N queries (one per distinct label) using the clustering column ordering:
-     * {@code SELECT edge_label FROM edges_out WHERE out_vertex_id = ? AND edge_label > ? LIMIT 1}.
-     *
-     * <p>For a vertex with 4.88M edges across 20 labels, this is 20 tiny queries
-     * instead of one massive partition scan.
-     *
-     * @param vertexId  the vertex to discover labels for
-     * @param direction OUT, IN, or BOTH
-     * @return set of distinct edge labels
-     */
-    public Set<String> getDistinctEdgeLabels(String vertexId, AtlasEdgeDirection direction) {
-        Set<String> labels = new LinkedHashSet<>();
-
-        if (direction == AtlasEdgeDirection.OUT || direction == AtlasEdgeDirection.BOTH) {
-            collectDistinctLabels(vertexId, "edges_out", "out_vertex_id", labels);
-        }
-        if (direction == AtlasEdgeDirection.IN || direction == AtlasEdgeDirection.BOTH) {
-            collectDistinctLabels(vertexId, "edges_in", "in_vertex_id", labels);
-        }
-
-        return labels;
-    }
-
-    /**
      * Discover distinct edge labels along with the typeName from the first edge of each label.
      * Combines label discovery with typeName extraction in a single skip-scan pass.
      *
@@ -504,24 +477,6 @@ public class EdgeRepository {
         }
 
         return labelToTypeName;
-    }
-
-    private void collectDistinctLabels(String vertexId, String tableName, String partitionCol,
-                                        Set<String> labels) {
-        String cql = "SELECT edge_label FROM " + tableName +
-                     " WHERE " + partitionCol + " = ? AND edge_label > ? LIMIT 1";
-
-        String currentLabel = "";
-        while (true) {
-            SimpleStatement stmt = SimpleStatement.newInstance(cql, vertexId, currentLabel);
-            ResultSet rs = session.execute(stmt);
-            Row row = rs.one();
-            if (row == null) {
-                break;
-            }
-            currentLabel = row.getString("edge_label");
-            labels.add(currentLabel);
-        }
     }
 
     private static final int DELETED_EDGE_SCAN_LIMIT = 1000;
