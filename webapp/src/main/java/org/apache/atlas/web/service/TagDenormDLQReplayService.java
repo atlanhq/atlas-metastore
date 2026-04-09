@@ -6,6 +6,9 @@ import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.GraphTransactionInterceptor;
 import org.apache.atlas.RequestContext;
+import org.apache.atlas.service.metrics.MetricUtils;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.ESDeferredOperation;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
@@ -139,6 +142,7 @@ public class TagDenormDLQReplayService {
 
     private final AtlasEntityStore entityStore;
     private final EntityMutationPostProcessor postProcessor;
+    private MeterRegistry meterRegistry;
 
     @Inject
     public TagDenormDLQReplayService(AtlasEntityStore entityStore,
@@ -146,6 +150,12 @@ public class TagDenormDLQReplayService {
         this.entityStore = entityStore;
         this.postProcessor = postProcessor;
         this.bootstrapServers = ApplicationProperties.get().getString("atlas.graph.kafka.bootstrap.servers");
+
+        try {
+            this.meterRegistry = MetricUtils.getMeterRegistry();
+        } catch (Exception e) {
+            log.warn("Failed to get meter registry for DLQ replay metrics", e);
+        }
     }
 
     /**
@@ -353,6 +363,7 @@ public class TagDenormDLQReplayService {
                                     long processingTime = System.currentTimeMillis() - processingStartTime;
 
                                     processedCount.incrementAndGet();
+                                    emitReplayMessageMetric("success", null);
 
                                     // Success - remove from retry tracker, reset backoff, and commit offset
                                     retryTracker.remove(retryKey);
@@ -370,6 +381,7 @@ public class TagDenormDLQReplayService {
                                 } catch (AtlasBaseException atlasBaseException) {
                                     // Treat as transient — Cassandra/graph failure, will retry with exponential backoff
                                     errorCount.incrementAndGet();
+                                    emitReplayMessageMetric("failed", atlasBaseException.getClass().getSimpleName());
 
                                     long backoffDelay = calculateExponentialBackoff(retryKey);
 
@@ -385,6 +397,7 @@ public class TagDenormDLQReplayService {
                                     break;
                                 } catch (Exception e) {
                                     errorCount.incrementAndGet();
+                                    emitReplayMessageMetric("failed", e.getClass().getSimpleName());
 
                                     // Track retry attempts with timestamp for this specific offset
                                     RetryTrackerEntry entry = retryTracker.get(retryKey);
@@ -405,6 +418,7 @@ public class TagDenormDLQReplayService {
                                                 record.offset(), record.partition(), retryCount, e.getMessage(), e);
 
                                         skippedCount.incrementAndGet();
+                                        emitReplayMessageMetric("skipped", e.getClass().getSimpleName());
                                         retryTracker.remove(retryKey);
                                         resetExponentialBackoff(retryKey);
 
@@ -512,8 +526,8 @@ public class TagDenormDLQReplayService {
             return;
         }
 
-        // Extract GUIDs from the message
-        List<String> guids = new ArrayList<>();
+        // Extract unique GUIDs from the message
+        Set<String> guids = new LinkedHashSet<>();
         Iterator<Map.Entry<String, JsonNode>> fields = verticesNode.fields();
         while (fields.hasNext()) {
             Map.Entry<String, JsonNode> field = fields.next();
@@ -534,11 +548,12 @@ public class TagDenormDLQReplayService {
 
         // Process in batches to bound memory (deferred ops accumulate per batch)
         // Same pattern as EntityMutationService:341-355
+        List<String> guidList = new ArrayList<>(guids);
         Map<String, String> allErrors = new HashMap<>();
         int batchSize = REPAIR_BATCH_SIZE;
 
-        for (int i = 0; i < guids.size(); i += batchSize) {
-            List<String> batch = guids.subList(i, Math.min(i + batchSize, guids.size()));
+        for (int i = 0; i < guidList.size(); i += batchSize) {
+            List<String> batch = guidList.subList(i, Math.min(i + batchSize, guidList.size()));
             try {
                 Map<String, String> errors = entityStore.repairClassificationMappingsV2(batch);
                 allErrors.putAll(errors);
@@ -555,10 +570,14 @@ public class TagDenormDLQReplayService {
         }
 
         if (!allErrors.isEmpty()) {
+            int repairedCount = guids.size() - allErrors.size();
+            emitReplayVertexMetric("repaired", null, repairedCount);
+            emitReplayVertexMetric("failed", "repair_error", allErrors.size());
             log.warn("Tag denorm DLQ repair completed with {} errors: {}", allErrors.size(), allErrors);
             throw new AtlasBaseException("Repair failed for " + allErrors.size() + " vertices: " + allErrors.keySet());
         }
 
+        emitReplayVertexMetric("repaired", null, guids.size());
         log.info("Successfully repaired tag denorm for {} vertices from DLQ", guids.size());
     }
 
@@ -653,5 +672,47 @@ public class TagDenormDLQReplayService {
         status.put("exponentialBackoffConfig", backoffConfig);
 
         return status;
+    }
+
+    /**
+     * Emits a Prometheus counter for DLQ replay message outcomes.
+     * Labels: outcome (success/failed/skipped), reason (why it failed).
+     */
+    private void emitReplayMessageMetric(String outcome, String reason) {
+        if (meterRegistry == null) {
+            return;
+        }
+        try {
+            Counter.Builder builder = Counter.builder("tag.denorm.dlq.replay.messages")
+                    .description("Tag denorm DLQ replay message outcomes")
+                    .tag("outcome", outcome);
+            if (reason != null) {
+                builder.tag("reason", reason);
+            }
+            builder.register(meterRegistry).increment();
+        } catch (Exception e) {
+            log.warn("Failed to emit DLQ replay message metric", e);
+        }
+    }
+
+    /**
+     * Emits a Prometheus counter for DLQ replay vertex outcomes.
+     * Labels: outcome (repaired/failed), reason (failure detail).
+     */
+    private void emitReplayVertexMetric(String outcome, String reason, int count) {
+        if (meterRegistry == null || count <= 0) {
+            return;
+        }
+        try {
+            Counter.Builder builder = Counter.builder("tag.denorm.dlq.replay.vertices")
+                    .description("Tag denorm DLQ replay vertex outcomes")
+                    .tag("outcome", outcome);
+            if (reason != null) {
+                builder.tag("reason", reason);
+            }
+            builder.register(meterRegistry).increment(count);
+        } catch (Exception e) {
+            log.warn("Failed to emit DLQ replay vertex metric", e);
+        }
     }
 }
