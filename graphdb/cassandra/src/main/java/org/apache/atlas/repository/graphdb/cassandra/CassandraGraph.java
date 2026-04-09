@@ -41,6 +41,8 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
     static final Set<String> EXCLUDE_ES_INDEXES_PREFIXING = new HashSet<>(Arrays.asList("search_logs"));
 
+    private static final int EDGE_PAGE_SIZE = AtlasConfiguration.CASSANDRA_EDGE_PAGE_SIZE.getInt();
+
     /**
      * Max vertices per LOGGED batch in commit(). Prevents exceeding Cassandra's
      * batch_size_fail_threshold (default 50KB). During TypeDef bootstrap, a single
@@ -495,9 +497,8 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         List<CassandraEdge> bufferedEdges = txBuffer.get().getEdgesForVertex(vertexId, direction, edgeLabel);
 
         // Lazy paginated fetch from Cassandra — O(pageSize) memory instead of O(totalEdges)
-        int pageSize = AtlasConfiguration.CASSANDRA_EDGE_PAGE_SIZE.getInt();
         Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> persistedEdges =
-                edgeRepository.getEdgesForVertexPaged(vertexId, direction, edgeLabel, this, pageSize);
+                edgeRepository.getEdgesForVertexPaged(vertexId, direction, edgeLabel, this, EDGE_PAGE_SIZE);
 
         // Lazy merge: yields buffered edges first, then streams persisted edges
         // while filtering out duplicates (buffered overrides) and removed edges.

@@ -525,6 +525,8 @@ public class EdgeRepository {
         }
     }
 
+    private static final int DELETED_EDGE_SCAN_LIMIT = 1000;
+
     private void collectDistinctLabelsWithTypeName(String vertexId, String tableName, String partitionCol,
                                                     Map<String, String> labelToTypeName) {
         String cql = "SELECT edge_label, properties, state FROM " + tableName +
@@ -541,15 +543,48 @@ public class EdgeRepository {
             currentLabel = row.getString("edge_label");
             String state = row.getString("state");
 
-            // Only include ACTIVE edges for label discovery
             if (!"DELETED".equals(state)) {
-                String propsJson = row.getString("properties");
-                Map<String, Object> props = parseProperties(propsJson);
-                Object typeNameObj = props.get("__typeName");
-                String typeName = typeNameObj != null ? String.valueOf(typeNameObj) : "";
-                labelToTypeName.putIfAbsent(currentLabel, typeName);
+                extractAndPutTypeName(row, currentLabel, labelToTypeName);
+            } else {
+                // First edge for this label is DELETED — scan for an ACTIVE edge
+                // to retrieve the typeName. Bounded to DELETED_EDGE_SCAN_LIMIT rows
+                // to avoid scanning millions of soft-deleted edges.
+                findActiveEdgeForLabel(vertexId, tableName, partitionCol, currentLabel, labelToTypeName);
             }
         }
+    }
+
+    private void findActiveEdgeForLabel(String vertexId, String tableName, String partitionCol,
+                                         String label, Map<String, String> labelToTypeName) {
+        String scanCql = "SELECT properties, state FROM " + tableName +
+                         " WHERE " + partitionCol + " = ? AND edge_label = ?";
+        SimpleStatement scanStmt = SimpleStatement.builder(scanCql)
+                .setPageSize(100)
+                .addPositionalValue(vertexId)
+                .addPositionalValue(label)
+                .build();
+
+        ResultSet scanRs = session.execute(scanStmt);
+        int scanned = 0;
+        for (Row scanRow : scanRs) {
+            if (++scanned > DELETED_EDGE_SCAN_LIMIT) {
+                LOG.warn("findActiveEdgeForLabel: scanned {} rows for vertex {} label {} without finding ACTIVE edge, giving up",
+                         DELETED_EDGE_SCAN_LIMIT, vertexId, label);
+                break;
+            }
+            if (!"DELETED".equals(scanRow.getString("state"))) {
+                extractAndPutTypeName(scanRow, label, labelToTypeName);
+                return;
+            }
+        }
+    }
+
+    private void extractAndPutTypeName(Row row, String label, Map<String, String> labelToTypeName) {
+        String propsJson = row.getString("properties");
+        Map<String, Object> props = parseProperties(propsJson);
+        Object typeNameObj = props.get("__typeName");
+        String typeName = typeNameObj != null ? String.valueOf(typeNameObj) : "";
+        labelToTypeName.putIfAbsent(label, typeName);
     }
 
     @SuppressWarnings("unchecked")
