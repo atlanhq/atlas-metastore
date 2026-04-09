@@ -290,7 +290,12 @@ public class ClassificationAssociator {
                 }
             }
 
-            List<AtlasClassification> filteredClassifications = Optional.ofNullable(incomingEntityHeader.getAddOrUpdateClassifications())
+            List<AtlasClassification> incomingRaw = incomingEntityHeader.getAddOrUpdateClassifications();
+            if (CollectionUtils.isEmpty(incomingRaw)) {
+                incomingRaw = incomingEntityHeader.getClassifications();
+            }
+
+            List<AtlasClassification> filteredClassifications = Optional.ofNullable(incomingRaw)
                     .orElse(Collections.emptyList())
                     .stream()
                     .filter(classification -> classification.getEntityGuid().equals(entityToBeChanged.getGuid()))
