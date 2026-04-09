@@ -60,4 +60,30 @@ public interface AtlasGraphIndexClient {
      * @return returns true if index client is active
      */
     boolean isHealthy();
+
+    /**
+     * Ensures the JanusGraph vertex index has the required Atlan analysis settings
+     * (normalizers, analyzers) before field mappings that reference them are registered.
+     *
+     * <p>JanusGraph creates {@code janusgraph_vertex_index} with empty settings. Atlan fields
+     * like {@code ENTITY_TYPE_PROPERTY_KEY} and {@code SUPER_TYPES_PROPERTY_KEY} use
+     * {@code atlan_normalizer} on their keyword sub-fields. If the normalizer is not defined
+     * on the index at registration time, Elasticsearch rejects the PUT mapping with HTTP 400,
+     * causing the Spring context to fail and Atlas to crash-loop.
+     *
+     * <p>Behaviour:
+     * <ul>
+     *   <li>Index has correct settings → no-op, returns {@code true}.</li>
+     *   <li>Index exists without settings AND has 0 documents → deletes and recreates with
+     *       correct settings, returns {@code true}.</li>
+     *   <li>Index exists without settings AND has documents → logs a critical error and returns
+     *       {@code false} (cannot safely change analysis settings on a populated index without
+     *       a full reindex).</li>
+     *   <li>Index does not exist → creates it with correct settings so that JanusGraph inherits
+     *       them when it registers the index in its own schema, returns {@code true}.</li>
+     * </ul>
+     *
+     * @return {@code true} if the index has (or was brought to have) the correct settings.
+     */
+    boolean ensureVertexIndexSettings();
 }
