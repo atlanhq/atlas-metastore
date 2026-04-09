@@ -188,7 +188,10 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
             // MS-928: Apply ES-native nested mappings BEFORE JanusGraph processing.
             // JanusGraph's commit creates keyword mappings for all properties it touches.
             // If we apply the nested mapping first, ES preserves it (can't change type).
-            applyESNestedMappings(changedTypeDefs);
+            // For CREATE: failure is fatal — the field will be permanently stuck as keyword.
+            // For UPDATE: failure is non-fatal — the mapping should already exist from CREATE.
+            applyESNestedMappings(changedTypeDefs.getCreatedTypeDefs(), true);
+            applyESNestedMappings(changedTypeDefs.getUpdatedTypeDefs(), false);
 
             // Update index for newly created types
             if (CollectionUtils.isNotEmpty(changedTypeDefs.getCreatedTypeDefs())) {
@@ -1157,44 +1160,55 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
     }
     
     /**
-     * MS-928: Scan changed typedefs for attributes with indexTypeESMapping="nested"
-     * and apply the mapping directly to ES. This bridges the gap between what the
-     * typedef declares and what JanusGraph can create (JanusGraph only supports
-     * multi-fields, not ES nested types).
+     * MS-928: Scan typedefs for attributes with indexTypeESMapping="nested"
+     * and apply the mapping directly to ES before JanusGraph processing.
+     *
+     * @param typeDefs  the typedef list to scan
+     * @param failOnError  if true (CREATE path), throw on failure — the field would be permanently
+     *                     stuck as keyword. If false (UPDATE path), warn only — the mapping should
+     *                     already exist from the original CREATE.
      */
-    private void applyESNestedMappings(ChangedTypeDefs changedTypeDefs) {
-        try {
-            Map<String, Map<String, Object>> nestedMappings = new LinkedHashMap<>();
+    private void applyESNestedMappings(List<? extends AtlasBaseTypeDef> typeDefs, boolean failOnError) throws AtlasBaseException {
+        if (CollectionUtils.isEmpty(typeDefs)) {
+            return;
+        }
 
-            List<AtlasBaseTypeDef> allChanged = new ArrayList<>();
-            if (changedTypeDefs.getCreatedTypeDefs() != null) allChanged.addAll(changedTypeDefs.getCreatedTypeDefs());
-            if (changedTypeDefs.getUpdatedTypeDefs() != null) allChanged.addAll(changedTypeDefs.getUpdatedTypeDefs());
+        Map<String, Map<String, Object>> nestedMappings = new LinkedHashMap<>();
 
-            for (AtlasBaseTypeDef typeDef : allChanged) {
-                if (typeDef instanceof AtlasStructDef) {
-                    for (AtlasStructDef.AtlasAttributeDef attrDef : ((AtlasStructDef) typeDef).getAttributeDefs()) {
-                        String esMapping = attrDef.getIndexTypeESMapping();
-                        if ("nested".equalsIgnoreCase(esMapping)) {
-                            // Build the nested properties from indexTypeESFields
-                            HashMap<String, HashMap<String, Object>> esFields = attrDef.getIndexTypeESFields();
-                            Map<String, Object> nestedProps = new LinkedHashMap<>();
-                            if (esFields != null) {
-                                for (Map.Entry<String, HashMap<String, Object>> field : esFields.entrySet()) {
-                                    nestedProps.put(field.getKey(), new LinkedHashMap<>(field.getValue()));
-                                }
-                            }
-                            nestedMappings.put(attrDef.getName(), nestedProps);
+        for (AtlasBaseTypeDef typeDef : typeDefs) {
+            if (typeDef instanceof AtlasStructDef) {
+                for (AtlasStructDef.AtlasAttributeDef attrDef : ((AtlasStructDef) typeDef).getAttributeDefs()) {
+                    String esMapping = attrDef.getIndexTypeESMapping();
+                    if ("nested".equalsIgnoreCase(esMapping)) {
+                        HashMap<String, HashMap<String, Object>> esFields = attrDef.getIndexTypeESFields();
+                        if (esFields == null || esFields.isEmpty()) {
+                            LOG.warn("Attribute '{}' has indexTypeESMapping=nested but no indexTypeESFields — nested mapping will have no sub-fields",
+                                    attrDef.getName());
                         }
+                        Map<String, Object> nestedProps = new LinkedHashMap<>();
+                        if (esFields != null) {
+                            for (Map.Entry<String, HashMap<String, Object>> field : esFields.entrySet()) {
+                                nestedProps.put(field.getKey(), new LinkedHashMap<>(field.getValue()));
+                            }
+                        }
+                        nestedMappings.put(attrDef.getName(), nestedProps);
                     }
                 }
             }
+        }
 
-            if (!nestedMappings.isEmpty()) {
+        if (!nestedMappings.isEmpty()) {
+            try {
                 LOG.info("Applying ES nested mappings for: {}", nestedMappings.keySet());
                 ESConnector.ensureNestedMappings(nestedMappings);
+            } catch (Exception e) {
+                if (failOnError) {
+                    LOG.error("Failed to apply ES nested mappings on typedef CREATE — aborting to prevent permanent keyword mapping", e);
+                    throw new AtlasBaseException("Failed to apply ES nested mappings for: " + nestedMappings.keySet(), e);
+                } else {
+                    LOG.warn("Failed to apply ES nested mappings on typedef UPDATE — non-fatal, mappings should already exist", e);
+                }
             }
-        } catch (Exception e) {
-            LOG.warn("Failed to apply ES nested mappings — non-fatal", e);
         }
     }
 
