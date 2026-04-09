@@ -294,7 +294,6 @@ public class ClassificationAssociator {
             if (CollectionUtils.isEmpty(incomingRaw)) {
                 incomingRaw = incomingEntityHeader.getClassifications();
             }
-
             List<AtlasClassification> filteredClassifications = Optional.ofNullable(incomingRaw)
                     .orElse(Collections.emptyList())
                     .stream()
