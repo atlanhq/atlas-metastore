@@ -11,6 +11,24 @@ Execute the Atlas Metastore REST API test harness against a tenant, capture stru
 **Test harness location:** `dev-support/test-harness/`
 **Entry point:** `python3 run.py [OPTIONS]`
 
+## Guardrail: Allowed Tenants
+
+Before executing against any tenant, validate it against the allowed list:
+
+```
+dev-support/test-harness/allowed-tenants.txt
+```
+
+- Read the file and collect all non-empty, non-comment lines (lines starting with `#` are comments)
+- `local` and `localhost` are always allowed (they target localhost:21000)
+- If the resolved tenant is NOT in the allowed list and is NOT local/localhost, **refuse to run** and show:
+  ```
+  Tenant "<name>" is not in the allowed tenants list.
+  Allowed: local, staging, preprod
+  To add a tenant, edit dev-support/test-harness/allowed-tenants.txt
+  ```
+- This prevents accidental execution against production environments
+
 ## Step 1: Parse Arguments
 
 Parse `$ARGUMENTS` to extract a tenant name and any CLI options.

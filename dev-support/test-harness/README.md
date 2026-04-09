@@ -104,7 +104,7 @@ creds:
     client_secret: <secret>
 ```
 
-Default location: `~/Desktop/Projects/tokens/creds.yaml` (override with `--creds-file` or `TOKEN_FILE` env var).
+Default location: `~/creds.yaml` (override with `--creds-file` or `TOKEN_FILE` env var).
 
 Token behavior:
 - Tokens are refreshed automatically 30 seconds before expiry
@@ -119,7 +119,7 @@ Token behavior:
 | `--url <url>` | `http://localhost:21000` | Atlas base URL override |
 | `--user <user>` | `admin` | Basic auth username (local dev only) |
 | `--password <pass>` | `admin` | Basic auth password (local dev only) |
-| `--creds-file <path>` | `~/Desktop/Projects/tokens/creds.yaml` | Path to creds.yaml for OAuth2 |
+| `--creds-file <path>` | `~/creds.yaml` | Path to creds.yaml for OAuth2 |
 | `--suite <names...>` | all | Run only these suites (space-separated) |
 | `--tag <tags...>` | all | Run only tests with these tags |
 | `--exclude-tag <tags...>` | (none) | Skip tests with these tags |

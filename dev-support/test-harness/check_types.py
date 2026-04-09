@@ -198,8 +198,8 @@ def main():
     parser.add_argument("--tenant", required=True,
                         help="Tenant name (e.g., 'preprod', 'staging')")
     parser.add_argument("--creds-file",
-                        default=os.path.expanduser("~/Desktop/Projects/tokens/creds.yaml"),
-                        help="Path to creds.yaml")
+                        default=os.environ.get("TOKEN_FILE", os.path.expanduser("~/creds.yaml")),
+                        help="Path to creds.yaml (default: $TOKEN_FILE or ~/creds.yaml)")
     parser.add_argument("--extra-types", nargs="*", default=[],
                         help="Additional type names to inspect")
     args = parser.parse_args()
