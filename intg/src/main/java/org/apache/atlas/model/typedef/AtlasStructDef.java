@@ -311,6 +311,7 @@ public class AtlasStructDef extends AtlasBaseTypeDef implements Serializable {
         HashMap<String, Object> indexTypeESConfig;
         HashMap<String, HashMap<String, Object>> indexTypeESFields;
         HashMap<String, ArrayList> autoUpdateAttributes;
+        String indexTypeESMapping;
 
         public AtlasAttributeDef() { this(null, null); }
 
@@ -404,6 +405,7 @@ public class AtlasStructDef extends AtlasBaseTypeDef implements Serializable {
                 setDisplayName(other.getDisplayName());
                 setIndexTypeESConfig(other.getIndexTypeESConfig());
                 setIndexTypeESFields(other.getIndexTypeESFields());
+                setIndexTypeESMapping(other.getIndexTypeESMapping());
                 setAutoUpdateAttributes(other.getAutoUpdateAttributes());
                 setSkipScrubbing(other.getSkipScrubbing());
                 setIsDefaultValueNull(other.getIsDefaultValueNull());
@@ -602,6 +604,10 @@ public class AtlasStructDef extends AtlasBaseTypeDef implements Serializable {
         public HashMap<String, HashMap<String, Object>> getIndexTypeESFields() {
             return this.indexTypeESFields;
         }
+
+        public void setIndexTypeESMapping(String indexTypeESMapping) { this.indexTypeESMapping = indexTypeESMapping; }
+
+        public String getIndexTypeESMapping() { return this.indexTypeESMapping; }
 
         public void setAutoUpdateAttributes(HashMap<String, ArrayList> autoUpdateAttributes) { this.autoUpdateAttributes = autoUpdateAttributes; }
 
