@@ -91,14 +91,22 @@ class EntityGraphRetrieverTagPropagationTest {
         setField(retriever, "typeRegistry", typeRegistry);
         setField(retriever, "executorService", newSameThreadExecutorService());
 
-        // Stub graph.getVertices() to return vertices from vertexStore (filters missing IDs)
+        // Stub graph.getVertices() to return vertices from vertexStore (filters missing IDs).
+        // Varargs handling: when called with an explicit String[], Mockito may expand or not.
         when(graph.getVertices(any(String[].class))).thenAnswer(invocation -> {
-            String[] ids = invocation.getArgument(0);
+            Object[] args = invocation.getArguments();
             Set<AtlasVertex> result = new LinkedHashSet<>();
-            for (String id : ids) {
-                AtlasVertex v = vertexStore.get(id);
-                if (v != null) {
-                    result.add(v);
+            if (args.length == 1 && args[0] instanceof String[]) {
+                for (String id : (String[]) args[0]) {
+                    AtlasVertex v = vertexStore.get(id);
+                    if (v != null) result.add(v);
+                }
+            } else {
+                for (Object arg : args) {
+                    if (arg instanceof String) {
+                        AtlasVertex v = vertexStore.get((String) arg);
+                        if (v != null) result.add(v);
+                    }
                 }
             }
             return result;
