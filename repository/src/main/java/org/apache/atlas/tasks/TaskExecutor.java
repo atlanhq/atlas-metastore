@@ -142,7 +142,6 @@ public class TaskExecutor {
                     TASK_LOG.warn("Task not scheduled as status was COMPLETE!", task);
                     return;
                 }
-
                 String tagTypeName = task.getTagTypeName();
                 if (task.getType() != null && task.getType().startsWith("CLASSIFICATION_PROPAGATION")
                         && (tagTypeName == null || tagTypeName.isEmpty())) {
