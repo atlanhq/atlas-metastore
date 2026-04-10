@@ -95,3 +95,6 @@ site/
 # Migration config (local dev overrides — template lives in graphdb/migrator/)
 migration.properties
 validation-report-*.json
+
+# Credentials
+**/creds.yaml
