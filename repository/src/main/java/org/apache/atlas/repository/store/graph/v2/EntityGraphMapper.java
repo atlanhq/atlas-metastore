@@ -6311,13 +6311,17 @@ public class EntityGraphMapper {
             }
         }
 
-        // Batch fetch all missing vertices (1 Cassandra call instead of N)
+        // Batch fetch missing vertices in sub-batches of 500
         if (!tagsNeedingFallback.isEmpty()) {
-            String[] vertexIds = tagsNeedingFallback.stream().map(Tag::getVertexId).toArray(String[]::new);
-            Set<AtlasVertex> vertices = graph.getVertices(vertexIds);
+            final int VERTEX_FETCH_BATCH = 500;
             Map<String, AtlasVertex> vertexMap = new HashMap<>();
-            for (AtlasVertex v : vertices) {
-                vertexMap.put(v.getIdForDisplay(), v);
+            for (int b = 0; b < tagsNeedingFallback.size(); b += VERTEX_FETCH_BATCH) {
+                int end = Math.min(b + VERTEX_FETCH_BATCH, tagsNeedingFallback.size());
+                String[] batchIds = tagsNeedingFallback.subList(b, end).stream().map(Tag::getVertexId).toArray(String[]::new);
+                Set<AtlasVertex> batchVertices = graph.getVertices(batchIds);
+                for (AtlasVertex v : batchVertices) {
+                    vertexMap.put(v.getIdForDisplay(), v);
+                }
             }
             for (Tag tag : tagsNeedingFallback) {
                 AtlasVertex vertex = vertexMap.get(tag.getVertexId());
