@@ -381,8 +381,9 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                 String responseBody = EntityUtils.toString(response.getEntity());
 
                 if (!aliasRedetected && statusCode >= 400 && statusCode < 500) {
-                    request = redetectAliasAndRebuild(cfg, eventPayloads, "HTTP " + statusCode);
-                    if (request != null) {
+                    Optional<Request> rebuilt = redetectAliasAndRebuild(cfg, eventPayloads, "HTTP " + statusCode);
+                    if (rebuilt.isPresent()) {
+                        request = rebuilt.get();
                         cfg = this.writeConfig;
                         aliasRedetected = true;
                         continue;
@@ -397,12 +398,36 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                     throw new AtlasBaseException("Unable to push entity audits to ES. Status code: " + statusCode + ", Response: " + responseBody);
                 }
 
-            } catch (IOException e) {
+            } catch (ResponseException e) {
+                // RestClient may throw for error statuses (depending on API/version); treat like HTTP branch above.
                 if (!aliasRedetected) {
-                    Request rebuilt = redetectAliasAndRebuild(cfg, eventPayloads, "IOException: " + e.getMessage());
+                    int status = e.getResponse().getStatusLine().getStatusCode();
+                    Optional<Request> rebuilt = redetectAliasAndRebuild(cfg, eventPayloads,
+                            "ResponseException HTTP " + status);
+                    if (rebuilt.isPresent()) {
+                        request = rebuilt.get();
+                        cfg = this.writeConfig;
+                        aliasRedetected = true;
+                        continue;
+                    }
                     aliasRedetected = true;
-                    if (rebuilt != null) {
-                        request = rebuilt;
+                }
+                int status = e.getResponse().getStatusLine().getStatusCode();
+                String errBody = e.getMessage();
+                if ((status >= 500 && status < 600) || status == 429) {
+                    LOG.warn("Failed to push entity audits to ES due to server error ({}). Retrying... ({}/{}) Response: {}",
+                            status, retryCount + 1, maxRetries, errBody);
+                } else {
+                    throw new AtlasBaseException("Unable to push entity audits to ES. Status code: " + status + ", Response: " + errBody, e);
+                }
+            } catch (IOException e) {
+                // Transport-level failures (connection reset, timeout, etc.); alias HEAD may still succeed after ILM change.
+                if (!aliasRedetected) {
+                    Optional<Request> rebuilt = redetectAliasAndRebuild(cfg, eventPayloads,
+                            "IOException: " + e.getMessage());
+                    aliasRedetected = true;
+                    if (rebuilt.isPresent()) {
+                        request = rebuilt.get();
                         cfg = this.writeConfig;
                         continue;
                     }
@@ -428,19 +453,19 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
     /**
      * Re-probes ES for the write alias after a write failure. If the config changed (e.g. ILM
      * migration created the write alias while Atlas was running), returns a rebuilt request
-     * targeting the new write index. Returns null if the config is unchanged.
+     * targeting the new write index. Empty if the write target is unchanged.
      */
-    private Request redetectAliasAndRebuild(WriteConfig prevCfg, List<String> eventPayloads, String trigger) {
+    private Optional<Request> redetectAliasAndRebuild(WriteConfig prevCfg, List<String> eventPayloads, String trigger) {
         detectAndConfigureWriteAlias();
         WriteConfig newCfg = this.writeConfig;
         if (!newCfg.writeIndex().equals(prevCfg.writeIndex())) {
             LOG.info("Write alias config changed after re-detection (trigger='{}', old='{}', new='{}'), rebuilding audit bulk request",
                     trigger, prevCfg.writeIndex(), newCfg.writeIndex());
-            return buildBulkAuditRequest(newCfg, eventPayloads);
+            return Optional.of(buildBulkAuditRequest(newCfg, eventPayloads));
         }
         LOG.debug("Write alias re-detection triggered by '{}' but config unchanged (writeIndex='{}')",
                 trigger, prevCfg.writeIndex());
-        return null;
+        return Optional.empty();
     }
 
     private Request buildBulkAuditRequest(WriteConfig cfg, List<String> eventPayloads) {
