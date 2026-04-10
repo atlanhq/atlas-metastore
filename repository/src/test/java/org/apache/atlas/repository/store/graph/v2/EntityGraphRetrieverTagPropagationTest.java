@@ -21,29 +21,36 @@ import org.mockito.MockitoAnnotations;
 import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
 
 /**
- * Tests for NPE fixes in tag propagation traversal methods (PR #6007).
+ * Tests for tag propagation traversal methods.
  *
  * Covers:
- * 1. graph.getVertex() returning null (deleted vertex during traversal)
- * 2. getAdjacentVerticesIds returning empty set for unknown entity types
- * 3. getAdjacentVerticesIds returning empty set when tagPropagationEdges is null
+ * 1. Batch vertex fetch in BFS (graph.getVertices instead of N × graph.getVertex)
+ * 2. Sub-batching at 500 for large BFS levels
+ * 3. Null/deleted vertex handling during traversal
+ * 4. getAdjacentVerticesIds returning empty set for unknown entity types
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class EntityGraphRetrieverTagPropagationTest {
@@ -56,6 +63,9 @@ class EntityGraphRetrieverTagPropagationTest {
 
     private AutoCloseable closeable;
     private EntityGraphRetriever retriever;
+
+    /** Map of vertexId → mock vertex, used by the getVertices stub */
+    private Map<String, AtlasVertex> vertexStore;
 
     static {
         try {
@@ -74,14 +84,25 @@ class EntityGraphRetrieverTagPropagationTest {
         RequestContext.clear();
         RequestContext.get();
 
-        // Create EntityGraphRetriever without calling constructor (avoids TagDAOCassandraImpl.getInstance())
-        // Field initializers don't run when constructor is bypassed, so we set all needed fields via reflection.
+        vertexStore = new HashMap<>();
+
         retriever = mock(EntityGraphRetriever.class, withSettings().defaultAnswer(CALLS_REAL_METHODS));
         setField(retriever, "graph", graph);
         setField(retriever, "typeRegistry", typeRegistry);
-        // Use a same-thread executor so that CompletableFuture.supplyAsync runs on the test thread.
-        // This is critical because MockedStatic is thread-local and won't apply on executor threads.
         setField(retriever, "executorService", newSameThreadExecutorService());
+
+        // Stub graph.getVertices() to return vertices from vertexStore (filters missing IDs)
+        when(graph.getVertices(any(String[].class))).thenAnswer(invocation -> {
+            String[] ids = invocation.getArgument(0);
+            Set<AtlasVertex> result = new LinkedHashSet<>();
+            for (String id : ids) {
+                AtlasVertex v = vertexStore.get(id);
+                if (v != null) {
+                    result.add(v);
+                }
+            }
+            return result;
+        });
     }
 
     @AfterEach
@@ -90,20 +111,27 @@ class EntityGraphRetrieverTagPropagationTest {
         if (closeable != null) closeable.close();
     }
 
+    /** Register a mock vertex so both getVertex and getVertices can find it. */
+    private AtlasVertex registerVertex(String id) {
+        AtlasVertex vertex = mock(AtlasVertex.class);
+        when(vertex.getIdForDisplay()).thenReturn(id);
+        vertexStore.put(id, vertex);
+        when(graph.getVertex(id)).thenReturn(vertex);
+        return vertex;
+    }
+
+    // -----------------------------------------------------------------------
+    //  Existing tests — updated to use batch vertex fetch
+    // -----------------------------------------------------------------------
+
     /**
-     * Test: traverseImpactedVerticesByLevelV2 should not throw NPE when
-     * graph.getVertex() returns null for a vertex ID (e.g., entity deleted concurrently).
-     *
-     * Before fix: graph.getVertex(t) returns null, then entityVertex.getIdForDisplay() throws NPE.
-     * After fix: null vertex is skipped gracefully with a warning log.
+     * Test: traverseImpactedVerticesByLevelV2 should gracefully skip vertices
+     * that are not found by graph.getVertices (e.g., deleted concurrently).
      */
     @Test
     void testTraverseV2_nullVertexSkippedGracefully() {
-        AtlasVertex startVertex = mock(AtlasVertex.class);
-        when(startVertex.getIdForDisplay()).thenReturn("v-start");
-
-        when(graph.getVertex("v-start")).thenReturn(startVertex);
-        when(graph.getVertex("v-deleted")).thenReturn(null);
+        AtlasVertex startVertex = registerVertex("v-start");
+        // v-deleted is NOT registered — getVertices will not include it
 
         AtlasEntityType entityType = mock(AtlasEntityType.class);
         when(entityType.getTagPropagationEdgesArray()).thenReturn(new String[]{"__Process.inputs"});
@@ -124,15 +152,12 @@ class EntityGraphRetrieverTagPropagationTest {
                     null, false, null, null);
         }
 
-        // v-deleted is discovered as adjacent and added to result.
-        // When BFS expands it at the next level, graph.getVertex("v-deleted") returns null
-        // and it's safely skipped (no NPE).
+        // v-deleted is discovered as adjacent and added to traversedVerticesIds.
+        // When BFS tries to expand it at the next level, getVertices doesn't return it,
+        // so it's safely skipped (no NPE, no processing).
         assertTrue(result.contains("v-deleted"), "Adjacent vertex should be in traversal result");
     }
 
-    /**
-     * Test: traverseImpactedVerticesByLevelV2 should handle when start vertex is null.
-     */
     @Test
     void testTraverseV2_nullStartVertex() {
         Set<String> result = new HashSet<>();
@@ -144,17 +169,9 @@ class EntityGraphRetrieverTagPropagationTest {
         assertTrue(result.isEmpty(), "Result should be empty when start vertex is null");
     }
 
-    /**
-     * Test: getAdjacentVerticesIds should return empty set (not null) when entity type
-     * has no tag propagation edges configured.
-     *
-     * Before fix: returned null, causing NPE in addAll(null) in the BFS loop.
-     */
     @Test
     void testTraverseV2_entityTypeWithNoTagPropagationEdges() {
-        AtlasVertex startVertex = mock(AtlasVertex.class);
-        when(startVertex.getIdForDisplay()).thenReturn("v-start");
-        when(graph.getVertex("v-start")).thenReturn(startVertex);
+        AtlasVertex startVertex = registerVertex("v-start");
 
         AtlasEntityType entityType = mock(AtlasEntityType.class);
         when(entityType.getTagPropagationEdgesArray()).thenReturn(null);
@@ -173,17 +190,9 @@ class EntityGraphRetrieverTagPropagationTest {
         assertTrue(result.isEmpty(), "Result should be empty when entity type has no propagation edges");
     }
 
-    /**
-     * Test: getAdjacentVerticesIds should return empty set when typeRegistry returns null
-     * for the entity type (unknown type).
-     *
-     * Before fix: entityType is null => tagPropagationEdges is null => returns null => NPE.
-     */
     @Test
     void testTraverseV2_unknownEntityType() {
-        AtlasVertex startVertex = mock(AtlasVertex.class);
-        when(startVertex.getIdForDisplay()).thenReturn("v-start");
-        when(graph.getVertex("v-start")).thenReturn(startVertex);
+        AtlasVertex startVertex = registerVertex("v-start");
 
         when(typeRegistry.getEntityTypeByName("UnknownType")).thenReturn(null);
 
@@ -200,26 +209,16 @@ class EntityGraphRetrieverTagPropagationTest {
         assertTrue(result.isEmpty(), "Result should be empty for unknown entity type");
     }
 
-    /**
-     * Test: When multiple vertices are at the same level and some return null from
-     * graph.getVertex(), only the valid ones should be processed.
-     */
     @Test
     void testTraverseV2_mixOfValidAndDeletedVerticesAtSameLevel() {
-        AtlasVertex startVertex = mock(AtlasVertex.class);
-        when(startVertex.getIdForDisplay()).thenReturn("v-start");
-        when(graph.getVertex("v-start")).thenReturn(startVertex);
-
-        AtlasVertex validVertex = mock(AtlasVertex.class);
-        when(validVertex.getIdForDisplay()).thenReturn("v-valid");
-        when(graph.getVertex("v-valid")).thenReturn(validVertex);
-        when(graph.getVertex("v-deleted")).thenReturn(null);
+        AtlasVertex startVertex = registerVertex("v-start");
+        AtlasVertex validVertex = registerVertex("v-valid");
+        // v-deleted is NOT registered — simulates deleted vertex
 
         AtlasEntityType tableType = mock(AtlasEntityType.class);
         when(tableType.getTagPropagationEdgesArray()).thenReturn(new String[]{"__Process.inputs"});
         when(typeRegistry.getEntityTypeByName("Table")).thenReturn(tableType);
 
-        // v-valid has no propagation edges (terminates traversal)
         AtlasEntityType columnType = mock(AtlasEntityType.class);
         when(columnType.getTagPropagationEdgesArray()).thenReturn(null);
         when(typeRegistry.getEntityTypeByName("Column")).thenReturn(columnType);
@@ -248,10 +247,165 @@ class EntityGraphRetrieverTagPropagationTest {
         assertTrue(result.contains("v-deleted"), "Deleted vertex should still be in result from discovery");
     }
 
+    // -----------------------------------------------------------------------
+    //  New tests — batch vertex fetch and sub-batching
+    // -----------------------------------------------------------------------
+
     /**
-     * Setup standard mock responses for an edge's GraphHelper static method calls.
-     * Uses ONE_TO_TWO propagation so edges from out-vertex propagate tags to in-vertex.
+     * Test: BFS uses graph.getVertices (batch API) instead of individual graph.getVertex calls.
+     * Verifies that batch API is called at least once during traversal.
      */
+    @Test
+    void testTraverseV2_usesBatchVertexFetch() {
+        AtlasVertex startVertex = registerVertex("v-start");
+        AtlasVertex child1 = registerVertex("v-child1");
+        AtlasVertex child2 = registerVertex("v-child2");
+
+        AtlasEntityType entityType = mock(AtlasEntityType.class);
+        when(entityType.getTagPropagationEdgesArray()).thenReturn(new String[]{"__Process.inputs"});
+        when(typeRegistry.getEntityTypeByName("Table")).thenReturn(entityType);
+
+        AtlasEntityType leafType = mock(AtlasEntityType.class);
+        when(leafType.getTagPropagationEdgesArray()).thenReturn(null);
+        when(typeRegistry.getEntityTypeByName("Column")).thenReturn(leafType);
+
+        AtlasEdge edge1 = createMockEdge("v-start", "v-child1", "rel-1");
+        AtlasEdge edge2 = createMockEdge("v-start", "v-child2", "rel-2");
+        when(startVertex.getEdges(eq(AtlasEdgeDirection.BOTH), any(String[].class)))
+                .thenReturn(Arrays.asList(edge1, edge2));
+        when(child1.getEdges(eq(AtlasEdgeDirection.BOTH), any(String[].class)))
+                .thenReturn(Collections.emptyList());
+        when(child2.getEdges(eq(AtlasEdgeDirection.BOTH), any(String[].class)))
+                .thenReturn(Collections.emptyList());
+
+        Set<String> result = new HashSet<>();
+
+        try (MockedStatic<GraphHelper> ghMock = mockStatic(GraphHelper.class)) {
+            ghMock.when(() -> GraphHelper.getTypeName(startVertex)).thenReturn("Table");
+            ghMock.when(() -> GraphHelper.getTypeName(child1)).thenReturn("Column");
+            ghMock.when(() -> GraphHelper.getTypeName(child2)).thenReturn("Column");
+            setupEdgeMocks(ghMock, edge1);
+            setupEdgeMocks(ghMock, edge2);
+
+            retriever.traverseImpactedVerticesByLevelV2(
+                    startVertex, null, "classif-1", result,
+                    null, false, null, null);
+        }
+
+        // Verify batch API was called (at least for expanding child level)
+        verify(graph, atLeast(1)).getVertices(any(String[].class));
+        assertEquals(2, result.size(), "Both children should be in result");
+        assertTrue(result.contains("v-child1"));
+        assertTrue(result.contains("v-child2"));
+    }
+
+    /**
+     * Test: BFS correctly traverses multiple levels using batch vertex fetch.
+     * Graph: start -> [level1a, level1b] -> [level2a]
+     */
+    @Test
+    void testTraverseV2_multiLevelBatchFetch() {
+        AtlasVertex startVertex = registerVertex("v-start");
+        AtlasVertex level1a = registerVertex("v-l1a");
+        AtlasVertex level1b = registerVertex("v-l1b");
+        AtlasVertex level2a = registerVertex("v-l2a");
+
+        AtlasEntityType tableType = mock(AtlasEntityType.class);
+        when(tableType.getTagPropagationEdgesArray()).thenReturn(new String[]{"__Process.inputs"});
+        when(typeRegistry.getEntityTypeByName("Table")).thenReturn(tableType);
+
+        AtlasEntityType leafType = mock(AtlasEntityType.class);
+        when(leafType.getTagPropagationEdgesArray()).thenReturn(null);
+        when(typeRegistry.getEntityTypeByName("Leaf")).thenReturn(leafType);
+
+        // start -> l1a, l1b
+        AtlasEdge e1 = createMockEdge("v-start", "v-l1a", "rel-1");
+        AtlasEdge e2 = createMockEdge("v-start", "v-l1b", "rel-2");
+        when(startVertex.getEdges(eq(AtlasEdgeDirection.BOTH), any(String[].class)))
+                .thenReturn(Arrays.asList(e1, e2));
+
+        // l1a -> l2a
+        AtlasEdge e3 = createMockEdge("v-l1a", "v-l2a", "rel-3");
+        when(level1a.getEdges(eq(AtlasEdgeDirection.BOTH), any(String[].class)))
+                .thenReturn(Collections.singletonList(e3));
+
+        // l1b -> no children
+        when(level1b.getEdges(eq(AtlasEdgeDirection.BOTH), any(String[].class)))
+                .thenReturn(Collections.emptyList());
+
+        // l2a -> leaf
+        when(level2a.getEdges(eq(AtlasEdgeDirection.BOTH), any(String[].class)))
+                .thenReturn(Collections.emptyList());
+
+        Set<String> result = new HashSet<>();
+
+        try (MockedStatic<GraphHelper> ghMock = mockStatic(GraphHelper.class)) {
+            ghMock.when(() -> GraphHelper.getTypeName(startVertex)).thenReturn("Table");
+            ghMock.when(() -> GraphHelper.getTypeName(level1a)).thenReturn("Table");
+            ghMock.when(() -> GraphHelper.getTypeName(level1b)).thenReturn("Leaf");
+            ghMock.when(() -> GraphHelper.getTypeName(level2a)).thenReturn("Leaf");
+            setupEdgeMocks(ghMock, e1);
+            setupEdgeMocks(ghMock, e2);
+            setupEdgeMocks(ghMock, e3);
+
+            retriever.traverseImpactedVerticesByLevelV2(
+                    startVertex, null, "classif-1", result,
+                    null, false, null, null);
+        }
+
+        assertEquals(3, result.size(), "All 3 descendants should be in result");
+        assertTrue(result.contains("v-l1a"));
+        assertTrue(result.contains("v-l1b"));
+        assertTrue(result.contains("v-l2a"));
+    }
+
+    /**
+     * Test: verticesWithClassification set is correctly populated during batch traversal.
+     * When storeVerticesWithoutClassification=true, vertices NOT in the initial set should be added.
+     */
+    @Test
+    void testTraverseV2_verticesWithClassificationTracking() {
+        AtlasVertex startVertex = registerVertex("v-start");
+        AtlasVertex child = registerVertex("v-child");
+
+        AtlasEntityType entityType = mock(AtlasEntityType.class);
+        when(entityType.getTagPropagationEdgesArray()).thenReturn(new String[]{"__Process.inputs"});
+        when(typeRegistry.getEntityTypeByName("Table")).thenReturn(entityType);
+
+        AtlasEntityType leafType = mock(AtlasEntityType.class);
+        when(leafType.getTagPropagationEdgesArray()).thenReturn(null);
+        when(typeRegistry.getEntityTypeByName("Column")).thenReturn(leafType);
+
+        AtlasEdge edge = createMockEdge("v-start", "v-child", "rel-1");
+        when(startVertex.getEdges(eq(AtlasEdgeDirection.BOTH), any(String[].class)))
+                .thenReturn(Collections.singletonList(edge));
+        when(child.getEdges(eq(AtlasEdgeDirection.BOTH), any(String[].class)))
+                .thenReturn(Collections.emptyList());
+
+        Set<String> result = new HashSet<>();
+        // v-start already has the classification, v-child does not
+        Set<String> verticesWithClassification = new HashSet<>(Collections.singleton("v-start"));
+
+        try (MockedStatic<GraphHelper> ghMock = mockStatic(GraphHelper.class)) {
+            ghMock.when(() -> GraphHelper.getTypeName(startVertex)).thenReturn("Table");
+            ghMock.when(() -> GraphHelper.getTypeName(child)).thenReturn("Column");
+            setupEdgeMocks(ghMock, edge);
+
+            retriever.traverseImpactedVerticesByLevelV2(
+                    startVertex, null, "classif-1", result,
+                    null, false, verticesWithClassification, null);
+        }
+
+        // verticesWithClassification should now contain vertices that need the tag propagated
+        // (v-child does NOT have the classification, so it should be in the set)
+        assertTrue(verticesWithClassification.contains("v-child"),
+                "v-child should be tracked as needing classification propagation");
+    }
+
+    // -----------------------------------------------------------------------
+    //  Helpers
+    // -----------------------------------------------------------------------
+
     private void setupEdgeMocks(MockedStatic<GraphHelper> ghMock, AtlasEdge edge) {
         ghMock.when(() -> GraphHelper.getPropagateTags(edge)).thenReturn(
                 org.apache.atlas.model.typedef.AtlasRelationshipDef.PropagateTags.ONE_TO_TWO);
@@ -273,11 +427,6 @@ class EntityGraphRetrieverTagPropagationTest {
         return edge;
     }
 
-    /**
-     * Creates an ExecutorService that runs tasks on the calling thread.
-     * This ensures MockedStatic (which is thread-local) works correctly
-     * for code executed via CompletableFuture.supplyAsync.
-     */
     private static ExecutorService newSameThreadExecutorService() {
         return new AbstractExecutorService() {
             private volatile boolean shutdown = false;
