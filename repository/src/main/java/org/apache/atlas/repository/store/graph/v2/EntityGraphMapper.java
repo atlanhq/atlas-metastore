@@ -4380,7 +4380,7 @@ public class EntityGraphMapper {
                                                     String tagTypeName, String parentEntityGuid, String toVertexGuid) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("propagateClassificationV2_new");
 
-        final int BATCH_SIZE_FOR_ADD_PROPAGATION = 200;
+        final int BATCH_SIZE_FOR_ADD_PROPAGATION = 500;
 
         try {
             if (StringUtils.isEmpty(toVertexGuid)) {
@@ -4444,10 +4444,7 @@ public class EntityGraphMapper {
                     int end = Math.min(i + BATCH_SIZE_FOR_ADD_PROPAGATION, vertexIdsToAdd.size());
                     List<String> batchIds = vertexIdsToAdd.subList(i, end);
 
-                    List<AtlasVertex> impactedVertices = batchIds.stream()
-                            .map(x -> graph.getVertex(x))
-                            .filter(Objects::nonNull)
-                            .collect(Collectors.toList());
+                    List<AtlasVertex> impactedVertices = new ArrayList<>(graph.getVertices(batchIds.toArray(new String[0])));
 
                     if (!impactedVertices.isEmpty()) {
                         assetsAffected += impactedVertices.size();
@@ -4519,10 +4516,7 @@ public class EntityGraphMapper {
                             int end = Math.min(i + BATCH_SIZE_FOR_ADD_PROPAGATION, vertexIdsToAdd.size());
                             List<String> batchIds = vertexIdsToAdd.subList(i, end);
 
-                            List<AtlasVertex> impactedVertices = batchIds.stream()
-                                    .map(x -> graph.getVertex(x))
-                                    .filter(Objects::nonNull)
-                                    .collect(Collectors.toList());
+                            List<AtlasVertex> impactedVertices = new ArrayList<>(graph.getVertices(batchIds.toArray(new String[0])));
 
                             if (!impactedVertices.isEmpty()) {
                                 assetsAffected += impactedVertices.size();
