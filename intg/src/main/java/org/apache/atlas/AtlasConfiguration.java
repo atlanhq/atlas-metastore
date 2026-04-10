@@ -196,6 +196,11 @@ public enum AtlasConfiguration {
     ENTITY_AUDIT_DLQ_TOPIC("atlas.entity.audit.dlq.topic", "ENTITY_AUDIT_DLQ"),
     ENTITY_AUDIT_DLQ_PUBLISH_TO_KAFKA_ENABLED("atlas.entity.audit.dlq.publish.to.kafka.enabled", true),
 
+    // Entity audit ILM: retention default -1 means delete phase is disabled (compliance-safe)
+    ENTITY_AUDIT_RETENTION_DAYS("atlas.audit.retention.days", -1),
+    ENTITY_AUDIT_ILM_ROLLOVER_SIZE("atlas.audit.ilm.rollover.max.size", "50gb"),
+    ENTITY_AUDIT_ILM_ROLLOVER_AGE("atlas.audit.ilm.rollover.max.age", "30d"),
+
     MIN_EDGES_SUPER_VERTEX("atlas.jg.super.vertex.min.edge.count", 100),
 
     // Task resource management configuration
