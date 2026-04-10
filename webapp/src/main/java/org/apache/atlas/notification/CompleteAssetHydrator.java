@@ -19,17 +19,13 @@ package org.apache.atlas.notification;
 
 import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.cql.PreparedStatement;
-import com.datastax.oss.driver.api.core.cql.ResultSet;
 import com.datastax.oss.driver.api.core.cql.Row;
 import com.datastax.oss.driver.api.core.cql.SimpleStatement;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.model.instance.AtlasEntity;
-import org.apache.atlas.model.instance.AtlasObjectId;
-import org.apache.atlas.model.instance.AtlasRelatedObjectId;
 import org.apache.atlas.model.notification.EntityNotification.EntityNotificationV2.OperationType;
 import org.apache.atlas.repository.graphdb.cassandra.CassandraSessionProvider;
-import org.apache.atlas.repository.graphdb.cassandra.JobLeaseManager;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.utils.KafkaUtils;
 import org.apache.commons.collections.CollectionUtils;
@@ -62,9 +58,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.apache.atlas.repository.graph.GraphHelper.isInternalType;
@@ -95,12 +89,8 @@ public class CompleteAssetHydrator implements AutoCloseable {
     private static final int DEFAULT_CONSUMER_POLL_MS = 1000;
     private static final int DEFAULT_CASSANDRA_SCAN_PAGE_SIZE = 500;
 
-    private static final String PROCESS_INPUTS_EDGE = "__Process.inputs";
-    private static final String PROCESS_OUTPUTS_EDGE = "__Process.outputs";
-
     private final Configuration configuration;
     private final CqlSession session;
-    private final JobLeaseManager leaseManager;
     private final AtlasFullEntityNotificationPublisher publisher;
     private final Properties kafkaProperties;
     private final String entityNotificationsTopic;
@@ -113,10 +103,8 @@ public class CompleteAssetHydrator implements AutoCloseable {
     private final int cassandraScanPageSize;
 
     private final PreparedStatement selectVertexByIdStmt;
-    private final PreparedStatement selectEdgesOutByVertexStmt;
 
     private final AtomicBoolean running = new AtomicBoolean(true);
-    private final AtomicBoolean leaseHeld = new AtomicBoolean(false);
 
     private volatile KafkaConsumer<String, String> consumer;
     private volatile ScheduledExecutorService leaseRenewer;
@@ -124,7 +112,6 @@ public class CompleteAssetHydrator implements AutoCloseable {
     public CompleteAssetHydrator(Configuration configuration) {
         this.configuration = configuration;
         this.session = CassandraSessionProvider.getSession(configuration);
-        this.leaseManager = new JobLeaseManager(session);
         this.fullEntityTopic = AtlasConfiguration.NOTIFICATION_ENTITIES_FULL_TOPIC_NAME.getString();
         this.publisher = new AtlasFullEntityNotificationPublisher(configuration, fullEntityTopic);
         this.kafkaProperties = createKafkaProperties(configuration);
@@ -139,9 +126,6 @@ public class CompleteAssetHydrator implements AutoCloseable {
         this.selectVertexByIdStmt = session.prepare(
                 "SELECT vertex_id, properties, type_name, state FROM vertices WHERE vertex_id = ?"
         );
-        this.selectEdgesOutByVertexStmt = session.prepare(
-                "SELECT edge_id, in_vertex_id, edge_label, properties, state FROM edges_out WHERE out_vertex_id = ?"
-        );
     }
 
     public static boolean isEnabled(Configuration configuration) {
@@ -153,13 +137,8 @@ public class CompleteAssetHydrator implements AutoCloseable {
                 fullEntityTopic, entityNotificationsTopic, consumerGroupId, leaseName);
 
         while (running.get()) {
-            if (!tryAcquireLease()) {
-                sleep(leaseRetryMs);
-                continue;
-            }
-
             try {
-                runAsLeader();
+                run();
             } catch (WakeupException e) {
                 if (running.get()) {
                     LOG.warn("Complete asset hydrator consumer woke unexpectedly", e);
@@ -167,9 +146,6 @@ public class CompleteAssetHydrator implements AutoCloseable {
             } catch (Exception e) {
                 LOG.error("Complete asset hydrator failed while acting as leader", e);
             } finally {
-                stopLeaseRenewer();
-                leaseHeld.set(false);
-                leaseManager.release(leaseName);
                 closeConsumer();
             }
         }
@@ -177,7 +153,6 @@ public class CompleteAssetHydrator implements AutoCloseable {
 
     public void stop() {
         running.set(false);
-        stopLeaseRenewer();
         closeConsumer();
     }
 
@@ -187,20 +162,7 @@ public class CompleteAssetHydrator implements AutoCloseable {
         publisher.close();
     }
 
-    private boolean tryAcquireLease() {
-        boolean acquired = leaseManager.tryAcquire(leaseName, leaseTtlSeconds);
-
-        if (acquired) {
-            leaseHeld.set(true);
-            LOG.info("Acquired complete asset hydrator lease '{}'", leaseName);
-        }
-
-        return acquired;
-    }
-
-    private void runAsLeader() {
-        startLeaseRenewer();
-
+    private void run() {
         Map<TopicPartition, Long> bootstrapResumeOffsets = null;
         if (isFullEntityTopicEmpty()) {
             bootstrapResumeOffsets = fetchTopicEndOffsets(entityNotificationsTopic);
@@ -214,38 +176,6 @@ public class CompleteAssetHydrator implements AutoCloseable {
         consumeEntityNotifications(bootstrapResumeOffsets);
     }
 
-    private void startLeaseRenewer() {
-        stopLeaseRenewer();
-
-        leaseRenewer = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread thread = new Thread(r, "complete-asset-hydrator-lease-renewer");
-            thread.setDaemon(true);
-            return thread;
-        });
-
-        long renewEveryMs = Math.max(1000L, TimeUnit.SECONDS.toMillis(leaseTtlSeconds) / 3);
-        leaseRenewer.scheduleAtFixedRate(() -> {
-            if (!running.get() || !leaseHeld.get()) {
-                return;
-            }
-
-            if (!leaseManager.renew(leaseName, leaseTtlSeconds)) {
-                LOG.warn("Lost complete asset hydrator lease '{}'; stopping current leader run", leaseName);
-                leaseHeld.set(false);
-                closeConsumer();
-            }
-        }, renewEveryMs, renewEveryMs, TimeUnit.MILLISECONDS);
-    }
-
-    private void stopLeaseRenewer() {
-        ScheduledExecutorService renewer = leaseRenewer;
-        leaseRenewer = null;
-
-        if (renewer != null) {
-            renewer.shutdownNow();
-        }
-    }
-
     private void bootstrapFromZeroGraph() {
         SimpleStatement stmt = SimpleStatement.builder(
                         "SELECT vertex_id, properties, type_name, state FROM vertices")
@@ -256,7 +186,7 @@ public class CompleteAssetHydrator implements AutoCloseable {
         int published = 0;
 
         for (Row row : session.execute(stmt)) {
-            if (!running.get() || !leaseHeld.get()) {
+            if (!running.get()) {
                 return;
             }
 
@@ -316,105 +246,11 @@ public class CompleteAssetHydrator implements AutoCloseable {
             }
         }
 
-        Map<String, Object> relationshipAttributes = buildRelationshipAttributes(vertexId, typeName);
-        if (MapUtils.isNotEmpty(relationshipAttributes)) {
-            entity.setRelationshipAttributes(relationshipAttributes);
-        }
-
         return entity;
     }
 
-    private Map<String, Object> buildRelationshipAttributes(String vertexId, String typeName) {
-        if (!shouldLoadProcessRelationships(typeName)) {
-            return Collections.emptyMap();
-        }
-
-        List<AtlasRelatedObjectId> inputs = new ArrayList<>();
-        List<AtlasRelatedObjectId> outputs = new ArrayList<>();
-
-        ResultSet edgeRows = session.execute(selectEdgesOutByVertexStmt.bind(vertexId));
-        for (Row edgeRow : edgeRows) {
-            String edgeLabel = edgeRow.getString("edge_label");
-            if (!PROCESS_INPUTS_EDGE.equals(edgeLabel) && !PROCESS_OUTPUTS_EDGE.equals(edgeLabel)) {
-                continue;
-            }
-
-            AtlasRelatedObjectId relatedObjectId = toRelatedObjectId(edgeRow.getString("in_vertex_id"), edgeRow);
-            if (relatedObjectId == null) {
-                continue;
-            }
-
-            if (PROCESS_INPUTS_EDGE.equals(edgeLabel)) {
-                inputs.add(relatedObjectId);
-            } else {
-                outputs.add(relatedObjectId);
-            }
-        }
-
-        Map<String, Object> relationshipAttributes = new LinkedHashMap<>();
-        if (!inputs.isEmpty()) {
-            relationshipAttributes.put("inputs", inputs);
-        }
-        if (!outputs.isEmpty()) {
-            relationshipAttributes.put("outputs", outputs);
-        }
-
-        return relationshipAttributes;
-    }
-
-    private AtlasRelatedObjectId toRelatedObjectId(String targetVertexId, Row edgeRow) {
-        if (StringUtils.isBlank(targetVertexId)) {
-            return null;
-        }
-
-        Row vertexRow = session.execute(selectVertexByIdStmt.bind(targetVertexId)).one();
-        if (vertexRow == null) {
-            return null;
-        }
-
-        Map<String, Object> props = parseNormalizedProperties(vertexRow.getString("properties"));
-        if (MapUtils.isEmpty(props)) {
-            return null;
-        }
-
-        String guid = getString(props.get("__guid"));
-        String typeName = StringUtils.defaultIfEmpty(getString(props.get("__typeName")), vertexRow.getString("type_name"));
-        if (StringUtils.isBlank(guid) || StringUtils.isBlank(typeName) || isInternalType(typeName)) {
-            return null;
-        }
-
-        Map<String, Object> uniqueAttributes = new HashMap<>();
-        if (props.containsKey("qualifiedName")) {
-            uniqueAttributes.put("qualifiedName", props.get("qualifiedName"));
-        }
-
-        String displayText = getString(props.get("name"));
-        if (StringUtils.isBlank(displayText)) {
-            displayText = getString(props.get("qualifiedName"));
-        }
-
-        Map<String, Object> edgeProps = parseRawProperties(edgeRow.getString("properties"));
-        String relationshipGuid = getString(edgeProps.get("r:__guid"));
-
-        AtlasRelatedObjectId relatedObjectId = new AtlasRelatedObjectId(
-                guid,
-                typeName,
-                toEntityStatus(StringUtils.defaultIfEmpty(getString(props.get("__state")), vertexRow.getString("state"))),
-                uniqueAttributes,
-                displayText,
-                relationshipGuid,
-                toRelationshipStatus(StringUtils.defaultIfEmpty(getString(edgeProps.get("__state")), edgeRow.getString("state"))),
-                null
-        );
-
-        relatedObjectId.setRelationshipType(edgeRow.getString("edge_label"));
-        relatedObjectId.setAttributes(new AtlasObjectId(guid, typeName, uniqueAttributes).getAttributes());
-
-        return relatedObjectId;
-    }
-
     private void consumeEntityNotifications(Map<TopicPartition, Long> bootstrapResumeOffsets) {
-        while (running.get() && leaseHeld.get()) {
+        while (running.get()) {
             try {
                 KafkaConsumer<String, String> kafkaConsumer = new KafkaConsumer<>(createConsumerProperties());
                 consumer = kafkaConsumer;
@@ -429,7 +265,7 @@ public class CompleteAssetHydrator implements AutoCloseable {
                 kafkaConsumer.assign(partitions);
                 initializeConsumerOffsets(kafkaConsumer, partitions, bootstrapResumeOffsets);
 
-                while (running.get() && leaseHeld.get()) {
+                while (running.get()) {
                     ConsumerRecords<String, String> records = kafkaConsumer.poll(Duration.ofMillis(consumerPollMs));
                     if (records.isEmpty()) {
                         continue;
@@ -448,7 +284,7 @@ public class CompleteAssetHydrator implements AutoCloseable {
 
                 return;
             } catch (WakeupException e) {
-                if (!running.get() || !leaseHeld.get()) {
+                if (!running.get()) {
                     return;
                 }
 
@@ -587,7 +423,7 @@ public class CompleteAssetHydrator implements AutoCloseable {
     }
 
     private List<TopicPartition> waitForTopicPartitions(KafkaConsumer<String, String> kafkaConsumer, String topicName) {
-        while (running.get() && leaseHeld.get()) {
+        while (running.get()) {
             List<TopicPartition> partitions = getTopicPartitions(kafkaConsumer, topicName);
             if (!partitions.isEmpty()) {
                 return partitions;

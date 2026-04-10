@@ -37,10 +37,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
+import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
@@ -73,15 +70,15 @@ public class AtlasFullEntityNotificationPublisher implements AutoCloseable {
         this.producer = enabled ? new KafkaProducer<>(kafkaProperties) : null;
     }
 
-    public void publishEntity(AtlasEntity entity, OperationType operationType, long eventTime, Map<String, String> headers) {
+    public Optional<Future<RecordMetadata>> publishEntity(AtlasEntity entity, OperationType operationType, long eventTime, Map<String, String> headers) {
         if (!enabled) {
             LOG.debug("Skipping full entity publish because {} does not include topic {}", NOTIFICATION_TOPICS_PROPERTY, topic);
-            return;
+            return Optional.empty();
         }
 
         if (entity == null || entity.getGuid() == null || operationType == null) {
             LOG.warn("Skipping full entity publish because entity, guid, or operationType is null");
-            return;
+            return Optional.empty();
         }
 
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -93,7 +90,7 @@ public class AtlasFullEntityNotificationPublisher implements AutoCloseable {
 
         try {
             ensureTopicExists();
-            send(new ProducerRecord<>(topic, entity.getGuid(), AtlasType.toJson(payload)));
+            return Optional.of(send(new ProducerRecord<>(topic, entity.getGuid(), AtlasType.toJson(payload))));
         } catch (Exception e) {
             throw new IllegalStateException("Failed to publish full entity notification for guid=" + entity.getGuid() + " to topic " + topic, e);
         }
@@ -116,10 +113,8 @@ public class AtlasFullEntityNotificationPublisher implements AutoCloseable {
         }
     }
 
-    private void send(ProducerRecord<String, String> record) throws Exception {
-        Future<RecordMetadata> future = producer.send(record);
-        RecordMetadata metadata = future.get();
-        LOG.debug("Published full entity record to {} partition {} offset {}", metadata.topic(), metadata.partition(), metadata.offset());
+    private Future<RecordMetadata> send(ProducerRecord<String, String> record) throws Exception {
+        return producer.send(record);
     }
 
     private static Properties createKafkaProducerProperties(Configuration atlasProperties) {

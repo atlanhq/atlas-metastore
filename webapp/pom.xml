@@ -242,13 +242,6 @@
 
         <dependency>
             <groupId>org.apache.atlas</groupId>
-            <artifactId>atlas-graphdb-migrator</artifactId>
-            <version>${project.version}</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.atlas</groupId>
             <artifactId>auth-plugin-atlas</artifactId>
             <version>${project.version}</version>
         </dependency>

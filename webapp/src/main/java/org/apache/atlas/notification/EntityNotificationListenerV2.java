@@ -259,7 +259,6 @@ import static org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever.QU
         }
 
         sendNotifications(operationType, messages);
-        publishRelationshipEntityNotifications(relationships, operationType);
         RequestContext.get().endMetricRecord(metric);
     }
 
@@ -294,39 +293,6 @@ import static org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever.QU
         }
     }
 
-    private void publishRelationshipEntityNotifications(List<AtlasRelationship> relationships, OperationType operationType) throws AtlasBaseException {
-        if (!fullEntityNotificationPublisher.isEnabled()) {
-            return;
-        }
-
-        if (CollectionUtils.isEmpty(relationships)) {
-            return;
-        }
-
-        Set<String> entityGuids = new LinkedHashSet<>();
-        for (AtlasRelationship relationship : relationships) {
-            if (relationship == null) {
-                continue;
-            }
-
-            if (relationship.getEnd1() != null && relationship.getEnd1().getGuid() != null) {
-                entityGuids.add(relationship.getEnd1().getGuid());
-            }
-
-            if (relationship.getEnd2() != null && relationship.getEnd2().getGuid() != null) {
-                entityGuids.add(relationship.getEnd2().getGuid());
-            }
-        }
-
-        try {
-            getOrCreatePostCommitFullEntityNotificationHook()
-                    .addRelationshipNotifications(entityGuids, operationType, RequestContext.get().getRequestTime(),
-                            new HashMap<>(RequestContext.get().getRequestContextHeaders()));
-        } catch (RuntimeException e) {
-            throw new AtlasBaseException(AtlasErrorCode.ENTITY_NOTIFICATION_FAILED, e, operationType.name());
-        }
-    }
-
     private PostCommitFullEntityNotificationHook getOrCreatePostCommitFullEntityNotificationHook() {
         PostCommitFullEntityNotificationHook notificationHook = postCommitFullEntityNotificationHooks.get();
 
@@ -340,7 +306,6 @@ import static org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever.QU
 
     private class PostCommitFullEntityNotificationHook extends GraphTransactionInterceptor.PostTransactionHook {
         private final List<FullEntityPublishRequest> entityRequests = new ArrayList<>();
-        private final List<RelationshipEntityPublishRequest> relationshipRequests = new ArrayList<>();
 
         void addEntityNotifications(List<AtlasEntity> entities, OperationType operationType, long eventTime, Map<String, String> headers) {
             if (CollectionUtils.isEmpty(entities)) {
@@ -354,14 +319,6 @@ import static org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever.QU
 
                 entityRequests.add(new FullEntityPublishRequest(entity, operationType, eventTime, headers));
             }
-        }
-
-        void addRelationshipNotifications(Set<String> entityGuids, OperationType operationType, long eventTime, Map<String, String> headers) {
-            if (CollectionUtils.isEmpty(entityGuids)) {
-                return;
-            }
-
-            relationshipRequests.add(new RelationshipEntityPublishRequest(new LinkedHashSet<>(entityGuids), operationType, eventTime, headers));
         }
 
         @Override
@@ -382,16 +339,6 @@ import static org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever.QU
                     fullEntityNotificationPublisher.publishEntity(entityToPublish, request.operationType, request.eventTime, request.headers);
                 }
 
-                for (RelationshipEntityPublishRequest request : relationshipRequests) {
-                    for (String guid : request.entityGuids) {
-                        AtlasEntity entityToPublish = entityRetriever.toAtlasEntity(guid);
-                        if (entityToPublish == null || isInternalType(entityToPublish.getTypeName())) {
-                            continue;
-                        }
-
-                        fullEntityNotificationPublisher.publishEntity(entityToPublish, request.operationType, request.eventTime, request.headers);
-                    }
-                }
             } catch (Exception e) {
                 LOG.error("failed to send full entity notifications", e);
             }
@@ -414,20 +361,6 @@ import static org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever.QU
 
         private FullEntityPublishRequest(AtlasEntity entity, OperationType operationType, long eventTime, Map<String, String> headers) {
             this.entity = new AtlasEntity(entity);
-            this.operationType = operationType;
-            this.eventTime = eventTime;
-            this.headers = headers;
-        }
-    }
-
-    private static class RelationshipEntityPublishRequest {
-        private final Set<String> entityGuids;
-        private final OperationType operationType;
-        private final long eventTime;
-        private final Map<String, String> headers;
-
-        private RelationshipEntityPublishRequest(Set<String> entityGuids, OperationType operationType, long eventTime, Map<String, String> headers) {
-            this.entityGuids = entityGuids;
             this.operationType = operationType;
             this.eventTime = eventTime;
             this.headers = headers;

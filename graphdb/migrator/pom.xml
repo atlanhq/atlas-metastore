@@ -118,12 +118,6 @@
             <artifactId>atlas-intg</artifactId>
         </dependency>
 
-        <!-- Shared notification/topic publisher utilities for CDC hydration -->
-        <dependency>
-            <groupId>org.apache.atlas</groupId>
-            <artifactId>atlas-notification</artifactId>
-        </dependency>
-
         <!-- Temporal SDK for backup schedule verification -->
         <dependency>
             <groupId>io.temporal</groupId>
