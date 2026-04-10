@@ -290,19 +290,20 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
     /**
      * Performs the actual ES bulk write for audit events. Throws on failure; callers are expected to
      * catch and handle gracefully so the main request does not fail (see putEventsV2).
+     *
+     * Self-healing: if a write fails with a 4xx client error (e.g. alias mis-routing after ILM
+     * migration), the method re-probes ES for the write alias once. If the write config changed,
+     * it rebuilds the request and retries — no Atlas restart required.
      */
     private void putEventsV2Internal(List<EntityAuditEventV2> events) throws AtlasBaseException {
         if (CollectionUtils.isEmpty(events)) {
             return;
         }
 
-        // Snapshot the write config once — consistent writeIndex and bulkMetadata for the entire call
-        WriteConfig cfg = this.writeConfig;
-
         Map<String, String> requestContextHeaders = RequestContext.get().getRequestContextHeaders();
         String entityPayloadTemplate = getQueryTemplate(requestContextHeaders);
 
-        StringBuilder bulkRequestBody = new StringBuilder();
+        List<String> eventPayloads = new ArrayList<>();
         for (EntityAuditEventV2 event : events) {
             String created = String.format("%s", event.getTimestamp());
             String auditDetailPrefix = EntityAuditListenerV2.getV2AuditPrefix(event.getAction());
@@ -330,7 +331,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                         event.getEntityId(), typeName);
             }
 
-            String bulkItem = MessageFormat.format(entityPayloadTemplate,
+            eventPayloads.add(MessageFormat.format(entityPayloadTemplate,
                     event.getEntityId(),
                     event.getAction(),
                     details,
@@ -339,22 +340,18 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                     event.getEntityQualifiedName(),
                     typeName,
                     created,
-                    "" + updateTimestamp);
-
-            bulkRequestBody.append(cfg.writeBulkMetadata());
-            bulkRequestBody.append(bulkItem);
-            bulkRequestBody.append("\n");
+                    "" + updateTimestamp));
         }
-        if (bulkRequestBody.length() == 0) {
+        if (eventPayloads.isEmpty()) {
             return;
         }
-        String endpoint = cfg.writeIndex() + "/_bulk";
-        HttpEntity entity = new NStringEntity(bulkRequestBody.toString(), ContentType.APPLICATION_JSON);
-        Request request = new Request("POST", endpoint);
-        request.setEntity(entity);
+
+        WriteConfig cfg = this.writeConfig;
+        Request request = buildBulkAuditRequest(cfg, eventPayloads);
 
         int maxRetries = AtlasConfiguration.ES_MAX_RETRIES.getInt();
         long initialRetryDelay = AtlasConfiguration.ES_RETRY_DELAY_MS.getLong();
+        boolean aliasRedetected = false;
 
         for (int retryCount = 0; retryCount < maxRetries; retryCount++) {
             Response response = null;
@@ -386,6 +383,16 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
                 String responseBody = EntityUtils.toString(response.getEntity());
 
+                if (!aliasRedetected && statusCode >= 400 && statusCode < 500) {
+                    request = redetectAliasAndRebuild(cfg, eventPayloads, "HTTP " + statusCode);
+                    if (request != null) {
+                        cfg = this.writeConfig;
+                        aliasRedetected = true;
+                        continue;
+                    }
+                    aliasRedetected = true;
+                }
+
                 if ((statusCode >= 500 && statusCode < 600) || statusCode==429) {
                     LOG.warn("Failed to push entity audits to ES due to server error ({}). Retrying... ({}/{}) Response: {}",
                             statusCode, retryCount + 1, maxRetries, responseBody);
@@ -394,6 +401,15 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                 }
 
             } catch (IOException e) {
+                if (!aliasRedetected) {
+                    Request rebuilt = redetectAliasAndRebuild(cfg, eventPayloads, "IOException: " + e.getMessage());
+                    aliasRedetected = true;
+                    if (rebuilt != null) {
+                        request = rebuilt;
+                        cfg = this.writeConfig;
+                        continue;
+                    }
+                }
                 LOG.warn("Failed to push entity audits to ES due to IOException. Retrying... ({}/{})", retryCount + 1, maxRetries, e);
             }
 
@@ -410,6 +426,36 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
         LOG.error("Failed to push entity audits to ES after {} retries", maxRetries);
         throw new AtlasBaseException("Unable to push entity audits to ES after " + maxRetries + " retries");
+    }
+
+    /**
+     * Re-probes ES for the write alias after a write failure. If the config changed (e.g. ILM
+     * migration created the write alias while Atlas was running), returns a rebuilt request
+     * targeting the new write index. Returns null if the config is unchanged.
+     */
+    private Request redetectAliasAndRebuild(WriteConfig prevCfg, List<String> eventPayloads, String trigger) {
+        detectAndConfigureWriteAlias();
+        WriteConfig newCfg = this.writeConfig;
+        if (!newCfg.writeIndex().equals(prevCfg.writeIndex())) {
+            LOG.info("Write alias config changed after re-detection (trigger='{}', old='{}', new='{}'), rebuilding audit bulk request",
+                    trigger, prevCfg.writeIndex(), newCfg.writeIndex());
+            return buildBulkAuditRequest(newCfg, eventPayloads);
+        }
+        LOG.debug("Write alias re-detection triggered by '{}' but config unchanged (writeIndex='{}')",
+                trigger, prevCfg.writeIndex());
+        return null;
+    }
+
+    private Request buildBulkAuditRequest(WriteConfig cfg, List<String> eventPayloads) {
+        StringBuilder body = new StringBuilder();
+        for (String payload : eventPayloads) {
+            body.append(cfg.writeBulkMetadata());
+            body.append(payload);
+            body.append("\n");
+        }
+        Request request = new Request("POST", cfg.writeIndex() + "/_bulk");
+        request.setEntity(new NStringEntity(body.toString(), ContentType.APPLICATION_JSON));
+        return request;
     }
 
     private String getQueryTemplate(Map<String, String> requestContextHeaders) {
