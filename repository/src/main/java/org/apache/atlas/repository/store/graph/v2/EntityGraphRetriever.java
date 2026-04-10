@@ -995,24 +995,26 @@ public class EntityGraphRetriever {
         try {
             while (!verticesAtCurrentLevel.isEmpty()) {
                 Set<String> verticesToVisitNextLevel = new HashSet<>();
-                List<CompletableFuture<Set<String>>> futures = verticesAtCurrentLevel.stream()
-                        .map(t -> {
-                            AtlasVertex entityVertex = graph.getVertex(t);
-                            if (entityVertex == null) {
-                                LOG.warn("traverseImpactedVerticesByLevelV2: vertex not found for id {}, skipping", t);
-                                return CompletableFuture.completedFuture((Set<String>) null);
-                            }
-                            visitedVerticesIds.add(entityVertex.getIdForDisplay());
-                            // If we want to store vertices without classification attached
-                            // Check if vertices has classification attached or not using function isClassificationAttached
+                // Batch fetch vertices at current level in sub-batches of 500
+                final int VERTEX_FETCH_BATCH = 500;
+                List<String> levelIds = new ArrayList<>(verticesAtCurrentLevel);
+                Set<AtlasVertex> levelVertices = new HashSet<>();
+                for (int b = 0; b < levelIds.size(); b += VERTEX_FETCH_BATCH) {
+                    int end = Math.min(b + VERTEX_FETCH_BATCH, levelIds.size());
+                    levelVertices.addAll(graph.getVertices(levelIds.subList(b, end).toArray(new String[0])));
+                }
 
-                            if(storeVerticesWithoutClassification && !verticesWithClassification.contains(entityVertex.getIdForDisplay())) {
-                                verticesToPropagateTo.add(entityVertex.getIdForDisplay());
-                            }
+                List<CompletableFuture<Set<String>>> futures = new ArrayList<>();
+                for (AtlasVertex entityVertex : levelVertices) {
+                    visitedVerticesIds.add(entityVertex.getIdForDisplay());
 
-                            return CompletableFuture.supplyAsync(() -> getAdjacentVerticesIds(entityVertex, classificationId,
-                                    relationshipGuidToExclude, edgeLabelsToCheck,toExclude, visitedVerticesIds), executorService);
-                        }).collect(Collectors.toList());
+                    if (storeVerticesWithoutClassification && !verticesWithClassification.contains(entityVertex.getIdForDisplay())) {
+                        verticesToPropagateTo.add(entityVertex.getIdForDisplay());
+                    }
+
+                    futures.add(CompletableFuture.supplyAsync(() -> getAdjacentVerticesIds(entityVertex, classificationId,
+                            relationshipGuidToExclude, edgeLabelsToCheck, toExclude, visitedVerticesIds), executorService));
+                }
 
                 futures.stream().map(CompletableFuture::join).forEach(x -> {
                     if (x != null) {

@@ -6298,21 +6298,35 @@ public class EntityGraphMapper {
      * Buffers tag denorm updates for a batch of Tags, using assetMetadata for GUID with graph fallback.
      */
     private void bufferTagDenormForTags(List<Tag> tags) {
+        List<Tag> tagsNeedingFallback = new ArrayList<>();
         for (Tag tag : tags) {
             String guid = null;
             if (tag.getAssetMetadata() != null) {
                 guid = (String) tag.getAssetMetadata().get(GUID_PROPERTY_KEY);
             }
-            if (guid == null) {
-                AtlasVertex vertex = graph.getVertex(tag.getVertexId());
-                if (vertex != null) {
-                    guid = GraphHelper.getGuid(vertex);
-                }
-            }
             if (guid != null) {
                 RequestContext.get().addVertexNeedingTagDenorm(tag.getVertexId(), guid);
             } else {
-                LOG.warn("Could not resolve GUID for vertexId={}, skipping denorm", tag.getVertexId());
+                tagsNeedingFallback.add(tag);
+            }
+        }
+
+        // Batch fetch all missing vertices (1 Cassandra call instead of N)
+        if (!tagsNeedingFallback.isEmpty()) {
+            String[] vertexIds = tagsNeedingFallback.stream().map(Tag::getVertexId).toArray(String[]::new);
+            Set<AtlasVertex> vertices = graph.getVertices(vertexIds);
+            Map<String, AtlasVertex> vertexMap = new HashMap<>();
+            for (AtlasVertex v : vertices) {
+                vertexMap.put(v.getIdForDisplay(), v);
+            }
+            for (Tag tag : tagsNeedingFallback) {
+                AtlasVertex vertex = vertexMap.get(tag.getVertexId());
+                String guid = vertex != null ? GraphHelper.getGuid(vertex) : null;
+                if (guid != null) {
+                    RequestContext.get().addVertexNeedingTagDenorm(tag.getVertexId(), guid);
+                } else {
+                    LOG.warn("Could not resolve GUID for vertexId={}, skipping denorm", tag.getVertexId());
+                }
             }
         }
     }
@@ -7039,10 +7053,7 @@ public class EntityGraphMapper {
                     int end = Math.min(i + BATCH_SIZE, vertexIdsToAdd.size());
                     List<String> batchIds = vertexIdsToAdd.subList(i, end);
 
-                    List<AtlasVertex> verticesToPropagate = batchIds.stream()
-                            .map(id -> graph.getVertex(id))
-                            .filter(Objects::nonNull)
-                            .collect(Collectors.toList());
+                    List<AtlasVertex> verticesToPropagate = new ArrayList<>(graph.getVertices(batchIds.toArray(new String[0])));
 
                     assetsAffected += verticesToPropagate.size();
 
