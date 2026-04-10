@@ -18,6 +18,7 @@
 
 package org.apache.atlas.repository.store.graph.v1;
 
+import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -83,8 +84,28 @@ public class SoftDeleteHandlerV1 extends DeleteHandlerV1 {
             //tag vertex do not have typeName, but they have a label
             if (!CLASSIFICATION_LABEL.equalsIgnoreCase(edge.getLabel())
                     && getTypeName(edge) == null) {
-                LOG.warn("Edge is not a tag type and typeName is empty. Nothing to delete");
-                return;
+                // In CassandraGraph mode, array attribute edges (e.g., __sourceReadRecentUserRecordList)
+                // don't carry __typeName in their properties — they never did in JanusGraph either,
+                // but JG cleaned them up through the vertex property removal path and never reached here.
+                // In CassandraGraph, entity updates route these edges through deleteEdge(), so we must
+                // proceed with soft-delete instead of skipping. The downstream code handles null typeName
+                // safely: authorizeRemoveRelation returns early, tag propagation finds nothing,
+                // and the soft-delete just sets __state=DELETED on the edge.
+                // Skipping causes orphaned edges to accumulate in Cassandra (10K+ per crawl cycle).
+                try {
+                    String backend = ApplicationProperties.get().getString(ApplicationProperties.GRAPHDB_BACKEND_CONF, "janus");
+                    if (ApplicationProperties.GRAPHDB_BACKEND_CASSANDRA.equalsIgnoreCase(backend)) {
+                        if (LOG.isDebugEnabled()) {
+                            LOG.debug("CassandraGraph: edge has no typeName (label={}), proceeding with soft-delete", edge.getLabel());
+                        }
+                    } else {
+                        LOG.warn("Edge is not a tag type and typeName is empty. Nothing to delete");
+                        return;
+                    }
+                } catch (Exception e) {
+                    LOG.warn("Edge is not a tag type and typeName is empty. Nothing to delete");
+                    return;
+                }
             }
 
             boolean isRelationshipEdge = isRelationshipEdge(edge);
