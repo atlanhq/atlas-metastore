@@ -7097,22 +7097,41 @@ public class EntityGraphMapper {
      * and ES (e.g., "42.5" instead of 42.5).
      */
     private Object coerceAttributeValue(String entityTypeName, String attributeName, String value) {
-        AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entityTypeName);
-        if (entityType != null) {
-            AtlasStructType.AtlasAttribute attribute = entityType.getAttribute(attributeName);
-            if (attribute != null) {
-                String typeName = attribute.getAttributeDef().getTypeName();
-                switch (typeName) {
-                    case "float":   return Float.parseFloat(value);
-                    case "double":  return Double.parseDouble(value);
-                    case "int":     return Integer.parseInt(value);
-                    case "long":    return Long.parseLong(value);
-                    case "boolean": return Boolean.parseBoolean(value);
-                    default:        return value;
-                }
-            }
+        if (value == null) {
+            return null;
         }
-        return value;
+
+        AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entityTypeName);
+        if (entityType == null) {
+            return value;
+        }
+
+        AtlasStructType.AtlasAttribute attribute = entityType.getAttribute(attributeName);
+        if (attribute == null) {
+            return value;
+        }
+
+        String typeName = attribute.getAttributeDef().getTypeName();
+        if (typeName == null) {
+            return value;
+        }
+
+        try {
+            switch (typeName) {
+                case "float":   return Float.parseFloat(value);
+                case "double":  return Double.parseDouble(value);
+                case "int":     return Integer.parseInt(value);
+                case "long":    return Long.parseLong(value);
+                case "boolean": return Boolean.parseBoolean(value);
+                case "short":   return Short.parseShort(value);
+                case "byte":    return Byte.parseByte(value);
+                default:        return value;
+            }
+        } catch (NumberFormatException e) {
+            LOG.warn("Failed to coerce attribute {}.{} value '{}' to type {}, storing as string",
+                     entityTypeName, attributeName, value, typeName);
+            return value;
+        }
     }
 
     private void cacheDifferentialEntityAttributeUpdate(AtlasVertex ev, String property, String value) {
