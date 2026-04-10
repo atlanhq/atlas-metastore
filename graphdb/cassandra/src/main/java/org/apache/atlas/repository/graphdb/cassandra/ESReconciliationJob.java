@@ -65,11 +65,17 @@ public class ESReconciliationJob implements Runnable {
     public void run() {
         if (!leaseManager.tryAcquire(LEASE_NAME, LEASE_TTL_SECONDS)) {
             LOG.info("ESReconciliationJob: another pod holds the lease, skipping");
+            recordJobMetric("skipped_lease", 0);
             return;
         }
 
+        long startMs = System.currentTimeMillis();
         try {
             runAudit();
+            recordJobMetric("success", startMs);
+        } catch (Exception e) {
+            recordJobMetric("failed", startMs);
+            throw e;
         } finally {
             leaseManager.release(LEASE_NAME);
         }
@@ -118,10 +124,15 @@ public class ESReconciliationJob implements Runnable {
                     String propsJson = row.getString("properties");
                     if (vertexId == null || propsJson == null) continue;
 
-                    // Extract __guid from properties, skip soft-deleted vertices
+                    // Extract __guid from properties, skip soft-deleted and non-entity vertices.
+                    // Only entity vertices (those with __typeName) are indexed to ES.
+                    // TypeDef, system, and internal vertices have no __typeName and are
+                    // expected to be absent from ES — counting them as "missing" produces
+                    // a misleading miss rate.
                     String guid = extractGuid(propsJson);
                     if (guid == null) continue;
                     if (isDeleted(propsJson)) continue;
+                    if (!isEntityVertex(propsJson)) continue;
 
                     guidBatch.add(guid);
                     guidToVertexId.put(guid, vertexId);
@@ -164,6 +175,17 @@ public class ESReconciliationJob implements Runnable {
                     elapsed, failedDrained, totalSampled, totalMissing, totalReindexed,
                     String.format("%.2f%%", missRate * 100));
 
+            // Record reconciliation metrics and update outbox failed gauge
+            try {
+                CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
+                if (metrics != null) {
+                    metrics.recordReconciliation(elapsed, failedDrained,
+                            totalSampled, totalMissing, totalReindexed, missRate);
+                }
+            } catch (Throwable t) {
+                LOG.debug("Failed to record reconciliation metrics: {}", t.getMessage());
+            }
+
         } catch (Exception e) {
             LOG.error("ESReconciliationJob: failed", e);
         }
@@ -178,6 +200,27 @@ public class ESReconciliationJob implements Runnable {
             return guid != null ? String.valueOf(guid) : null;
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    /**
+     * Returns true if the vertex is an entity (has __typeName property with a non-null value).
+     * Only entity vertices are indexed to ES. TypeDef vertices, system vertices,
+     * and internal vertices do not have __typeName and should be excluded from
+     * the reconciliation sample to avoid false-positive miss rates.
+     *
+     * Parses JSON to check the key exists (not String.contains, which would
+     * false-positive on "__typeName" appearing in description or other text fields).
+     */
+    @SuppressWarnings("unchecked")
+    private boolean isEntityVertex(String propsJson) {
+        try {
+            Map<String, Object> props = AtlasType.fromJson(propsJson, Map.class);
+            if (props == null) return false;
+            Object typeName = props.get("__typeName");
+            return typeName != null && !String.valueOf(typeName).isEmpty();
+        } catch (Exception e) {
+            return false;
         }
     }
 
@@ -254,6 +297,19 @@ public class ESReconciliationJob implements Runnable {
      */
     private int drainFailedOutboxEntries() {
         List<String> failedVertexIds = outboxRepository.getFailedVertexIds(5000);
+
+        // Reset the outbox_failed gauge to the actual C* count (piggybacking on
+        // this existing query — no additional C* cost). This corrects any drift
+        // from pod restarts or missed inline increments.
+        try {
+            CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
+            if (metrics != null) {
+                metrics.resetOutboxFailed(failedVertexIds.size());
+            }
+        } catch (Throwable t) {
+            LOG.debug("Failed to reset outbox_failed gauge: {}", t.getMessage());
+        }
+
         if (failedVertexIds.isEmpty()) {
             LOG.info("ESReconciliationJob phase 1: no FAILED outbox entries");
             return 0;
@@ -341,6 +397,18 @@ public class ESReconciliationJob implements Runnable {
         } catch (Exception e) {
             LOG.error("ESReconciliationJob: reindex failed for {} GUIDs: {}", guids.size(), e.getMessage());
             return 0;
+        }
+    }
+
+    private void recordJobMetric(String result, long startMs) {
+        try {
+            CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
+            if (metrics != null) {
+                long durationMs = startMs > 0 ? System.currentTimeMillis() - startMs : 0;
+                metrics.recordJobRun(LEASE_NAME, result, durationMs);
+            }
+        } catch (Throwable t) {
+            LOG.debug("Failed to record job metric: {}", t.getMessage());
         }
     }
 }

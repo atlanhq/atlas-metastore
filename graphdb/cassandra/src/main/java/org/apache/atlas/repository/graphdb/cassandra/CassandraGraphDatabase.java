@@ -97,7 +97,7 @@ public class CassandraGraphDatabase implements GraphDatabase<CassandraVertex, Ca
                     configuration.getString("atlas.graph.id.strategy", "legacy"));
             boolean claimEnabled = configuration.getBoolean("atlas.graph.claim.enabled", false);
             LOG.info("CassandraGraph config: idStrategy={}, claimEnabled={}", idStrategy, claimEnabled);
-            CassandraGraph graph = new CassandraGraph(session, idStrategy, claimEnabled);
+            CassandraGraph graph = new CassandraGraph(session, idStrategy, claimEnabled, configuration);
             LOG.info("CassandraGraph created successfully.");
 
             // Register JVM shutdown hook for graceful cleanup
