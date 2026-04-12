@@ -146,6 +146,8 @@ public enum AtlasConfiguration {
     ATLAS_INDEXSEARCH_EDGE_BULK_FETCH_ENABLE("atlas.indexsearch.edge.bulk.fetch.enable", true),
     ATLAS_INDEXSEARCH_EDGE_BULK_FETCH_BATCH_SIZE ("atlas.indexsearch.edge.bulk.fetch.batch.size", 10),
     ATLAS_INDEXSEARCH_USE_OPTIMISED_PIPELINE("atlas.indexsearch.use.optimised.pipeline", false),
+    ATLAS_INDEXSEARCH_STAGE_MAX_RETRIES("atlas.indexsearch.stage.max.retries", 2),
+    ATLAS_INDEXSEARCH_STAGE_TIMEOUT_MS("atlas.indexsearch.stage.timeout.ms", 10000),
     ATLAS_MAINTENANCE_MODE("atlas.maintenance.mode", false),
     DELTA_BASED_REFRESH_ENABLED("atlas.authorizer.enable.delta_based_refresh", false),
     READ_RESTRICTION_LEVEL("atlas.authorizer.read.restriction.level", "scrub"),
