@@ -25,6 +25,7 @@ import org.apache.atlas.*;
 import org.apache.atlas.annotation.GraphTransaction;
 import org.apache.atlas.authorize.AtlasSearchResultScrubRequest;
 import org.apache.atlas.authorizer.AtlasAuthorizationUtils;
+import org.apache.atlas.discovery.searchpipeline.IndexSearchResultRenderer;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.discovery.*;
 import org.apache.atlas.model.discovery.AtlasSearchResult.AtlasQueryType;
@@ -91,6 +92,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     private final ElasticsearchDslOptimizer dslOptimizer;
 
     private EntityGraphRetriever            entityRetriever;
+    private IndexSearchResultRenderer       indexSearchResultRenderer;
 
     @Inject
     public EntityDiscoveryService(AtlasTypeRegistry typeRegistry,
@@ -99,9 +101,11 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                                   SearchTracker searchTracker,
                                   UserProfileService userProfileService,
                                   StatsClient statsClient,
-                                  EntityGraphRetriever entityRetriever) throws AtlasException {
+                                  EntityGraphRetriever entityRetriever,
+                                  IndexSearchResultRenderer indexSearchResultRenderer) throws AtlasException {
         this(typeRegistry, graph, indexer, searchTracker, userProfileService, statsClient);
-        this.entityRetriever          = entityRetriever;
+        this.entityRetriever              = entityRetriever;
+        this.indexSearchResultRenderer    = indexSearchResultRenderer;
     }
 
     public EntityDiscoveryService(AtlasTypeRegistry typeRegistry,
@@ -365,7 +369,15 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 return null;
             }
             RequestContext.get().endMetricRecord(elasticSearchQueryMetric);
-            prepareSearchResult(ret, indexQueryResult, resultAttributes, true, useVertexEdgeBulkFetching);
+
+            if (AtlasConfiguration.ATLAS_INDEXSEARCH_USE_OPTIMISED_PIPELINE.getBoolean()) {
+                indexSearchResultRenderer.render(ret, indexQueryResult, resultAttributes, searchParams);
+                if (!searchParams.getEnableFullRestriction()) {
+                    scrubSearchResults(ret, searchParams.getSuppressLogs());
+                }
+            } else {
+                prepareSearchResult(ret, indexQueryResult, resultAttributes, true, useVertexEdgeBulkFetching);
+            }
 
             ret.setAggregations(indexQueryResult.getAggregationMap());
             ret.setApproximateCount(indexQuery.vertexTotals());
