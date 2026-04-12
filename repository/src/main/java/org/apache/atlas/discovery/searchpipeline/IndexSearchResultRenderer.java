@@ -19,6 +19,8 @@ package org.apache.atlas.discovery.searchpipeline;
 
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.RequestContext;
+import org.apache.atlas.authorize.AtlasSearchResultScrubRequest;
+import org.apache.atlas.authorizer.AtlasAuthorizationUtils;
 import org.apache.atlas.discovery.searchpipeline.stages.*;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.discovery.AtlasSearchResult;
@@ -73,6 +75,7 @@ public class IndexSearchResultRenderer {
     private final List<EnrichmentStage> stages;
     private final StageExecutor         stageExecutor;
     private final EntityGraphRetriever  entityRetriever;
+    private final AtlasTypeRegistry     typeRegistry;
 
     @Inject
     public IndexSearchResultRenderer(AtlasGraph graph,
@@ -81,6 +84,7 @@ public class IndexSearchResultRenderer {
         this.vertexIdExtractor = new DirectVertexIdExtractor();
         this.stageExecutor     = new StageExecutor();
         this.entityRetriever   = entityRetriever;
+        this.typeRegistry      = typeRegistry;
 
         TypeAwareEdgeLabelResolver labelResolver = new TypeAwareEdgeLabelResolver(typeRegistry);
 
@@ -217,6 +221,20 @@ public class IndexSearchResultRenderer {
             }
         } finally {
             reqCtx.setIncludeMeanings(originalIncludeMeanings);
+        }
+
+        // Auth post-filter — matches existing prepareSearchResult line 677-679.
+        // Called here (not in directIndexSearch) so collapse results are also scrubbed
+        // independently, matching existing behaviour where recursive prepareSearchResult
+        // calls scrubSearchResults on each collapse result.
+        if (!searchParams.getEnableFullRestriction()) {
+            AtlasPerfMetrics.MetricRecorder scrubMetric = reqCtx.startMetricRecord("scrubSearchResults");
+            try {
+                AtlasAuthorizationUtils.scrubSearchResults(
+                        new AtlasSearchResultScrubRequest(typeRegistry, result), searchParams.getSuppressLogs());
+            } finally {
+                reqCtx.endMetricRecord(scrubMetric);
+            }
         }
     }
 

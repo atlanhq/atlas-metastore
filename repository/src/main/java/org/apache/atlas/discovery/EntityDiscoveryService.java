@@ -371,10 +371,9 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             RequestContext.get().endMetricRecord(elasticSearchQueryMetric);
 
             if (AtlasConfiguration.ATLAS_INDEXSEARCH_USE_OPTIMISED_PIPELINE.getBoolean()) {
+                // scrubSearchResults is called inside renderInternal (including for collapse results),
+                // matching existing prepareSearchResult behaviour
                 indexSearchResultRenderer.render(ret, indexQueryResult, resultAttributes, searchParams);
-                if (!searchParams.getEnableFullRestriction()) {
-                    scrubSearchResults(ret, searchParams.getSuppressLogs());
-                }
             } else {
                 prepareSearchResult(ret, indexQueryResult, resultAttributes, true, useVertexEdgeBulkFetching);
             }
