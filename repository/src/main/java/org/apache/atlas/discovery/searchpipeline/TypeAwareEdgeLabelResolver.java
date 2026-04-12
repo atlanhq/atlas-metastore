@@ -166,10 +166,10 @@ public class TypeAwareEdgeLabelResolver {
                 continue;
             }
 
-            // Match existing behaviour: skip relationship attrs for product calls with no relAttrsForSearch
+            // Match existing behaviour: skip ALL relationship attrs for product calls with no relAttrsForSearch
+            // (existing code at processRelationshipAttribute line 1212-1214)
             if (context.isInvokedByIndexSearch() && context.isInvokedByProduct()
-                    && CollectionUtils.isEmpty(context.getRelationAttrsForSearch())
-                    && (requestedAttrs == null || !requestedAttrs.contains(attrName))) {
+                    && CollectionUtils.isEmpty(context.getRelationAttrsForSearch())) {
                 continue;
             }
 
