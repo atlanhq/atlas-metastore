@@ -34,6 +34,7 @@ import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.DirectIndexQueryResult;
 import org.apache.atlas.repository.graphdb.cassandra.CassandraIndexQuery;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
@@ -111,93 +112,221 @@ public class IndexSearchResultRenderer {
         AtlasPerfMetrics.MetricRecorder overallMetric =
                 RequestContext.get().startMetricRecord("indexSearchResultRenderer.render");
         try {
-            // Stage 0: Extract vertex IDs from ES _id (0 CQL on ZeroGraph)
             List<ESHitResult> esHits = toESHitResults(queryResult);
-            List<String> vertexIds = vertexIdExtractor.extractVertexIds(esHits);
-
-            if (CollectionUtils.isEmpty(vertexIds)) {
-                return;
-            }
-
-            // Build context
-            RequestContext reqCtx = RequestContext.get();
-            SearchEnrichmentContext context = new SearchEnrichmentContext(
-                    esHits,
-                    vertexIds,
-                    resultAttributes,
-                    reqCtx.getRelationAttrsForSearch(),
-                    searchParams,
-                    reqCtx.includeClassifications(),
-                    reqCtx.isIncludeClassificationNames(),
-                    reqCtx.includeMeanings()
-            );
-
-            // Execute stages sequentially with timeout + adaptive retry
-            for (EnrichmentStage stage : stages) {
-                stageExecutor.execute(stage, context);
-            }
-
-            // Build VertexEdgePropertiesCache from context for delegation
-            VertexEdgePropertiesCache cache = buildCacheFromContext(context);
-
-            // Classification map (includes empty lists for no-tag vertices)
-            Map<String, List<AtlasClassification>> classificationMap = context.getClassificationMap();
-
-            // Save and override includeMeanings — we handle terms ourselves from Stage 5
-            boolean originalIncludeMeanings = reqCtx.includeMeanings();
-            reqCtx.setIncludeMeanings(false);
-
-            try {
-                for (int i = 0; i < vertexIds.size(); i++) {
-                    String vertexId = vertexIds.get(i);
-                    AtlasVertex vertex = context.getVertexObject(vertexId);
-
-                    if (vertex == null) {
-                        LOG.warn("Vertex not found in context for vertexId={}, skipping", vertexId);
-                        continue;
-                    }
-
-                    // Delegate to EXISTING toAtlasEntityHeader — 100% functional parity
-                    // for all attribute types (PRIMITIVE, ENUM, OBJECT_ID, ARRAY, MAP, STRUCT)
-                    AtlasEntityHeader header = entityRetriever.toAtlasEntityHeader(
-                            vertex, resultAttributes, cache, classificationMap);
-
-                    if (header == null) {
-                        continue;
-                    }
-
-                    // Add terms from Stage 5 (was skipped via includeMeanings=false)
-                    if (originalIncludeMeanings) {
-                        List<AtlasTermAssignmentHeader> terms = context.getTermAssignmentMap()
-                                .getOrDefault(vertexId, Collections.emptyList());
-                        header.setMeanings(terms);
-                        header.setMeaningNames(terms.stream()
-                                .map(AtlasTermAssignmentHeader::getDisplayText)
-                                .filter(Objects::nonNull)
-                                .collect(Collectors.toList()));
-                    }
-
-                    // Score, highlights, sort from ES hit
-                    ESHitResult esHit = esHits.get(i);
-                    if (searchParams.getShowSearchScore()) {
-                        result.addEntityScore(header.getGuid(), esHit.getScore());
-                    }
-                    if (searchParams.getShowSearchMetadata()) {
-                        result.addHighlights(header.getGuid(), esHit.getHighlights());
-                        result.addSort(header.getGuid(), esHit.getSort());
-                    } else if (searchParams.getShowHighlights()) {
-                        result.addHighlights(header.getGuid(), esHit.getHighlights());
-                    }
-
-                    result.addEntity(header);
-                }
-            } finally {
-                // Restore includeMeanings
-                reqCtx.setIncludeMeanings(originalIncludeMeanings);
-            }
-
+            renderInternal(result, esHits, resultAttributes, searchParams, true);
         } finally {
             RequestContext.get().endMetricRecord(overallMetric);
+        }
+    }
+
+    /**
+     * Internal rendering logic shared by top-level render and collapse recursion.
+     *
+     * @param fetchCollapsedResults if true, handle inner_hits collapse. False for recursive calls.
+     */
+    private void renderInternal(AtlasSearchResult result,
+                                List<ESHitResult> esHits,
+                                Set<String> resultAttributes,
+                                SearchParams searchParams,
+                                boolean fetchCollapsedResults) throws AtlasBaseException {
+
+        // Stage 0: Extract vertex IDs from ES _id (0 CQL on ZeroGraph)
+        List<String> vertexIds = vertexIdExtractor.extractVertexIds(esHits);
+
+        if (CollectionUtils.isEmpty(vertexIds)) {
+            return;
+        }
+
+        // Build context
+        RequestContext reqCtx = RequestContext.get();
+        SearchEnrichmentContext context = new SearchEnrichmentContext(
+                esHits,
+                vertexIds,
+                resultAttributes,
+                reqCtx.getRelationAttrsForSearch(),
+                searchParams,
+                reqCtx.includeClassifications(),
+                reqCtx.isIncludeClassificationNames(),
+                reqCtx.includeMeanings()
+        );
+
+        // Execute stages sequentially with timeout + adaptive retry
+        for (EnrichmentStage stage : stages) {
+            stageExecutor.execute(stage, context);
+        }
+
+        // Build VertexEdgePropertiesCache from context for delegation
+        VertexEdgePropertiesCache cache = buildCacheFromContext(context);
+
+        // Classification map (includes empty lists for no-tag vertices)
+        Map<String, List<AtlasClassification>> classificationMap = context.getClassificationMap();
+
+        // Save and override includeMeanings — we handle terms ourselves from Stage 5
+        boolean originalIncludeMeanings = reqCtx.includeMeanings();
+        reqCtx.setIncludeMeanings(false);
+
+        try {
+            for (int i = 0; i < vertexIds.size(); i++) {
+                String vertexId = vertexIds.get(i);
+                AtlasVertex vertex = context.getVertexObject(vertexId);
+
+                if (vertex == null) {
+                    LOG.warn("Vertex not found in context for vertexId={}, skipping", vertexId);
+                    continue;
+                }
+
+                // Delegate to EXISTING toAtlasEntityHeader — 100% functional parity
+                AtlasEntityHeader header = entityRetriever.toAtlasEntityHeader(
+                        vertex, resultAttributes, cache, classificationMap);
+
+                if (header == null) {
+                    continue;
+                }
+
+                // Add terms from Stage 5 (was skipped via includeMeanings=false)
+                if (originalIncludeMeanings) {
+                    List<AtlasTermAssignmentHeader> terms = context.getTermAssignmentMap()
+                            .getOrDefault(vertexId, Collections.emptyList());
+                    header.setMeanings(terms);
+                    header.setMeaningNames(terms.stream()
+                            .map(AtlasTermAssignmentHeader::getDisplayText)
+                            .filter(Objects::nonNull)
+                            .collect(Collectors.toList()));
+                }
+
+                // Score
+                ESHitResult esHit = esHits.get(i);
+                if (searchParams.getShowSearchScore()) {
+                    result.addEntityScore(header.getGuid(), esHit.getScore());
+                }
+
+                // Collapse handling — matches existing prepareSearchResult behaviour
+                if (fetchCollapsedResults && esHit.hasInnerHits()) {
+                    handleCollapse(header, esHit, resultAttributes, searchParams, result);
+                }
+
+                // Highlights, sort
+                if (searchParams.getShowSearchMetadata()) {
+                    result.addHighlights(header.getGuid(), esHit.getHighlights());
+                    result.addSort(header.getGuid(), esHit.getSort());
+                } else if (searchParams.getShowHighlights()) {
+                    result.addHighlights(header.getGuid(), esHit.getHighlights());
+                }
+
+                result.addEntity(header);
+            }
+        } finally {
+            reqCtx.setIncludeMeanings(originalIncludeMeanings);
+        }
+    }
+
+    /**
+     * Handle collapse (inner_hits) for a single entity header.
+     * Matches existing behaviour in prepareSearchResult lines 631-661.
+     */
+    @SuppressWarnings("unchecked")
+    private void handleCollapse(AtlasEntityHeader header,
+                                ESHitResult esHit,
+                                Set<String> resultAttributes,
+                                SearchParams searchParams,
+                                AtlasSearchResult parentResult) throws AtlasBaseException {
+
+        Map<String, LinkedHashMap> innerHitsMap = esHit.getInnerHits();
+        if (innerHitsMap == null || innerHitsMap.isEmpty()) {
+            return;
+        }
+
+        RequestContext reqCtx = RequestContext.get();
+        // Copy — getRelationAttrsForSearch() returns a mutable set, clear() would clear our reference
+        Set<String> savedRelationAttrs = new HashSet<>(reqCtx.getRelationAttrsForSearch());
+
+        Map<String, AtlasSearchResult> collapse = new HashMap<>();
+
+        for (String collapseKey : innerHitsMap.keySet()) {
+            AtlasSearchResult collapseResult = new AtlasSearchResult();
+            collapseResult.setSearchParameters(parentResult.getSearchParameters());
+
+            // Determine collapse attributes (from searchParams or use parent's)
+            Set<String> collapseAttrs;
+            if (searchParams.getCollapseAttributes() != null) {
+                collapseAttrs = new HashSet<>(searchParams.getCollapseAttributes());
+            } else {
+                collapseAttrs = resultAttributes;
+            }
+
+            // Handle collapse relation attributes
+            if (searchParams.getCollapseRelationAttributes() != null) {
+                reqCtx.getRelationAttrsForSearch().clear();
+                reqCtx.setRelationAttrsForSearch(searchParams.getCollapseRelationAttributes());
+            }
+
+            // Parse inner hits into ESHitResult list
+            List<ESHitResult> collapseHits = parseInnerHits(innerHitsMap.get(collapseKey));
+
+            if (collapseHits != null && !collapseHits.isEmpty()) {
+                // Recursive render — fetchCollapsedResults=false (no nested collapse)
+                renderInternal(collapseResult, collapseHits, collapseAttrs, searchParams, false);
+            }
+
+            // Extract approximate count from inner hits
+            try {
+                LinkedHashMap innerHitResponse = innerHitsMap.get(collapseKey);
+                Map<String, LinkedHashMap> hitsWrapper = AtlasType.fromJson(
+                        AtlasType.toJson(innerHitResponse.get("hits")), Map.class);
+                if (hitsWrapper != null && hitsWrapper.get("total") != null) {
+                    Integer approximateCount = (Integer) hitsWrapper.get("total").get("value");
+                    collapseResult.setApproximateCount(approximateCount);
+                }
+            } catch (Exception e) {
+                LOG.debug("Failed to extract approximate count for collapse key {}", collapseKey, e);
+            }
+
+            collapseResult.setSearchParameters(null);
+            collapse.put(collapseKey, collapseResult);
+        }
+
+        // Restore relation attributes
+        if (searchParams.getCollapseRelationAttributes() != null) {
+            reqCtx.getRelationAttrsForSearch().clear();
+            reqCtx.setRelationAttrsForSearch(savedRelationAttrs);
+        }
+
+        if (!collapse.isEmpty()) {
+            header.setCollapse(collapse);
+        }
+    }
+
+    /**
+     * Parse inner hits response into a list of ESHitResult.
+     * Inner hits have the same structure as top-level ES hits.
+     */
+    @SuppressWarnings("unchecked")
+    private List<ESHitResult> parseInnerHits(LinkedHashMap innerHitResponse) {
+        if (innerHitResponse == null) {
+            return Collections.emptyList();
+        }
+
+        try {
+            Map<String, LinkedHashMap> hitsWrapper = AtlasType.fromJson(
+                    AtlasType.toJson(innerHitResponse.get("hits")), Map.class);
+            if (hitsWrapper == null) {
+                return Collections.emptyList();
+            }
+
+            List<LinkedHashMap> hits = AtlasType.fromJson(
+                    AtlasType.toJson(hitsWrapper.get("hits")), List.class);
+            if (hits == null) {
+                return Collections.emptyList();
+            }
+
+            List<ESHitResult> results = new ArrayList<>(hits.size());
+            for (LinkedHashMap hit : hits) {
+                results.add(new ESHitResult(hit));
+            }
+            return results;
+        } catch (Exception e) {
+            LOG.warn("Failed to parse inner hits for collapse", e);
+            return Collections.emptyList();
         }
     }
 

@@ -183,15 +183,10 @@ public class TypeAwareEdgeLabelResolver {
             }
         }
 
-        // Also include header attributes that are edge-backed
-        for (AtlasAttribute headerAttr : entityType.getHeaderAttributes().values()) {
-            if (headerAttr.getRelationshipEdgeLabel() != null) {
-                String label = headerAttr.getRelationshipEdgeLabel();
-                AtlasEdgeDirection direction = toAtlasEdgeDirection(headerAttr.getRelationshipEdgeDirection());
-                labelDirections.merge(label, direction, (existing, incoming) ->
-                        existing == incoming ? existing : AtlasEdgeDirection.BOTH);
-            }
-        }
+        // Note: header attributes that are edge-backed are NOT included here,
+        // matching existing collectEdgeLabelsWithDirection() behaviour. Header attrs
+        // are resolved from cache in toAtlasEntityHeader — if the edge wasn't fetched
+        // because the attr wasn't in the requested set, it returns null (same as current code).
 
         // Include TERM_ASSIGNMENT_LABEL if meanings requested
         if (includeMeanings) {
