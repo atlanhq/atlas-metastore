@@ -194,8 +194,8 @@ public enum AtlasConfiguration {
 
     // Entity audit ILM: retention default -1 means delete phase is disabled (compliance-safe)
     ENTITY_AUDIT_RETENTION_DAYS("atlas.audit.retention.days", -1),
+    // ILM rollover: total index max_size only (atlas.audit.ilm.rollover.max.size); no max_age
     ENTITY_AUDIT_ILM_ROLLOVER_SIZE("atlas.audit.ilm.rollover.max.size", "50gb"),
-    ENTITY_AUDIT_ILM_ROLLOVER_AGE("atlas.audit.ilm.rollover.max.age", "30d"),
 
     MIN_EDGES_SUPER_VERTEX("atlas.jg.super.vertex.min.edge.count", 100),
 
