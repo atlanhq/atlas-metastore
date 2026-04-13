@@ -6008,48 +6008,13 @@ public class EntityGraphMapper {
 
         if (MapUtils.isNotEmpty(entity.getRelationshipAttributes())) {
             Set<String> relatedEntitiesGuids = getRelatedEntitiesGuids(entity);
-
-            // Extract entity type to enable per-label iteration (super vertex optimization)
-            AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
-            activateEntityRelationships(vertex, relatedEntitiesGuids, entityType);
+            activateEntityRelationships(vertex, relatedEntitiesGuids);
         }
     }
 
-    private void activateEntityRelationships(AtlasVertex vertex, Set<String> relatedEntitiesGuids,
-                                              AtlasEntityType entityType) {
-        // Instead of getEdges(BOTH) which scans ALL edges on the vertex,
-        // iterate only the relationship edge labels relevant to this entity type.
-        // For a super vertex with 4.88M edges across 20 labels, if the entity type
-        // has 5 relationship attributes, this scans only those 5 labels.
-        Set<String> edgeLabels;
-        if (entityType != null && MapUtils.isNotEmpty(entityType.getRelationshipAttributes())) {
-            edgeLabels = new HashSet<>();
-            for (Map<String, AtlasAttribute> attrMap : entityType.getRelationshipAttributes().values()) {
-                for (AtlasAttribute attr : attrMap.values()) {
-                    String label = attr.getRelationshipEdgeLabel();
-                    if (label != null) {
-                        edgeLabels.add(label);
-                    }
-                }
-            }
-        } else {
-            edgeLabels = Collections.emptySet();
-        }
+    private void activateEntityRelationships(AtlasVertex vertex, Set<String> relatedEntitiesGuids) {
+        Iterator<AtlasEdge> edgeIterator = vertex.getEdges(AtlasEdgeDirection.BOTH).iterator();
 
-        if (edgeLabels.isEmpty()) {
-            // Fallback: scan all edges (original behavior)
-            activateEdgesForLabels(vertex, relatedEntitiesGuids,
-                    vertex.getEdges(AtlasEdgeDirection.BOTH).iterator());
-        } else {
-            for (String label : edgeLabels) {
-                activateEdgesForLabels(vertex, relatedEntitiesGuids,
-                        vertex.getEdges(AtlasEdgeDirection.BOTH, label).iterator());
-            }
-        }
-    }
-
-    private void activateEdgesForLabels(AtlasVertex vertex, Set<String> relatedEntitiesGuids,
-                                         Iterator<AtlasEdge> edgeIterator) {
         while (edgeIterator.hasNext()) {
             AtlasEdge edge = edgeIterator.next();
 

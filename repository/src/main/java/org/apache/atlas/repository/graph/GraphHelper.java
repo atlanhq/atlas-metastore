@@ -2351,6 +2351,9 @@ public final class GraphHelper {
     }
 
     private Set<AbstractMap.SimpleEntry<String,String>> retrieveEdgeLabelsAndTypeNameViaAtlasApi(AtlasVertex vertex) {
+        if (!(graph instanceof CassandraGraph)) {
+            throw new IllegalStateException("retrieveEdgeLabelsAndTypeNameViaAtlasApi called with non-Cassandra graph: " + graph.getClass().getName());
+        }
         // Use label-skip-scan optimization: ~N tiny CQL queries (one per distinct label)
         // instead of scanning all edges (which can be millions for super vertices).
         CassandraGraph cassandraGraph = (CassandraGraph) graph;
