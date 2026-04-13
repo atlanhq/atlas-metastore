@@ -80,9 +80,9 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     private final ClaimRepository     claimRepository;
     private final ESOutboxRepository  esOutboxRepository;
     private final JobLeaseManager     leaseManager;
-    private final ESOutboxProcessor   esOutboxProcessor;
-    private final RepairJobScheduler  repairJobScheduler;
-    private final Set<String>         multiProperties;
+    private final ESOutboxProcessor        esOutboxProcessor;
+    private final RepairJobScheduler       repairJobScheduler;
+    private final Set<String>              multiProperties;
     private final RuntimeIdStrategy   idStrategy;
     private final boolean             claimEnabled;
 
@@ -102,6 +102,11 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     }
 
     public CassandraGraph(CqlSession session, RuntimeIdStrategy idStrategy, boolean claimEnabled) {
+        this(session, idStrategy, claimEnabled, null);
+    }
+
+    public CassandraGraph(CqlSession session, RuntimeIdStrategy idStrategy, boolean claimEnabled,
+                           org.apache.commons.configuration.Configuration configuration) {
         this.session             = session;
         this.vertexRepository    = new VertexRepository(session);
         this.edgeRepository      = new EdgeRepository(session);
@@ -112,14 +117,57 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         this.esOutboxRepository  = new ESOutboxRepository(session);
         this.leaseManager        = new JobLeaseManager(session);
         this.esOutboxProcessor   = new ESOutboxProcessor(esOutboxRepository, leaseManager);
-        this.repairJobScheduler  = new RepairJobScheduler(session, this, leaseManager, esOutboxRepository);
+        this.repairJobScheduler  = new RepairJobScheduler(session, this, leaseManager, esOutboxRepository, configuration);
         this.multiProperties     = ConcurrentHashMap.newKeySet();
         this.idStrategy          = idStrategy != null ? idStrategy : RuntimeIdStrategy.LEGACY;
         this.claimEnabled        = claimEnabled;
 
+        // Initialize metrics (uses global Prometheus registry)
+        initMetrics();
+
         // Start background processors
         this.esOutboxProcessor.start();
         this.repairJobScheduler.start();
+    }
+
+    private void initMetrics() {
+        try {
+            io.micrometer.core.instrument.MeterRegistry registry =
+                    org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry();
+            if (registry != null) {
+                CassandraGraphMetrics.getInstance(registry);
+                seedOutboxFailedGauge();
+            }
+        } catch (Throwable t) {
+            LOG.warn("Failed to initialize CassandraGraph metrics (non-fatal): {}", t.getMessage());
+        }
+    }
+
+    /**
+     * One-time seed of the outbox_failed gauge from Cassandra on startup.
+     * The es_outbox table is partitioned by status, so WHERE status = 'FAILED'
+     * is a single-partition read — milliseconds even with thousands of entries.
+     * Uses a 2-second timeout to avoid delaying startup if C* is slow.
+     */
+    private void seedOutboxFailedGauge() {
+        try {
+            com.datastax.oss.driver.api.core.cql.ResultSet rs = session.execute(
+                    com.datastax.oss.driver.api.core.cql.SimpleStatement.builder(
+                            "SELECT COUNT(*) FROM es_outbox WHERE status = 'FAILED'")
+                        .setTimeout(java.time.Duration.ofSeconds(2))
+                        .build());
+            com.datastax.oss.driver.api.core.cql.Row row = rs.one();
+            if (row != null) {
+                int count = (int) row.getLong(0);
+                if (count > 0) {
+                    CassandraGraphMetrics.getInstance().incrementOutboxFailed(count);
+                    LOG.info("Seeded outbox_failed gauge from C*: {}", count);
+                }
+            }
+        } catch (Exception e) {
+            LOG.info("Could not seed outbox_failed gauge (will self-correct on next reconciliation): {}",
+                    e.getMessage());
+        }
     }
 
     // ---- Vertex operations ----
@@ -793,6 +841,8 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     @Override
     public void commit() {
         TransactionBuffer buffer = txBuffer.get();
+        long commitStartMs = System.currentTimeMillis();
+        int totalBatchCount = 0;
 
         try {
             List<CassandraVertex> originalNewVertices = buffer.getNewVertices();
@@ -857,6 +907,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                     session.execute(atomicBatch.build());
                     batchCount++;
                 }
+                totalBatchCount += batchCount;
                 LOG.info("commit: wrote {} new vertices with their index entries in {} batch(es)", newVertices.size(), batchCount);
             }
 
@@ -875,6 +926,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                     session.execute(dirtyBatch.build());
                     dirtyBatchCount++;
                 }
+                totalBatchCount += dirtyBatchCount;
                 LOG.info("commit: updated {} dirty vertices in {} batch(es)", dirtyVertices.size(), dirtyBatchCount);
             }
 
@@ -1021,16 +1073,37 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 e.markPersisted();
             }
 
+            // Record commit metrics
+            recordCommitMetrics(true, commitStartMs, newVertices.size(), dirtyVertices.size(),
+                    removedVertices.size(), newEdges.size(), removedEdges.size(),
+                    totalBatchCount, claimLostIds.size());
+
         } catch (Exception e) {
             LOG.error("CassandraGraph.commit() FAILED: {}. TypeRegistryUpdateHook will receive isSuccess=false, " +
                     "discarding any transient type registry updates. Cassandra writes that already flushed " +
                     "are NOT rolled back.", e.getMessage(), e);
+            recordCommitMetrics(false, commitStartMs, 0, 0, 0, 0, 0, totalBatchCount, 0);
             throw e;
         } finally {
             buffer.clear();
             // Clear vertex cache so the next transaction on this thread reads fresh from Cassandra.
             // Without this, a thread reused from the pool could return stale cached vertices.
             vertexCache.get().clear();
+        }
+    }
+
+    private void recordCommitMetrics(boolean success, long startMs,
+                                     int verticesCreated, int verticesUpdated, int verticesDeleted,
+                                     int edgesCreated, int edgesDeleted, int batchCount, int claimConflicts) {
+        try {
+            CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
+            if (metrics != null) {
+                metrics.recordCommit(success, System.currentTimeMillis() - startMs,
+                        verticesCreated, verticesUpdated, verticesDeleted,
+                        edgesCreated, edgesDeleted, batchCount, claimConflicts);
+            }
+        } catch (Throwable t) {
+            LOG.debug("Failed to record commit metrics: {}", t.getMessage());
         }
     }
 
@@ -1248,6 +1321,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     private void syncVerticesToElasticsearch(List<CassandraVertex> newVertices,
                                              List<CassandraVertex> dirtyVertices,
                                              List<CassandraVertex> removedVertices) {
+        long esSyncStartMs = System.currentTimeMillis();
         try {
             String indexName = Constants.VERTEX_INDEX_NAME;
 
@@ -1306,6 +1380,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             if (client == null) {
                 LOG.warn("ES client not available, {} index + {} delete operations written to outbox for background retry",
                         vertexMap.size(), deleteIds.size());
+                recordESSyncMetrics("outbox_fallback", esSyncStartMs, vertexMap.size(), deleteIds.size());
                 return;
             }
 
@@ -1319,6 +1394,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                     long delay = ES_SYNC_RETRY_DELAYS[Math.min(attempt - 1, ES_SYNC_RETRY_DELAYS.length - 1)];
                     LOG.warn("ES sync retry attempt {}/{} after {}ms for {} index + {} delete operations",
                             attempt, ES_SYNC_MAX_RETRIES, delay, pendingIndexIds.size(), pendingDeleteIds.size());
+                    recordESSyncRetryMetric(attempt);
                     Thread.sleep(delay);
                 }
 
@@ -1409,11 +1485,44 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                         permanentlyFailed.size(),
                         permanentlyFailed.stream().limit(50).collect(java.util.stream.Collectors.joining(", ")));
             }
+
+            // Record ES sync metrics
+            if (stillFailing.isEmpty() && permanentlyFailed.isEmpty()) {
+                recordESSyncMetrics("sync_success", esSyncStartMs, vertexMap.size(), deleteIds.size());
+            } else if (!permanentlyFailed.isEmpty()) {
+                recordESSyncMetrics("permanent_failure", esSyncStartMs, vertexMap.size(), deleteIds.size());
+            } else {
+                recordESSyncMetrics("outbox_fallback", esSyncStartMs, vertexMap.size(), deleteIds.size());
+            }
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
             LOG.warn("ES sync interrupted during retry backoff: {}", ie.getMessage());
+            recordESSyncMetrics("outbox_fallback", esSyncStartMs, 0, 0);
         } catch (Exception e) {
             LOG.error("Failed to sync vertices to ES (outbox entries preserved for background retry): {}", e.getMessage(), e);
+            recordESSyncMetrics("outbox_fallback", esSyncStartMs, 0, 0);
+        }
+    }
+
+    private void recordESSyncMetrics(String result, long startMs, int indexOps, int deleteOps) {
+        try {
+            CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
+            if (metrics != null) {
+                metrics.recordESSync(result, System.currentTimeMillis() - startMs, indexOps, deleteOps);
+            }
+        } catch (Throwable t) {
+            LOG.debug("Failed to record ES sync metrics: {}", t.getMessage());
+        }
+    }
+
+    private void recordESSyncRetryMetric(int attempt) {
+        try {
+            CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
+            if (metrics != null) {
+                metrics.recordESSyncRetry(attempt);
+            }
+        } catch (Throwable t) {
+            LOG.debug("Failed to record ES sync retry metric: {}", t.getMessage());
         }
     }
 
@@ -1526,6 +1635,18 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
             LOG.info("ES bulk response: {} succeeded, {} retryable failures, {} permanent failures",
                     succeeded, retryable, permanent);
+
+            // Record per-item metrics
+            try {
+                CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
+                if (metrics != null) {
+                    metrics.recordESBulkItems("success", succeeded);
+                    metrics.recordESBulkItems("retryable", retryable);
+                    metrics.recordESBulkItems("permanent", permanent);
+                }
+            } catch (Throwable t) {
+                LOG.debug("Failed to record ES bulk item metrics: {}", t.getMessage());
+            }
         } catch (Exception parseEx) {
             LOG.warn("Could not parse ES bulk response for item errors: {}. Raw (truncated): {}",
                     parseEx.getMessage(), respBody.substring(0, Math.min(4000, respBody.length())));
@@ -2070,6 +2191,10 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
     public EdgeRepository getEdgeRepository() {
         return edgeRepository;
+    }
+
+    RepairJobScheduler getRepairJobScheduler() {
+        return repairJobScheduler;
     }
 
     public IndexRepository getIndexRepository() {
