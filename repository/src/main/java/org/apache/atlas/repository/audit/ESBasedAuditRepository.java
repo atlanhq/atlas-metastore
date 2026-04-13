@@ -170,6 +170,9 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
      */
     private record WriteConfig(String writeIndex, String writeBulkMetadata, boolean aliasMode) {}
 
+    /** Pair returned from {@link #redetectAliasAndRebuild} so local {@code cfg} matches the built {@link Request}. */
+    private record WriteAliasRedetectResult(WriteConfig config, Request request) {}
+
     private static final WriteConfig DEFAULT_WRITE_CONFIG = new WriteConfig(INDEX_NAME, bulkMetadata, false);
 
     private volatile WriteConfig writeConfig = DEFAULT_WRITE_CONFIG;
@@ -361,6 +364,22 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                     Map<String, Object> responseMap = AtlasType.fromJson(responseString, Map.class);
 
                     if ((boolean) responseMap.get("errors")) {
+                        // Bulk often returns HTTP 200 with per-item failures (e.g. no write index on a
+                        // multi-target alias after ILM). Re-probe the write alias once before failing —
+                        // otherwise we never hit the 4xx/IOException paths and alias mode stays stale.
+                        // ES may mark the overall bulk as "errors" even if some actions succeeded; for
+                        // entity audit we still treat any failed item as a failed batch and recover/retry.
+                        if (!aliasRedetected) {
+                            Optional<WriteAliasRedetectResult> rebuilt = redetectAliasAndRebuild(cfg, eventPayloads,
+                                    "bulk errors=true (HTTP 200)");
+                            if (rebuilt.isPresent()) {
+                                WriteAliasRedetectResult r = rebuilt.get();
+                                request = r.request();
+                                cfg = r.config();
+                                aliasRedetected = true;
+                                continue;
+                            }
+                        }
                         LOG.error("Elasticsearch returned errors for bulk audit event request. Full response: {}", responseString);
                         List<String> errors = new ArrayList<>();
                         List<Map<String, Object>> resultItems = (List<Map<String, Object>>) responseMap.get("items");
@@ -380,10 +399,11 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                 String responseBody = EntityUtils.toString(response.getEntity());
 
                 if (!aliasRedetected && statusCode >= 400 && statusCode < 500) {
-                    Optional<Request> rebuilt = redetectAliasAndRebuild(cfg, eventPayloads, "HTTP " + statusCode);
+                    Optional<WriteAliasRedetectResult> rebuilt = redetectAliasAndRebuild(cfg, eventPayloads, "HTTP " + statusCode);
                     if (rebuilt.isPresent()) {
-                        request = rebuilt.get();
-                        cfg = this.writeConfig;
+                        WriteAliasRedetectResult r = rebuilt.get();
+                        request = r.request();
+                        cfg = r.config();
                         aliasRedetected = true;
                         continue;
                     }
@@ -401,11 +421,12 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                 // RestClient may throw for error statuses (depending on API/version); treat like HTTP branch above.
                 if (!aliasRedetected) {
                     int status = e.getResponse().getStatusLine().getStatusCode();
-                    Optional<Request> rebuilt = redetectAliasAndRebuild(cfg, eventPayloads,
+                    Optional<WriteAliasRedetectResult> rebuilt = redetectAliasAndRebuild(cfg, eventPayloads,
                             "ResponseException HTTP " + status);
                     if (rebuilt.isPresent()) {
-                        request = rebuilt.get();
-                        cfg = this.writeConfig;
+                        WriteAliasRedetectResult r = rebuilt.get();
+                        request = r.request();
+                        cfg = r.config();
                         aliasRedetected = true;
                         continue;
                     }
@@ -422,12 +443,13 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
             } catch (IOException e) {
                 // Transport-level failures (connection reset, timeout, etc.); alias HEAD may still succeed after ILM change.
                 if (!aliasRedetected) {
-                    Optional<Request> rebuilt = redetectAliasAndRebuild(cfg, eventPayloads,
+                    Optional<WriteAliasRedetectResult> rebuilt = redetectAliasAndRebuild(cfg, eventPayloads,
                             "IOException: " + e.getMessage());
                     aliasRedetected = true;
                     if (rebuilt.isPresent()) {
-                        request = rebuilt.get();
-                        cfg = this.writeConfig;
+                        WriteAliasRedetectResult r = rebuilt.get();
+                        request = r.request();
+                        cfg = r.config();
                         continue;
                     }
                 }
@@ -451,19 +473,23 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
     /**
      * Re-probes ES for the write alias after a write failure. If the config changed (e.g. ILM
-     * migration created the write alias while Atlas was running), returns a rebuilt request
-     * targeting the new write index. Empty if the write target is unchanged.
+     * migration created the write alias while Atlas was running), returns the new {@link WriteConfig}
+     * snapshot and a {@link Request} built from that same snapshot (avoids re-reading
+     * {@link #writeConfig} and diverging from the bulk body). Empty if the write target is unchanged.
      */
-    private Optional<Request> redetectAliasAndRebuild(WriteConfig prevCfg, List<String> eventPayloads, String trigger) {
+    private Optional<WriteAliasRedetectResult> redetectAliasAndRebuild(WriteConfig prevCfg, List<String> eventPayloads, String trigger) {
+        // detectAndConfigureWriteAlias() logs INFO when the write alias appears or is missing (404).
+        // This method adds an explicit line when the *effective* write target did not change after re-probe.
         detectAndConfigureWriteAlias();
         WriteConfig newCfg = this.writeConfig;
         if (!newCfg.writeIndex().equals(prevCfg.writeIndex())) {
             LOG.info("Write alias config changed after re-detection (trigger='{}', old='{}', new='{}'), rebuilding audit bulk request",
                     trigger, prevCfg.writeIndex(), newCfg.writeIndex());
-            return Optional.of(buildBulkAuditRequest(newCfg, eventPayloads));
+            Request rebuilt = buildBulkAuditRequest(newCfg, eventPayloads);
+            return Optional.of(new WriteAliasRedetectResult(newCfg, rebuilt));
         }
-        LOG.debug("Write alias re-detection triggered by '{}' but config unchanged (writeIndex='{}')",
-                trigger, prevCfg.writeIndex());
+        LOG.info("Entity audit write-alias re-probe finished (trigger='{}'): writeIndex still '{}', aliasMode={} — no request rebuild",
+                trigger, prevCfg.writeIndex(), newCfg.aliasMode());
         return Optional.empty();
     }
 
