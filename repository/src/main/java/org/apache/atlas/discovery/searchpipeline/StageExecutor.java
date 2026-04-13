@@ -90,8 +90,8 @@ public class StageExecutor {
                     if (!isRetryable(e) || attempt == maxRetries) {
                         LOG.error("Stage {} failed (attempt {}/{}, non-retryable or retries exhausted): {}",
                                 stage.name(), attempt + 1, maxRetries + 1, e.getMessage());
-                        throw new AtlasBaseException(INTERNAL_ERROR,
-                                "IndexSearch stage " + stage.name() + " failed: " + e.getMessage(), e);
+                        throw new AtlasBaseException(INTERNAL_ERROR, e,
+                                "IndexSearch stage " + stage.name() + " failed: " + e.getMessage());
                     }
 
                     LOG.warn("Stage {} failed with retryable error (attempt {}/{}): {}",
@@ -103,8 +103,8 @@ public class StageExecutor {
                         Thread.sleep(delay);
                     } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
-                        throw new AtlasBaseException(INTERNAL_ERROR,
-                                "IndexSearch stage " + stage.name() + " interrupted during retry backoff", ie);
+                        throw new AtlasBaseException(INTERNAL_ERROR, ie,
+                                "IndexSearch stage " + stage.name() + " interrupted during retry backoff");
                     }
                 }
             }

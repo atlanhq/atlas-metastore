@@ -101,11 +101,23 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                                   SearchTracker searchTracker,
                                   UserProfileService userProfileService,
                                   StatsClient statsClient,
-                                  EntityGraphRetriever entityRetriever,
-                                  IndexSearchResultRenderer indexSearchResultRenderer) throws AtlasException {
+                                  EntityGraphRetriever entityRetriever) throws AtlasException {
         this(typeRegistry, graph, indexer, searchTracker, userProfileService, statsClient);
-        this.entityRetriever              = entityRetriever;
-        this.indexSearchResultRenderer    = indexSearchResultRenderer;
+        this.entityRetriever          = entityRetriever;
+    }
+
+    /**
+     * Setter-based injection for IndexSearchResultRenderer (optional dependency).
+     * Kept separate from the 7-arg constructor to preserve its signature for
+     * manual instantiations (e.g., from entity preprocessors that pass null for
+     * indexer/searchTracker/userProfileService/statsClient).
+     *
+     * <p>When null (manual instantiation), the feature-flag gate in
+     * {@code directIndexSearch} falls back to the old {@code prepareSearchResult} path.</p>
+     */
+    @Inject
+    public void setIndexSearchResultRenderer(IndexSearchResultRenderer indexSearchResultRenderer) {
+        this.indexSearchResultRenderer = indexSearchResultRenderer;
     }
 
     public EntityDiscoveryService(AtlasTypeRegistry typeRegistry,
@@ -370,9 +382,12 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             }
             RequestContext.get().endMetricRecord(elasticSearchQueryMetric);
 
-            if (AtlasConfiguration.ATLAS_INDEXSEARCH_USE_OPTIMISED_PIPELINE.getBoolean()) {
+            if (AtlasConfiguration.ATLAS_INDEXSEARCH_USE_OPTIMISED_PIPELINE.getBoolean()
+                    && indexSearchResultRenderer != null) {
                 // scrubSearchResults is called inside renderInternal (including for collapse results),
-                // matching existing prepareSearchResult behaviour
+                // matching existing prepareSearchResult behaviour.
+                // Null check guards manual instantiations (e.g., entity preprocessors that pass null
+                // for non-DI dependencies) — fall back to old path in that case.
                 indexSearchResultRenderer.render(ret, indexQueryResult, resultAttributes, searchParams);
             } else {
                 prepareSearchResult(ret, indexQueryResult, resultAttributes, true, useVertexEdgeBulkFetching);
