@@ -34,7 +34,10 @@ global:
   graphIdStrategy: "legacy"
   # CassandraGraph entity claim dedup via LWT (requires cassandra backend)
   graphClaimEnabled: false
-    
+  # ES reconciliation job interval (hours) and initial delay (minutes)
+  reconciliationIntervalHours: 6
+  reconciliationInitialDelayMinutes: 10
+
 Namespace: atlas
 sentry_flag: disable
 albTenant: false

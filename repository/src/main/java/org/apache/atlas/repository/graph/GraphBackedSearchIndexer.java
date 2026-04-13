@@ -59,6 +59,12 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.*;
 
+import org.apache.atlas.AtlasConfiguration;
+import org.apache.atlas.model.notification.AtlasDistributedTaskNotification;
+import org.apache.atlas.notification.NotificationException;
+import org.apache.atlas.notification.NotificationInterface;
+import org.springframework.beans.factory.annotation.Autowired;
+
 import static org.apache.atlas.ApplicationProperties.INDEX_BACKEND_CONF;
 import static org.apache.atlas.model.typedef.AtlasBaseTypeDef.*;
 import static org.apache.atlas.repository.Constants.*;
@@ -109,6 +115,36 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
     private boolean     recomputeIndexedKeys = true;
     private Set<String> vertexIndexKeys      = new HashSet<>();
     private IndexHealthMetricService indexHealthMetricService;
+
+    @Autowired(required = false)
+    private NotificationInterface notificationInterface;
+
+    // Collects repair records during a single onChange()/onLoadCompletion() cycle.
+    // Thread-safety: safe because typedef change processing is serialized by JanusGraph
+    // management transactions — only one thread calls onChange()/onLoadCompletion() at a time.
+    private final List<Map<String, Object>> pendingRepairs = new ArrayList<>();
+
+    // Producer-side dedup: tracks vertexPropertyNames already repaired on this pod.
+    // Prevents duplicate Kafka messages across Cedar pushes within the same JVM lifecycle.
+    // Cross-pod duplicates are harmless since reindexing is idempotent.
+    // This is a singleton (@Component) field — bounded to MAX_DEDUP_ENTRIES to prevent
+    // unbounded growth on long-running pods. In practice, self-healing repairs are rare
+    // (only on Cedar push partial failures), so this limit is unlikely to be hit.
+    private static final int MAX_DEDUP_ENTRIES = 1000;
+    private final Set<String> repairedPropertyNames = Collections.newSetFromMap(new LinkedHashMap<String, Boolean>() {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, Boolean> eldest) {
+            return size() > MAX_DEDUP_ENTRIES;
+        }
+    });
+
+    // Self-healing guard: only auto-repair missing property keys on established schemas.
+    // On a fresh environment, null property keys are normal — they haven't been created yet.
+    // The self-healing createVertexIndex() adds schema mutations to the management commit
+    // which can overwhelm ES on small environments.
+    // Production tenants with Cedar models loaded have 2000+ field keys.
+    // Fresh/test environments have 30-50 during initial setup.
+    private static final int MIN_FIELD_KEYS_FOR_SELF_HEALING = 100;
 
     public static boolean isValidSearchWeight(int searchWeight) {
         if (searchWeight != -1 ) {
@@ -179,6 +215,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
             LOG.debug("Processing changed typedefs {}", changedTypeDefs);
         }
 
+        pendingRepairs.clear();
         AtlasGraphManagement management = null;
 
         try {
@@ -213,10 +250,13 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
 
             //Commit indexes
             commit(management);
+
+            sendReindexMessageIfNeeded();
         } catch (RepositoryException | IndexException e) {
             LOG.error("Failed to update indexes for changed typedefs", e);
             attemptRollback(changedTypeDefs, management);
         } finally {
+            pendingRepairs.clear();
             // Always audit — even if commit failed or rollback re-threw
             runIndexHealthAudit();
         }
@@ -230,6 +270,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
             LOG.debug("Type definition load completed. Informing the completion to IndexChangeListeners.");
         }
 
+        pendingRepairs.clear();
         Collection<AtlasBaseTypeDef> typeDefs = new ArrayList<>();
 
         typeDefs.addAll(typeRegistry.getAllEntityDefs());
@@ -255,20 +296,25 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
             //Commit indexes
             commit(management);
 
+            sendReindexMessageIfNeeded();
+
             notifyInitializationCompletion(changedTypeDefs);
         } catch (RepositoryException | IndexException e) {
             LOG.error("Failed to update indexes for changed typedefs", e);
             attemptRollback(changedTypeDefs, management);
         } finally {
-            // Always audit — even if commit failed or rollback re-threw.
-            // Reports the actual schema state so the dashboard never shows a false positive.
+            pendingRepairs.clear();
             runIndexHealthAudit();
         }
     }
 
+
     /**
      * Runs a read-only audit of the JanusGraph mixed index schema and publishes
      * Prometheus metrics reporting expected, indexed, and missing property keys.
+     *
+     * Runs asynchronously as a daemon thread so it does not affect startup time
+     * or typedef change processing time.
      *
      * Opens a separate management transaction (rolled back in finally — no mutations).
      * Uses a singleton IndexHealthMetricService so that Micrometer gauge references
@@ -304,6 +350,41 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
         }, "index-health-audit");
         auditThread.setDaemon(true);
         auditThread.start();
+    }
+
+    // Always send the Kafka message when repairs happen — the consumer-side flag
+    // (atlas.index.repair.consumer.enabled) controls whether messages are processed,
+    // not whether they are produced. This ensures messages queue up in Kafka even if
+    // the consumer is temporarily disabled, and get processed when re-enabled.
+    private void sendReindexMessageIfNeeded() {
+        if (pendingRepairs.isEmpty()) {
+            return;
+        }
+
+        if (notificationInterface == null) {
+            LOG.warn("INDEX REPAIR: NotificationInterface not available (early startup?). "
+                    + "Cannot send reindex message for {} repaired attributes.", pendingRepairs.size());
+            return;
+        }
+
+        try {
+            Map<String, Object> params = new HashMap<>();
+            params.put("repairs", new ArrayList<>(pendingRepairs));
+            params.put("podId", System.getenv().getOrDefault("HOSTNAME", "unknown-pod"));
+            params.put("timestamp", System.currentTimeMillis());
+
+            AtlasDistributedTaskNotification notification = new AtlasDistributedTaskNotification(
+                    AtlasDistributedTaskNotification.AtlasTaskType.REINDEX_REPAIRED_ATTRIBUTES, params);
+
+            notificationInterface.send(
+                    NotificationInterface.NotificationType.ATLAS_DISTRIBUTED_TASKS, notification);
+
+            LOG.info("INDEX REPAIR: Sent reindex message for {} repaired attributes to Kafka",
+                    pendingRepairs.size());
+        } catch (NotificationException e) {
+            LOG.error("INDEX REPAIR: Failed to send reindex message to Kafka for {} repaired attributes. "
+                    + "Repairs: {}", pendingRepairs.size(), pendingRepairs, e);
+        }
     }
 
     public Set<String> getVertexIndexKeys() {
@@ -584,6 +665,108 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                             LOG.debug("Property {} is mapped to index field name {}", attribute.getQualifiedName(), attribute.getIndexFieldName());
                         }
                     } else {
+                        // SELF-HEALING: property key is missing from the mixed index.
+                        // This happens when typedef seeding (Cedar push) partially fails —
+                        // the typedef is persisted but the property key was never registered.
+                        // createVertexIndex() is idempotent: it checks getPropertyKey() first,
+                        // creates only if missing, and checks getFieldKeys().contains() before
+                        // adding to the mixed index.
+                        //
+                        // Guard: only self-heal on established schemas where null property key
+                        // indicates a Cedar push failure, not fresh typedef loading.
+                        AtlasGraphIndex vertexIdx = managementSystem.getGraphIndex(Constants.VERTEX_INDEX);
+                        int fieldKeyCount = (vertexIdx != null) ? vertexIdx.getFieldKeys().size() : 0;
+
+                        if (fieldKeyCount < MIN_FIELD_KEYS_FOR_SELF_HEALING) {
+                            LOG.warn("resolveIndexFieldName(attribute={}): propertyKey is null for vertexPropertyName={}. "
+                                    + "Skipping self-healing (schema has {} field keys, threshold: {})",
+                                    attribute.getQualifiedName(), attribute.getVertexPropertyName(),
+                                    fieldKeyCount, MIN_FIELD_KEYS_FOR_SELF_HEALING);
+                        } else {
+                        LOG.warn("resolveIndexFieldName(attribute={}): propertyKey is null — "
+                                + "attempting auto-repair for vertexPropertyName={}",
+                                attribute.getQualifiedName(), attribute.getVertexPropertyName());
+                        try {
+                            Class primitiveClass = getPrimitiveClass(attribute.getTypeName());
+                            AtlasCardinality cardinality = toAtlasCardinality(attribute.getAttributeDef().getCardinality());
+                            // Match createIndexForAttribute logic: isStringField only true
+                            // when the primitive class IS String AND indexType is STRING
+                            boolean repairIsStringField = (primitiveClass == String.class) && isStringField;
+
+                            String indexFieldName = createVertexIndex(
+                                    managementSystem,
+                                    attribute.getVertexPropertyName(),
+                                    UniqueKind.NONE,
+                                    primitiveClass,
+                                    cardinality,
+                                    attribute.getAttributeDef().getIsIndexable(),
+                                    false,
+                                    repairIsStringField,
+                                    attribute.getAttributeDef().getIndexTypeESConfig(),
+                                    attribute.getAttributeDef().getIndexTypeESFields()
+                            );
+
+                            if (indexFieldName != null) {
+                                attribute.setIndexFieldName(indexFieldName);
+
+                                if (baseInstance != null) {
+                                    baseInstance.setIndexFieldName(indexFieldName);
+                                }
+
+                                typeRegistry.addIndexFieldName(attribute.getVertexPropertyName(), indexFieldName);
+
+                                // Resolve all entity types that inherit this attribute
+                                String definedInTypeName = attribute.getDefinedInType() != null
+                                        ? attribute.getDefinedInType().getTypeName() : "unknown";
+                                // Use vertex property name for matching to avoid false positives
+                                // from unqualified short names (e.g., "score" matching across unrelated types)
+                                String repairedVertexPropertyName = attribute.getVertexPropertyName();
+                                Set<String> affectedEntityTypes = new HashSet<>();
+                                for (AtlasEntityType entityType : typeRegistry.getAllEntityTypes()) {
+                                    for (AtlasAttribute entityAttr : entityType.getAllAttributes().values()) {
+                                        if (repairedVertexPropertyName.equals(entityAttr.getVertexPropertyName())) {
+                                            affectedEntityTypes.add(entityType.getTypeName());
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                long repairTimestamp = System.currentTimeMillis();
+                                LOG.warn("INDEX AUTO-REPAIR: Repaired missing property key for attribute={}, "
+                                        + "vertexPropertyName={}, indexFieldName={}, definedInType={}, "
+                                        + "affectedEntityTypes={}, repairTimestamp={}. "
+                                        + "Future writes will include this field in ES. "
+                                        + "Queuing reindex for existing entities (Phase 2b).",
+                                        attribute.getQualifiedName(),
+                                        attribute.getVertexPropertyName(),
+                                        indexFieldName,
+                                        definedInTypeName,
+                                        affectedEntityTypes,
+                                        repairTimestamp);
+
+                                // Producer-side dedup: only queue reindex if this property wasn't
+                                // already repaired on a previous cycle (restart or Cedar push)
+                                if (repairedPropertyNames.add(attribute.getVertexPropertyName())) {
+                                    Map<String, Object> repairRecord = new HashMap<>();
+                                    repairRecord.put("vertexPropertyName", attribute.getVertexPropertyName());
+                                    repairRecord.put("affectedEntityTypes", new ArrayList<>(affectedEntityTypes));
+                                    repairRecord.put("repairTimestamp", repairTimestamp);
+                                    repairRecord.put("attributeName", attribute.getQualifiedName());
+                                    pendingRepairs.add(repairRecord);
+                                } else {
+                                    LOG.info("INDEX AUTO-REPAIR: Skipping reindex for {} — already queued in a previous cycle",
+                                            attribute.getVertexPropertyName());
+                                }
+                            } else {
+                                LOG.error("CRITICAL: Failed to auto-repair index for attribute={}. "
+                                        + "ES sync WILL BE BROKEN for this field.",
+                                        attribute.getQualifiedName());
+                            }
+                        } catch (Exception repairEx) {
+                            LOG.error("CRITICAL: Auto-repair threw exception for attribute={}",
+                                    attribute.getQualifiedName(), repairEx);
+                        }
+                        } // end self-healing guard
                         if (loggedNullPropertyKeyWarnings.add(attribute.getVertexPropertyName())) {
                             LOG.warn("resolveIndexFieldName(attribute={}): propertyKey is null for vertextPropertyName={}", attribute.getQualifiedName(), attribute.getVertexPropertyName());
                         }
