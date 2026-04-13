@@ -21,7 +21,7 @@ import org.apache.atlas.discovery.searchpipeline.EnrichmentStage;
 import org.apache.atlas.discovery.searchpipeline.SearchEnrichmentContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.glossary.relations.AtlasTermAssignmentHeader;
-import org.apache.atlas.model.glossary.relations.AtlasTermAssignmentStatus;
+import org.apache.atlas.model.glossary.enums.AtlasTermAssignmentStatus;
 import org.apache.atlas.repository.EdgeVertexReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
