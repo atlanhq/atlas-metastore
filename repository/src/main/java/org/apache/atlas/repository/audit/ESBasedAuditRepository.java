@@ -972,16 +972,15 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
             int    retentionDays = AtlasConfiguration.ENTITY_AUDIT_RETENTION_DAYS.getInt();
             String rolloverSize  = AtlasConfiguration.ENTITY_AUDIT_ILM_ROLLOVER_SIZE.getString();
-            String rolloverAge   = AtlasConfiguration.ENTITY_AUDIT_ILM_ROLLOVER_AGE.getString();
 
-            String policyBody = buildIlmPolicyJson(retentionDays, rolloverSize, rolloverAge);
+            String policyBody = buildIlmPolicyJson(retentionDays, rolloverSize);
 
             Request putPolicy = new Request("PUT", "/_ilm/policy/" + ILM_POLICY_NAME);
             putPolicy.setEntity(new NStringEntity(policyBody, ContentType.APPLICATION_JSON));
             Response response = lowLevelClient.performRequest(putPolicy);
             if (isSuccess(response)) {
-                LOG.info("ILM policy '{}' created (retention={}d, rollover={}/@{})",
-                         ILM_POLICY_NAME, retentionDays, rolloverSize, rolloverAge);
+                LOG.info("ILM policy '{}' created (retention={}d, rollover max_size={})",
+                         ILM_POLICY_NAME, retentionDays, rolloverSize);
             }
         } catch (Exception e) {
             LOG.warn("Failed to ensure ILM policy '{}', will retry on next startup: {}",
@@ -992,9 +991,10 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
     /**
      * Builds the ILM policy JSON with hot (rollover) and warm (forcemerge) phases.
      * No shrink action in warm — avoids shard relocation failures on heap-constrained 3-node clusters.
+     * Rollover is size-only ({@code max_size}) — no {@code max_age}, to avoid time-based small-index proliferation.
      * Delete phase included only when {@code retentionDays > 0}.
      */
-    private String buildIlmPolicyJson(int retentionDays, String rolloverSize, String rolloverAge) {
+    private String buildIlmPolicyJson(int retentionDays, String rolloverSize) {
         ObjectMapper mapper = new ObjectMapper();
         ObjectNode root   = mapper.createObjectNode();
         ObjectNode policy = root.putObject("policy");
@@ -1004,8 +1004,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
         hot.put("min_age", "0ms");
         ObjectNode hotActions = hot.putObject("actions");
         ObjectNode rollover   = hotActions.putObject("rollover");
-        rollover.put("max_primary_shard_size", rolloverSize);
-        rollover.put("max_age", rolloverAge);
+        rollover.put("max_size", rolloverSize);
         hotActions.putObject("set_priority").put("priority", 100);
 
         ObjectNode warm        = phases.putObject("warm");
