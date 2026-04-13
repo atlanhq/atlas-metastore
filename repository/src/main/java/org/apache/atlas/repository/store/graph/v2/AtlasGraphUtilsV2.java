@@ -729,95 +729,14 @@ public class AtlasGraphUtilsV2 {
         return ret;
     }
 
+    /** @deprecated Use {@link AtlasTypeDefESUtils#typeHasInstanceVertex(String)} */
     public static boolean typeHasInstanceVertex(String typeName) throws AtlasBaseException {
-        try {
-            String indexName = Constants.VERTEX_INDEX_NAME;
-            AtlasIndexQuery indexQuery = getGraphInstance().elasticsearchQuery(indexName);
-
-            String esQuery = String.format(
-                "{\"query\":{\"bool\":{\"filter\":[{\"term\":{\"%s\":\"%s\"}}]}}}",
-                Constants.TYPE_NAME_PROPERTY_KEY, typeName
-            );
-            Long count = indexQuery.countIndexQuery(esQuery);
-
-            boolean hasInstance = count != null && count > 0;
-
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("typeName {} has instance vertex {} (ES count: {})", typeName, hasInstance, count);
-            }
-
-            return hasInstance;
-        } catch (Exception e) {
-            LOG.error("Error checking type instances for {}: {}", typeName, e.getMessage(), e);
-            // If ES fails, assume the type is still linked to entities to prevent accidental deletion
-            return true;
-        }
+        return AtlasTypeDefESUtils.typeHasInstanceVertex(typeName);
     }
 
-    /**
-     * Check if a classification type has references using Elasticsearch.
-     * This method searches for entities that have the classification attached
-     * either directly or through propagation.
-     * 
-     * @param typeName the classification type name to check
-     * @return true if any active entities have this classification, false otherwise
-     *
-     */
+    /** @deprecated Use {@link AtlasTypeDefESUtils#classificationHasReferences(String)} */
     public static boolean classificationHasReferences(String typeName) {
-        try {
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Checking if classification {} has references using ES", typeName);
-            }
-
-            String indexName = Constants.VERTEX_INDEX_NAME;
-            AtlasIndexQuery indexQuery = getGraphInstance().elasticsearchQuery(indexName);
-
-            String esQuery = buildClassificationReferenceQuery(typeName);
-            Long count = indexQuery.countIndexQuery(esQuery);
-
-            boolean hasReferences = count != null && count > 0;
-
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Classification {} has references: {} (count: {})", typeName, hasReferences, count);
-            }
-
-            return hasReferences;
-        } catch (Exception e) {
-            LOG.error("Error checking classification references for {}: {}", typeName, e.getMessage(), e);
-            // Conservative approach: if ES query fails, assume there are references to prevent accidental deletion
-            return true;
-        }
-    }
-
-    /**
-     * Build Elasticsearch query to check for classification references.
-     * Searches for entities that have the classification in either __traitNames or __propagatedTraitNames.
-     * 
-     * @param typeName the classification type name
-     * @return JSON query string
-     */
-    private static String buildClassificationReferenceQuery(String typeName) {
-        return String.format(
-            "{\n" +
-            "  \"query\": {\n" +
-            "    \"bool\": {\n" +
-            "      \"filter\": [\n" +
-            "        {\n" +
-            "          \"bool\": {\n" +
-            "            \"should\": [\n" +
-            "              {\"term\": {\"%s\": \"%s\"}},\n" +
-            "              {\"term\": {\"%s\": \"%s\"}}\n" +
-            "            ],\n" +
-            "            \"minimum_should_match\": 1\n" +
-            "          }\n" +
-            "        }\n" +
-            "      ]\n" +
-            "    }\n" +
-            "  }\n" +
-            "}",
-            Constants.TRAIT_NAMES_PROPERTY_KEY, typeName,
-            Constants.PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, typeName
-        );
+        return AtlasTypeDefESUtils.classificationHasReferences(typeName);
     }
 
     public static AtlasVertex findByTypeAndUniquePropertyName(String typeName, String propertyName, Object attrVal) {

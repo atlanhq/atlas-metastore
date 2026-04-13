@@ -37,7 +37,7 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.*;
 
 /**
- * Unit tests for AtlasGraphUtilsV2.typeHasInstanceVertex() — ES-based implementation.
+ * Unit tests for AtlasTypeDefESUtils.typeHasInstanceVertex() — ES-based implementation.
  */
 class AtlasGraphUtilsV2TypeHasInstanceVertexTest {
 
@@ -81,7 +81,7 @@ class AtlasGraphUtilsV2TypeHasInstanceVertexTest {
     void testReturnsTrueWhenInstancesExist() throws AtlasBaseException {
         when(mockIndexQuery.countIndexQuery(anyString())).thenReturn(5L);
 
-        boolean result = AtlasGraphUtilsV2.typeHasInstanceVertex("Table");
+        boolean result = AtlasTypeDefESUtils.typeHasInstanceVertex("Table");
 
         assertTrue(result);
         verify(mockIndexQuery).countIndexQuery(contains("__typeName"));
@@ -92,7 +92,7 @@ class AtlasGraphUtilsV2TypeHasInstanceVertexTest {
     void testReturnsFalseWhenNoInstances() throws AtlasBaseException {
         when(mockIndexQuery.countIndexQuery(anyString())).thenReturn(0L);
 
-        boolean result = AtlasGraphUtilsV2.typeHasInstanceVertex("Table");
+        boolean result = AtlasTypeDefESUtils.typeHasInstanceVertex("Table");
 
         assertFalse(result);
     }
@@ -101,7 +101,7 @@ class AtlasGraphUtilsV2TypeHasInstanceVertexTest {
     void testReturnsFalseWhenCountIsNull() throws AtlasBaseException {
         when(mockIndexQuery.countIndexQuery(anyString())).thenReturn(null);
 
-        boolean result = AtlasGraphUtilsV2.typeHasInstanceVertex("Table");
+        boolean result = AtlasTypeDefESUtils.typeHasInstanceVertex("Table");
 
         assertFalse(result);
     }
@@ -112,7 +112,7 @@ class AtlasGraphUtilsV2TypeHasInstanceVertexTest {
         when(mockIndexQuery.countIndexQuery(anyString()))
                 .thenThrow(new RuntimeException("ES connection refused"));
 
-        boolean result = AtlasGraphUtilsV2.typeHasInstanceVertex("Table");
+        boolean result = AtlasTypeDefESUtils.typeHasInstanceVertex("Table");
 
         assertTrue(result, "Should return true (conservative) when ES query fails");
     }
@@ -123,7 +123,7 @@ class AtlasGraphUtilsV2TypeHasInstanceVertexTest {
         when(mockGraph.elasticsearchQuery(anyString()))
                 .thenThrow(new AtlasBaseException("Graph unavailable"));
 
-        boolean result = AtlasGraphUtilsV2.typeHasInstanceVertex("Table");
+        boolean result = AtlasTypeDefESUtils.typeHasInstanceVertex("Table");
 
         assertTrue(result, "Should return true (conservative) when graph is unavailable");
     }
@@ -132,7 +132,7 @@ class AtlasGraphUtilsV2TypeHasInstanceVertexTest {
     void testQueryUsesCorrectIndexAndTypeName() throws AtlasBaseException {
         when(mockIndexQuery.countIndexQuery(anyString())).thenReturn(1L);
 
-        AtlasGraphUtilsV2.typeHasInstanceVertex("DataSet");
+        AtlasTypeDefESUtils.typeHasInstanceVertex("DataSet");
 
         verify(mockGraph).elasticsearchQuery(Constants.VERTEX_INDEX_NAME);
         verify(mockIndexQuery).countIndexQuery(contains("DataSet"));
@@ -143,7 +143,7 @@ class AtlasGraphUtilsV2TypeHasInstanceVertexTest {
     void testReturnsTrueForCountOfOne() throws AtlasBaseException {
         when(mockIndexQuery.countIndexQuery(anyString())).thenReturn(1L);
 
-        boolean result = AtlasGraphUtilsV2.typeHasInstanceVertex("Column");
+        boolean result = AtlasTypeDefESUtils.typeHasInstanceVertex("Column");
 
         assertTrue(result);
     }
@@ -153,7 +153,7 @@ class AtlasGraphUtilsV2TypeHasInstanceVertexTest {
         // Defensive: negative count should be treated as no instances
         when(mockIndexQuery.countIndexQuery(anyString())).thenReturn(-1L);
 
-        boolean result = AtlasGraphUtilsV2.typeHasInstanceVertex("Table");
+        boolean result = AtlasTypeDefESUtils.typeHasInstanceVertex("Table");
 
         assertFalse(result);
     }
