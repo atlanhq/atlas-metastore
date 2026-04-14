@@ -253,6 +253,46 @@ class EntityMetadataSuite:
             f"Expected empty userDescription after clear, got: {repr(ud)[:80]}"
         )
 
+    @test("clear_user_description_cascades_to_description",
+          tags=["metadata", "readme", "v2"], order=13,
+          depends_on=["clear_user_description"])
+    def test_clear_user_description_cascades_to_description(self, client, ctx):
+        """WARE-1004: Clearing userDescription should also clear description
+        to prevent the frontend fallback chain from showing stale values."""
+        # Step 1: Set description (simulates crawler writing source description)
+        resp = _update_entity_attrs(client, self.guid, self.qn, self.name, {
+            "description": "Source description from Snowflake",
+        })
+        assert_status(resp, 200)
+
+        # Step 2: Set userDescription (simulates user overriding in UI)
+        resp = _update_entity_attrs(client, self.guid, self.qn, self.name, {
+            "userDescription": "User override description",
+        })
+        assert_status(resp, 200)
+
+        # Step 3: Clear userDescription — should cascade to description
+        resp = _update_entity_attrs(client, self.guid, self.qn, self.name, {
+            "userDescription": "",
+        })
+        assert_status(resp, 200)
+
+        # Step 4: Verify both fields are cleared
+        resp2 = client.get(f"/entity/guid/{self.guid}")
+        assert_status(resp2, 200)
+        attrs = resp2.json().get("entity", {}).get("attributes", {})
+
+        ud = attrs.get("userDescription", "")
+        assert ud in ("", None), (
+            f"Expected empty userDescription, got: {repr(ud)[:80]}"
+        )
+
+        desc = attrs.get("description")
+        assert desc in ("", None), (
+            f"Expected description to be cleared by cascade, got: {repr(desc)[:80]}. "
+            "This is the WARE-1004 bug: stale description bleeds through after userDescription clear."
+        )
+
     # ================================================================
     #  Announcement (badge)
     # ================================================================

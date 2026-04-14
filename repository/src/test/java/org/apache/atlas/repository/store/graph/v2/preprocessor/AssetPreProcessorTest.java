@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static org.apache.atlas.repository.Constants.AI_GENERATED_DESCRIPTION_ATTR;
 import static org.apache.atlas.repository.Constants.ATTR_ADMIN_GROUPS;
 import static org.apache.atlas.repository.Constants.ATTR_ADMIN_USERS;
 import static org.apache.atlas.repository.Constants.ATTR_ANNOUNCEMENT_MESSAGE;
@@ -32,11 +33,14 @@ import static org.apache.atlas.repository.Constants.ATTR_OWNER_GROUPS;
 import static org.apache.atlas.repository.Constants.ATTR_OWNER_USERS;
 import static org.apache.atlas.repository.Constants.ATTR_VIEWER_GROUPS;
 import static org.apache.atlas.repository.Constants.ATTR_VIEWER_USERS;
+import static org.apache.atlas.repository.Constants.DESCRIPTION_ATTR;
 import static org.apache.atlas.repository.Constants.OWNER_ATTRIBUTE;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
+import static org.apache.atlas.repository.Constants.USER_DESCRIPTION_ATTR;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertNull;
 import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.fail;
@@ -670,5 +674,150 @@ public class AssetPreProcessorTest {
         // Both should succeed
         assertEquals(sharedDatasetGuid, asset1.getAttribute("catalogDatasetGuid"));
         assertEquals(sharedDatasetGuid, asset2.getAttribute("catalogDatasetGuid"));
+    }
+
+    // =====================================================================================
+    // Description Clear Cascade Tests (WARE-1004)
+    // =====================================================================================
+
+    @Test
+    public void testClearUserDescriptionNull_CascadesClearToDescriptionFields() throws AtlasBaseException {
+        AtlasEntity entity = new AtlasEntity("Table");
+        entity.setGuid("test-guid");
+        entity.setAttribute(QUALIFIED_NAME, "test-table");
+        entity.setAttribute(USER_DESCRIPTION_ATTR, null);
+        entity.setAttribute(DESCRIPTION_ATTR, "Source description from crawler");
+        entity.setAttribute(AI_GENERATED_DESCRIPTION_ATTR, "AI generated description");
+
+        org.apache.atlas.repository.graphdb.AtlasVertex vertex =
+            mock(org.apache.atlas.repository.graphdb.AtlasVertex.class);
+        when(context.getVertex("test-guid")).thenReturn(vertex);
+
+        preProcessor.processAttributes(entity, context, EntityMutations.EntityOperation.UPDATE);
+
+        // description and aiGeneratedDescription should remain as-is since they were explicitly
+        // included in the request (hasAttribute returns true)
+        assertEquals(entity.getAttribute(DESCRIPTION_ATTR), "Source description from crawler");
+        assertEquals(entity.getAttribute(AI_GENERATED_DESCRIPTION_ATTR), "AI generated description");
+    }
+
+    @Test
+    public void testClearUserDescriptionNull_CascadesWhenFallbackFieldsAbsent() throws AtlasBaseException {
+        AtlasEntity entity = new AtlasEntity("Table");
+        entity.setGuid("test-guid");
+        entity.setAttribute(QUALIFIED_NAME, "test-table");
+        entity.setAttribute(USER_DESCRIPTION_ATTR, null);
+        // description and assetAiGeneratedDescription NOT set in request
+
+        org.apache.atlas.repository.graphdb.AtlasVertex vertex =
+            mock(org.apache.atlas.repository.graphdb.AtlasVertex.class);
+        when(context.getVertex("test-guid")).thenReturn(vertex);
+
+        preProcessor.processAttributes(entity, context, EntityMutations.EntityOperation.UPDATE);
+
+        // Cascade should inject null for both fallback fields
+        assertTrue(entity.hasAttribute(DESCRIPTION_ATTR),
+                "description should be injected into entity attributes");
+        assertNull(entity.getAttribute(DESCRIPTION_ATTR),
+                "description should be null after cascade");
+        assertTrue(entity.hasAttribute(AI_GENERATED_DESCRIPTION_ATTR),
+                "assetAiGeneratedDescription should be injected into entity attributes");
+        assertNull(entity.getAttribute(AI_GENERATED_DESCRIPTION_ATTR),
+                "assetAiGeneratedDescription should be null after cascade");
+    }
+
+    @Test
+    public void testClearUserDescriptionEmpty_CascadesWhenFallbackFieldsAbsent() throws AtlasBaseException {
+        AtlasEntity entity = new AtlasEntity("Table");
+        entity.setGuid("test-guid");
+        entity.setAttribute(QUALIFIED_NAME, "test-table");
+        entity.setAttribute(USER_DESCRIPTION_ATTR, "");
+        // description NOT set in request
+
+        org.apache.atlas.repository.graphdb.AtlasVertex vertex =
+            mock(org.apache.atlas.repository.graphdb.AtlasVertex.class);
+        when(context.getVertex("test-guid")).thenReturn(vertex);
+
+        preProcessor.processAttributes(entity, context, EntityMutations.EntityOperation.UPDATE);
+
+        // Cascade should inject null for both fallback fields
+        assertTrue(entity.hasAttribute(DESCRIPTION_ATTR),
+                "description should be injected into entity attributes");
+        assertNull(entity.getAttribute(DESCRIPTION_ATTR),
+                "description should be null after cascade");
+    }
+
+    @Test
+    public void testSetUserDescription_DoesNotCascade() throws AtlasBaseException {
+        AtlasEntity entity = new AtlasEntity("Table");
+        entity.setGuid("test-guid");
+        entity.setAttribute(QUALIFIED_NAME, "test-table");
+        entity.setAttribute(USER_DESCRIPTION_ATTR, "New user description");
+
+        org.apache.atlas.repository.graphdb.AtlasVertex vertex =
+            mock(org.apache.atlas.repository.graphdb.AtlasVertex.class);
+        when(context.getVertex("test-guid")).thenReturn(vertex);
+
+        preProcessor.processAttributes(entity, context, EntityMutations.EntityOperation.UPDATE);
+
+        // Should NOT cascade when userDescription is being set to a non-empty value
+        assertFalse(entity.hasAttribute(DESCRIPTION_ATTR),
+                "description should not be injected when userDescription has a value");
+        assertFalse(entity.hasAttribute(AI_GENERATED_DESCRIPTION_ATTR),
+                "assetAiGeneratedDescription should not be injected when userDescription has a value");
+    }
+
+    @Test
+    public void testNoUserDescription_DoesNotCascade() throws AtlasBaseException {
+        AtlasEntity entity = new AtlasEntity("Table");
+        entity.setGuid("test-guid");
+        entity.setAttribute(QUALIFIED_NAME, "test-table");
+        // userDescription NOT in the request at all
+
+        org.apache.atlas.repository.graphdb.AtlasVertex vertex =
+            mock(org.apache.atlas.repository.graphdb.AtlasVertex.class);
+        when(context.getVertex("test-guid")).thenReturn(vertex);
+
+        preProcessor.processAttributes(entity, context, EntityMutations.EntityOperation.UPDATE);
+
+        // Should NOT cascade when userDescription is not in the request
+        assertFalse(entity.hasAttribute(DESCRIPTION_ATTR),
+                "description should not be injected when userDescription is absent from request");
+        assertFalse(entity.hasAttribute(AI_GENERATED_DESCRIPTION_ATTR),
+                "assetAiGeneratedDescription should not be injected when userDescription is absent");
+    }
+
+    @Test
+    public void testClearUserDescription_RespectsExplicitDescriptionInSameRequest() throws AtlasBaseException {
+        AtlasEntity entity = new AtlasEntity("Table");
+        entity.setGuid("test-guid");
+        entity.setAttribute(QUALIFIED_NAME, "test-table");
+        entity.setAttribute(USER_DESCRIPTION_ATTR, null);
+        entity.setAttribute(DESCRIPTION_ATTR, "Explicitly set new source description");
+
+        org.apache.atlas.repository.graphdb.AtlasVertex vertex =
+            mock(org.apache.atlas.repository.graphdb.AtlasVertex.class);
+        when(context.getVertex("test-guid")).thenReturn(vertex);
+
+        preProcessor.processAttributes(entity, context, EntityMutations.EntityOperation.UPDATE);
+
+        // The explicit description value in the same request should be preserved
+        assertEquals(entity.getAttribute(DESCRIPTION_ATTR), "Explicitly set new source description",
+                "Explicit description in same request should not be overridden by cascade");
+    }
+
+    @Test
+    public void testClearUserDescription_DoesNotCascadeOnCreate() throws AtlasBaseException {
+        AtlasEntity entity = new AtlasEntity("Table");
+        entity.setAttribute(QUALIFIED_NAME, "test-table");
+        entity.setAttribute(USER_DESCRIPTION_ATTR, null);
+        // description NOT set — simulates a crawler creating an entity
+
+        preProcessor.processAttributes(entity, context, EntityMutations.EntityOperation.CREATE);
+
+        // CREATE should NOT cascade — the initial state can legitimately have
+        // description set by a crawler with userDescription null
+        assertFalse(entity.hasAttribute(DESCRIPTION_ATTR),
+                "description should not be injected during CREATE");
     }
 }

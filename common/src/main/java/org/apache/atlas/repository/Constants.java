@@ -332,6 +332,9 @@ public final class Constants {
     public static final String PRODUCT_GUIDS                           = "productGUIDs";
     public static final String CATALOG_DATASET_GUID_ATTR               = "catalogDatasetGuid";
     public static final String DATASET_TYPE_ATTR                       = "dataMeshDatasetType";
+    public static final String DESCRIPTION_ATTR                        = "description";
+    public static final String USER_DESCRIPTION_ATTR                   = "userDescription";
+    public static final String AI_GENERATED_DESCRIPTION_ATTR           = "assetAiGeneratedDescription";
 
     public static final String ATTR_TENANT_ID = "tenantId";
     public static final String DEFAULT_TENANT_ID = "default";

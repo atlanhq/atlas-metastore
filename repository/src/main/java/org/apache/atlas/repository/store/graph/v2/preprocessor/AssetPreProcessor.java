@@ -119,11 +119,48 @@ public class AssetPreProcessor implements PreProcessor {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processUpdateAsset");
 
         userGroupAttributeValidator.validate(entity);
+        processDescriptionClearCascade(entity);
         processDomainLinkAttribute(entity, vertex, operation);
         processDatasetLinkAttribute(entity, vertex, operation);
 
         RequestContext.get().endMetricRecord(metricRecorder);
 
+    }
+
+    /**
+     * When userDescription is explicitly cleared (set to null or empty string),
+     * cascade the clear to the fallback description fields (description and
+     * assetAiGeneratedDescription) so that stale values do not bleed through the
+     * frontend fallback chain (userDescription → description → assetAiGeneratedDescription).
+     *
+     * Only injects the clear if the caller did not already include the fallback field
+     * in the same request, so an explicit simultaneous update is always respected.
+     *
+     * @see <a href="https://linear.app/atlan-epd/issue/WARE-1004">WARE-1004</a>
+     */
+    private void processDescriptionClearCascade(AtlasEntity entity) {
+        if (!entity.hasAttribute(USER_DESCRIPTION_ATTR)) {
+            return;
+        }
+
+        Object userDescription = entity.getAttribute(USER_DESCRIPTION_ATTR);
+        boolean isCleared = userDescription == null || (userDescription instanceof String && StringUtils.isEmpty((String) userDescription));
+
+        if (!isCleared) {
+            return;
+        }
+
+        if (!entity.hasAttribute(DESCRIPTION_ATTR)) {
+            entity.setAttribute(DESCRIPTION_ATTR, null);
+        }
+        if (!entity.hasAttribute(AI_GENERATED_DESCRIPTION_ATTR)) {
+            entity.setAttribute(AI_GENERATED_DESCRIPTION_ATTR, null);
+        }
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("processDescriptionClearCascade: userDescription cleared, cascading clear to description and assetAiGeneratedDescription for entity {}",
+                    entity.getGuid());
+        }
     }
 
     private void processDomainLinkAttribute(AtlasEntity entity, AtlasVertex vertex, EntityMutations.EntityOperation operation) throws AtlasBaseException {
