@@ -54,7 +54,7 @@ import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.script.Script;
 import org.elasticsearch.script.ScriptType;
-import org.janusgraph.util.encoding.LongEncoding;
+import org.apache.atlas.repository.store.graph.v2.LongEncodingUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -87,7 +87,7 @@ public class TaskRegistry {
     private static final Logger LOG = LoggerFactory.getLogger(TaskRegistry.class);
     public static final int TASK_FETCH_BATCH_SIZE = 100;
     public static final List<Map<String, Object>> SORT_ARRAY = Collections.singletonList(mapOf(Constants.TASK_CREATED_TIME, mapOf("order", "asc")));
-    public static final String JANUSGRAPH_VERTEX_INDEX = "janusgraph_vertex_index";
+    public static final String JANUSGRAPH_VERTEX_INDEX = Constants.VERTEX_INDEX_NAME;
     public static final String TASK_MISMATCH_TAG = "mismatchTask";
 
     private AtlasGraph graph;
@@ -204,6 +204,13 @@ public class TaskRegistry {
         setEncodedProperty(taskVertex, TASK_STATUS, task.getStatus().toString());
         setEncodedProperty(taskVertex, Constants.TASK_UPDATED_TIME, System.currentTimeMillis());
         setEncodedProperty(taskVertex, Constants.TASK_ERROR_MESSAGE, task.getErrorMessage());
+
+        if (task.getEsStatus() != null) {
+            setEncodedProperty(taskVertex, Constants.TASK_ES_STATUS, task.getEsStatus().toString());
+        }
+        if (task.getEsErrorMessage() != null) {
+            setEncodedProperty(taskVertex, Constants.TASK_ES_ERROR_MESSAGE, task.getEsErrorMessage());
+        }
     }
 
     @GraphTransaction
@@ -469,7 +476,7 @@ public class TaskRegistry {
                                         atlasTask.getGuid(), atlasTask.getStatus());
                                 mismatches++;
                                 try {
-                                    String docId = LongEncoding.encode(Long.parseLong(vertex.getIdForDisplay()));
+                                    String docId = LongEncodingUtil.vertexIdToDocId(vertex.getIdForDisplay());
                                     repairMismatchedTask(atlasTask, docId);
                                 }
                                 catch (Exception e){
@@ -711,6 +718,16 @@ public class TaskRegistry {
         String errorMessage = v.getProperty(Constants.TASK_ERROR_MESSAGE, String.class);
         if (errorMessage != null) {
             ret.setErrorMessage(errorMessage);
+        }
+
+        String esStatus = v.getProperty(Constants.TASK_ES_STATUS, String.class);
+        if (esStatus != null) {
+            ret.setEsStatus(AtlasTask.EsStatus.from(esStatus));
+        }
+
+        String esErrorMessage = v.getProperty(Constants.TASK_ES_ERROR_MESSAGE, String.class);
+        if (esErrorMessage != null) {
+            ret.setEsErrorMessage(esErrorMessage);
         }
 
         List<String> headerKeys = v.getPropertyKeys().stream().filter(key -> key.toLowerCase().startsWith(ATLAN_HEADER_PREFIX_PATTERN)).collect(Collectors.toUnmodifiableList());

@@ -279,12 +279,42 @@ public final class Constants {
     public static final String FULLTEXT_INDEX = "fulltext_index";
 
     /**
-     * elasticsearch index prefix.
+     * Elasticsearch index prefix.
+     *
+     * Derived automatically from atlas.graphdb.backend:
+     *   - "cassandra" → "atlas_graph_"
+     *   - "janus" (default) → "janusgraph_"
+     *
+     * Can be overridden explicitly via atlas.graph.index.search.es.prefix,
+     * but normally you should just set the backend and let this follow.
      */
-    public static final String INDEX_PREFIX = "janusgraph_";
+    public static final String ES_INDEX_PREFIX_PROPERTY = "atlas.graph.index.search.es.prefix";
+    public static final String INDEX_PREFIX;
+    public static final String VERTEX_INDEX_NAME;
+    public static final String EDGE_INDEX_NAME;
 
-    public static final String VERTEX_INDEX_NAME = INDEX_PREFIX + VERTEX_INDEX;
-    public static final String EDGE_INDEX_NAME = INDEX_PREFIX + EDGE_INDEX;
+    static {
+        String prefix;
+        try {
+            Configuration config = ApplicationProperties.get();
+
+            // Derive default prefix from the graphdb backend
+            String backend = config.getString(ApplicationProperties.GRAPHDB_BACKEND_CONF,
+                                              ApplicationProperties.DEFAULT_GRAPHDB_BACKEND);
+            String backendDefault = ApplicationProperties.GRAPHDB_BACKEND_CASSANDRA.equalsIgnoreCase(backend)
+                                    ? "atlas_graph_" : "janusgraph_";
+
+            // Allow explicit override, but default follows the backend
+            prefix = config.getString(ES_INDEX_PREFIX_PROPERTY, backendDefault);
+        } catch (Exception e) {
+            prefix = "janusgraph_";
+            LOG.warn("Failed to read ES index prefix from config, using default: {}", prefix);
+        }
+        INDEX_PREFIX = prefix;
+        VERTEX_INDEX_NAME = INDEX_PREFIX + VERTEX_INDEX;
+        EDGE_INDEX_NAME   = INDEX_PREFIX + EDGE_INDEX;
+        LOG.info("ES index prefix: '{}', vertex_index: '{}', edge_index: '{}'", INDEX_PREFIX, VERTEX_INDEX_NAME, EDGE_INDEX_NAME);
+    }
 
     public static final String NAME                                    = "name";
     public static final String QUALIFIED_NAME                          = "qualifiedName";
@@ -382,6 +412,8 @@ public final class Constants {
     public static final String TASK_ATTEMPT_COUNT     = encodePropertyKey(TASK_PREFIX + "attemptCount");
     public static final String TASK_PARAMETERS        = encodePropertyKey(TASK_PREFIX + "parameters");
     public static final String TASK_ERROR_MESSAGE     = encodePropertyKey(TASK_PREFIX + "errorMessage");
+    public static final String TASK_ES_STATUS          = encodePropertyKey(TASK_PREFIX + "esStatus");
+    public static final String TASK_ES_ERROR_MESSAGE   = encodePropertyKey(TASK_PREFIX + "esErrorMessage");
     public static final String TASK_WARNING_MESSAGE     = encodePropertyKey(TASK_PREFIX + "warning");
     public static final String TASK_START_TIME        = encodePropertyKey(TASK_PREFIX + "startTime");
     public static final String TASK_END_TIME          = encodePropertyKey(TASK_PREFIX + "endTime");

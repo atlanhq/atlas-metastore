@@ -34,6 +34,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -98,6 +99,7 @@ public final class AccessControlUtils {
     public static final String ACCESS_READ_PERSONA_PRODUCT = "persona-domain-product-read";
     public static final String ACCESS_READ_PERSONA_AI_APP = "persona-ai-application-read";
     public static final String ACCESS_READ_PERSONA_AI_MODEL = "persona-ai-model-read";
+    public static final String ACCESS_READ_PERSONA_AI_MODEL_VERSION = "persona-ai-modelversion-read";
 
 
     public static final String POLICY_CATEGORY_PERSONA  = "persona";
@@ -329,7 +331,8 @@ public final class AccessControlUtils {
     public static List<AtlasEntity> objectToEntityList(AtlasEntity.AtlasEntityWithExtInfo entityWithExtInfo, List<AtlasObjectId> policies) {
         List<AtlasEntity> ret = new ArrayList<>();
 
-        Set<String> referredGuids =  entityWithExtInfo.getReferredEntities().keySet();
+        Map<String, AtlasEntity> referredEntitiesMap = entityWithExtInfo.getReferredEntities();
+        Set<String> referredGuids = referredEntitiesMap != null ? referredEntitiesMap.keySet() : Collections.emptySet();
         if (policies != null) {
             ret = policies.stream()
                     .filter(x -> referredGuids.contains(x.getGuid()))
