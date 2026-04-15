@@ -265,6 +265,11 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
 
     @Override
     public AtlasAccessResult isAccessAllowed(AtlasRelationshipAccessRequest request) throws AtlasAuthorizationException {
+        return isAccessAllowed(request, true);
+    }
+
+    @Override
+    public AtlasAccessResult isAccessAllowed(AtlasRelationshipAccessRequest request, boolean isAuditEnabled) throws AtlasAuthorizationException {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> isAccessAllowed(" + request + ")");
         }
@@ -322,15 +327,27 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
             rangerResource.setValue(RESOURCE_END_TWO_ENTITY_CLASSIFICATION, classificationsWithSuperTypesEnd2);
             rangerResource.setValue(RESOURCE_END_TWO_ENTITY_ID, end2EntityId);
 
-            ret = checkAccess(rangerRequest);
+            if (isAuditEnabled) {
+                ret = checkAccess(rangerRequest);
+            } else {
+                ret = checkAccess(rangerRequest, null);
+            }
 
             if (!ret.isAllowed()) { // if resource based policy access not available fallback to check tag-based access.
                 setClassificationsToRequestContext(end1Classifications, rangerRequest);
-                ret = checkAccess(rangerRequest); // tag-based check with end1 classification
+                if (isAuditEnabled) {
+                    ret = checkAccess(rangerRequest);
+                } else {
+                    ret = checkAccess(rangerRequest, null);
+                }
                 LOG.info("End1 checkAccess " + ret);
                 if (ret.isAllowed()) { //
                     setClassificationsToRequestContext(end2Classifications, rangerRequest);
-                    ret = checkAccess(rangerRequest); // tag-based check with end2 classification
+                    if (isAuditEnabled) {
+                        ret = checkAccess(rangerRequest);
+                    } else {
+                        ret = checkAccess(rangerRequest, null);
+                    }
                     LOG.info("End2 checkAccess " + ret);
                 }
             }
@@ -775,9 +792,9 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
         RangerBasePlugin plugin = atlasPlugin;
 
         if (plugin != null) {
-            
+
             groupUtil.setUserStore(atlasPlugin.getUserStore());
-            
+
             request.setUserGroups(groupUtil.getContainedGroups(userName));
 
             if (LOG.isDebugEnabled()) {
@@ -793,19 +810,24 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
             LOG.warn("RangerAtlasPlugin not initialized. Access blocked!!!");
         }
 
+        if (result == null) {
+            LOG.warn("checkAccess(): policy engine returned null result for user=" + userName + ". Defaulting to DENY.");
+            result = new AtlasAccessResult(false);
+        }
+
         return result;
     }
 
     private AtlasAccessResult checkAccess(RangerAccessRequestImpl request, RangerAtlasAuditHandler auditHandler) {
         AtlasAccessResult result = null;
-        
+
         RangerBasePlugin plugin = atlasPlugin;
         String userName = request.getUser();
 
         if (plugin != null) {
-            
+
             groupUtil.setUserStore(atlasPlugin.getUserStore());
-            
+
             request.setUserGroups(groupUtil.getContainedGroups(userName));
 
             if (LOG.isDebugEnabled()) {
@@ -816,9 +838,14 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
             if (rangerResult != null) {
                 result = new AtlasAccessResult(rangerResult.getIsAllowed(), rangerResult.getPolicyId(), rangerResult.getPolicyPriority());
             }
-        
+
         } else {
             LOG.warn("RangerAtlasPlugin not initialized. Access blocked!!!");
+        }
+
+        if (result == null) {
+            LOG.warn("checkAccess(): policy engine returned null result for user=" + userName + ". Defaulting to DENY.");
+            result = new AtlasAccessResult(false);
         }
 
         return result;

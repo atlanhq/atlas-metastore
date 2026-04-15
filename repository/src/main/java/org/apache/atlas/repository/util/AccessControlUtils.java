@@ -17,7 +17,9 @@
  */
 package org.apache.atlas.repository.util;
 
+import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.repository.Constants;
 import org.apache.atlas.model.discovery.IndexSearchParams;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
@@ -34,6 +36,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -98,6 +101,7 @@ public final class AccessControlUtils {
     public static final String ACCESS_READ_PERSONA_PRODUCT = "persona-domain-product-read";
     public static final String ACCESS_READ_PERSONA_AI_APP = "persona-ai-application-read";
     public static final String ACCESS_READ_PERSONA_AI_MODEL = "persona-ai-model-read";
+    public static final String ACCESS_READ_PERSONA_AI_MODEL_VERSION = "persona-ai-modelversion-read";
 
 
     public static final String POLICY_CATEGORY_PERSONA  = "persona";
@@ -320,6 +324,35 @@ public final class AccessControlUtils {
         return parts[1];
     }
 
+    /**
+     * Returns the ES alias name to use as an index name in ES queries and alias operations.
+     * On Cassandra backend, prepends INDEX_PREFIX (e.g. "atlas_graph_") so the alias name
+     * is consistent with normalizeIndexName in CassandraIndexQuery.
+     * On JanusGraph backend, returns the raw alias name (unchanged behavior).
+     */
+    public static String getESAliasIndexName(AtlasEntity entity) {
+        return getESAliasIndexName(getStringAttribute(entity, QUALIFIED_NAME));
+    }
+
+    public static String getESAliasIndexName(String qualifiedName) {
+        String aliasName = getESAliasName(qualifiedName);
+
+        if (ApplicationProperties.GRAPHDB_BACKEND_CASSANDRA.equalsIgnoreCase(getGraphDbBackend())) {
+            return Constants.INDEX_PREFIX + aliasName;
+        }
+        return aliasName;
+    }
+
+    private static String getGraphDbBackend() {
+        try {
+            return ApplicationProperties.get().getString(
+                    ApplicationProperties.GRAPHDB_BACKEND_CONF,
+                    ApplicationProperties.DEFAULT_GRAPHDB_BACKEND);
+        } catch (Exception e) {
+            return ApplicationProperties.DEFAULT_GRAPHDB_BACKEND;
+        }
+    }
+
     public static List<AtlasEntity> getPolicies(AtlasEntity.AtlasEntityWithExtInfo accessControl) {
         List<AtlasObjectId> policies = (List<AtlasObjectId>) accessControl.getEntity().getRelationshipAttribute(REL_ATTR_POLICIES);
 
@@ -329,7 +362,8 @@ public final class AccessControlUtils {
     public static List<AtlasEntity> objectToEntityList(AtlasEntity.AtlasEntityWithExtInfo entityWithExtInfo, List<AtlasObjectId> policies) {
         List<AtlasEntity> ret = new ArrayList<>();
 
-        Set<String> referredGuids =  entityWithExtInfo.getReferredEntities().keySet();
+        Map<String, AtlasEntity> referredEntitiesMap = entityWithExtInfo.getReferredEntities();
+        Set<String> referredGuids = referredEntitiesMap != null ? referredEntitiesMap.keySet() : Collections.emptySet();
         if (policies != null) {
             ret = policies.stream()
                     .filter(x -> referredGuids.contains(x.getGuid()))
@@ -424,7 +458,7 @@ public final class AccessControlUtils {
 
     private static boolean hasMatchingVertex(AtlasGraph graph, List<String> newTags,
                                                IndexSearchParams indexSearchParams) throws AtlasBaseException {
-        String vertexIndexName = getESIndex();
+        String vertexIndexName = VERTEX_INDEX_NAME;
         AtlasIndexQuery indexQuery = graph.elasticsearchQuery(vertexIndexName);
 
         DirectIndexQueryResult indexQueryResult = indexQuery.vertices(indexSearchParams);

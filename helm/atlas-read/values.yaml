@@ -14,6 +14,12 @@ multiarch:
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 global:
+  # Graph backend mode: "janus" (default, JanusGraph) or "cassandra" (Cassandra+ES direct)
+  graphBackend: "janus"
+  # CassandraGraph ID strategy: "legacy" (UUID) or "deterministic" (SHA-256 of type+QN)
+  graphIdStrategy: "legacy"
+  # CassandraGraph entity claim dedup via LWT (requires cassandra backend)
+  graphClaimEnabled: false
   Tier_Type: ""
   Deployment_Type: ""
   cloud: ""
@@ -35,6 +41,23 @@ hpa:
     averageUtilization: 85
   memory:
     averageUtilization: 85
+
+vpa:
+  enabled: false
+  updateMode: "Off"
+  recommender:
+    name: ""  # Set to use a custom VPA recommender; leave empty for the default recommender
+  # minReplicas is always computed as (atlas.replicaCount - 1), floored at 1.
+  controlledResources:
+    - cpu
+    - memory
+  controlledValues: "RequestsAndLimits"
+  minAllowed:
+    cpu: "1000m"
+    memory: "8Gi"
+  maxAllowed:
+    cpu: "4000m"
+    memory: "10Gi"
 
 Namespace: atlas
 sentry_flag: disable
@@ -141,20 +164,6 @@ atlas:
   affinity:
     nodeAffinity:
       preferredDuringSchedulingIgnoredDuringExecution:
-      - weight: 1
-        preference:
-          matchExpressions:
-          - key: eks.amazonaws.com/capacityType   #AWS
-            operator: In
-            values:
-            - ON_DEMAND
-      - weight: 1
-        preference:
-          matchExpressions:
-          - key: lifecycle     #Azure
-            operator: In
-            values:
-            - ondemand
       - weight: 1
         preference:
           matchExpressions:

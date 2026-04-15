@@ -1,5 +1,19 @@
 {
   "properties": {
+    "lexicographicalSortOrder": {
+      "type": "keyword"
+    },
+    "nestedColumnOrder": {
+      "type": "nested",
+      "properties": {
+        "version": {
+          "type": "version"
+        },
+        "order": {
+          "type": "keyword"
+        }
+      }
+    },
     "relationshipList": {
       "type": "nested",
       "properties": {

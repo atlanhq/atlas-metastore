@@ -4,6 +4,7 @@ import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.discovery.EntityDiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.model.discovery.AtlasSearchResult;
 import org.apache.atlas.model.discovery.IndexSearchParams;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
@@ -45,6 +46,9 @@ public class PreProcessorUtils {
     public static final String GLOSSARY_TERM_REL_TYPE = "AtlasGlossaryTermAnchor";
     public static final String GLOSSARY_CATEGORY_REL_TYPE = "AtlasGlossaryCategoryAnchor";
     public static final String INIT_LEXORANK_OFFSET = "0|100000:";
+
+    //Dataset constants
+    public static final Set<String> VALID_DATASET_TYPES = new HashSet<>(Arrays.asList("Raw", "Refined", "Aggregated"));
 
     //DataMesh models constants
     public static final String PARENT_DOMAIN_REL_TYPE = "parentDomain";
@@ -324,10 +328,11 @@ public class PreProcessorUtils {
                 IndexSearchParams searchParams = new IndexSearchParams();
                 searchParams.setAttributes(ATTRIBUTES);
                 searchParams.setDsl(dslQuery);
-                categories = discovery.directIndexSearch(searchParams).getEntities();
-            } catch (AtlasBaseException e) {
-                e.printStackTrace();
-                throw new AtlasBaseException("Something went wrong in assigning lexicographicalSortOrder");
+                AtlasSearchResult searchResult = discovery.directIndexSearch(searchParams);
+                categories = searchResult != null ? searchResult.getEntities() : null;
+            } catch (Exception e) {
+                LOG.warn("Failed to search for existing lexicographicalSortOrder, using default offset: {}", e.getMessage());
+                categories = null;
             }
 
             if (CollectionUtils.isNotEmpty(categories)) {

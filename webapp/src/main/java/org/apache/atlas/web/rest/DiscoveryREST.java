@@ -17,6 +17,7 @@
  */
 package org.apache.atlas.web.rest;
 
+import java.util.concurrent.CompletableFuture;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
@@ -247,7 +248,15 @@ public class DiscoveryREST {
             long endTime = System.currentTimeMillis();
 
             if (enableSearchLogging && parameters.isSaveSearchLog() && !shouldSkipSearchLog(parameters)) {
-                logSearchLog(parameters, result, servletRequest, endTime - startTime);
+                final AtlasSearchResult logResult = result;
+                final long duration = endTime - startTime;
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        logSearchLog(parameters, logResult, servletRequest, duration);
+                    } catch (Exception e) {
+                        LOG.warn("Async search log failed", e);
+                    }
+                });
             }
 
             return result;
@@ -353,7 +362,7 @@ public class DiscoveryREST {
         if (elapsed > AtlasConfiguration.SEARCH_SLOW_QUERY_THRESHOLD_MS.getLong()) {
             PERF_LOG.info("slow esSearch: {} ms, query={}", elapsed, parameters.getQuery());
         }
-        return esResponse.get("hits");
+        return esResponse;
     }
 
     /**

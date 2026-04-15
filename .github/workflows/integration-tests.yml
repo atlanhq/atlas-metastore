@@ -23,15 +23,6 @@ on:
       - master
       - beta
       - staging
-    paths-ignore:
-      - '.claude/**'
-      - '.cursor/**'
-      - '.github/**'
-      - 'docs/**'
-      - 'helm/**'
-      - 'local-dev/**'
-      - 'README.txt'
-      - 'README.md'
 
 permissions:
   contents: read
@@ -40,27 +31,58 @@ permissions:
 
 jobs:
   integration-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [janus, cassandra]
+    name: Integration Tests (${{ matrix.backend }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
+      - uses: actions/checkout@v3
+
+      - name: Check if tests should run
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            src:
+              - '**'
+              - '!.claude/**'
+              - '!.cursor/**'
+              - '!.github/**'
+              - '!docs/**'
+              - '!helm/**'
+              - '!local-dev/**'
+              - '!README.txt'
+              - '!README.md'
+
+      - name: Skip message
+        if: steps.filter.outputs.src != 'true'
+        run: |
+          echo "## Integration Tests Skipped" >> $GITHUB_STEP_SUMMARY
+          echo "No source code changes detected. Only docs/config files were modified." >> $GITHUB_STEP_SUMMARY
+          echo "Skipping integration tests."
+
       # ============================================
       # DISK CLEANUP - Testcontainers need space
       # ============================================
       - name: Free up disk space
+        if: steps.filter.outputs.src == 'true'
         run: |
           echo "Freeing disk space..."
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift || true
 
-      - uses: actions/checkout@v3
-
       - name: Set up JDK 17
+        if: steps.filter.outputs.src == 'true'
         uses: actions/setup-java@v3
         with:
           java-version: '17'
           distribution: 'zulu'
 
       - name: Cache Maven packages
+        if: steps.filter.outputs.src == 'true'
         uses: actions/cache@v3
         with:
           path: ~/.m2/repository
@@ -70,6 +92,7 @@ jobs:
             ${{ runner.os }}-maven-
 
       - name: Create Maven Settings
+        if: steps.filter.outputs.src == 'true'
         uses: s4u/maven-settings-action@v2.8.0
         with:
           servers: |
@@ -80,11 +103,13 @@ jobs:
             }]
 
       - name: Verify Docker
+        if: steps.filter.outputs.src == 'true'
         run: |
           docker --version
           docker info
 
       - name: Build webapp module
+        if: steps.filter.outputs.src == 'true'
         run: |
           mvn install -pl webapp -am -DskipTests -Drat.skip=true -q
         env:
@@ -92,6 +117,7 @@ jobs:
 
       - name: Run integration tests
         id: tests
+        if: steps.filter.outputs.src == 'true'
         continue-on-error: true
         env:
           TESTCONTAINERS_RYUK_DISABLED: true
@@ -104,7 +130,8 @@ jobs:
 
           # Run tests with testcontainers properties passed to JVM
           mvn test -pl webapp \
-            -Dtest="EntityCrudIntegrationTest,GlossaryIntegrationTest,GlossaryExtendedIntegrationTest,SQLAssetHierarchyIntegrationTest,ClassificationIntegrationTest,LineageIntegrationTest,SearchIntegrationTest,RelationshipIntegrationTest,BusinessMetadataIntegrationTest,DataMeshIntegrationTest,PersonaPurposeIntegrationTest,PurposeDiscoveryIntegrationTest,LabelIntegrationTest,TypeDefIntegrationTest" \
+            -Datlas.graphdb.backend=${{ matrix.backend }} \
+            -Dtest="EntityCrudIntegrationTest,GlossaryIntegrationTest,GlossaryExtendedIntegrationTest,SQLAssetHierarchyIntegrationTest,ClassificationIntegrationTest,LineageIntegrationTest,SearchIntegrationTest,RelationshipIntegrationTest,BusinessMetadataIntegrationTest,DataMeshIntegrationTest,PersonaPurposeIntegrationTest,PurposeDiscoveryIntegrationTest,LabelIntegrationTest,TypeDefIntegrationTest,AsyncIngestionIntegrationTest,SubAssetAddParentUpdateNotificationTest" \
             -Drat.skip=true \
             -Dsurefire.failIfNoSpecifiedTests=false \
             -Dtestcontainers.ryuk.disabled=true \
@@ -115,15 +142,15 @@ jobs:
 
       - name: Publish test results
         uses: dorny/test-reporter@v1
-        if: always() && steps.tests.outcome != 'skipped'
+        if: always() && steps.filter.outputs.src == 'true' && steps.tests.outcome != 'skipped'
         with:
-          name: Integration Test Results
+          name: Integration Test Results (${{ matrix.backend }})
           path: webapp/target/surefire-reports/TEST-*.xml
           reporter: java-junit
           fail-on-error: false
 
       - name: Generate test reports
-        if: always() && steps.tests.outcome != 'skipped'
+        if: always() && steps.filter.outputs.src == 'true' && steps.tests.outcome != 'skipped'
         run: |
           python3 webapp/src/test/scripts/generate-test-report.py \
             webapp/target/surefire-reports \
@@ -138,19 +165,33 @@ jobs:
             echo "Report generation failed. Check artifacts for raw XML reports." >> $GITHUB_STEP_SUMMARY
           fi
 
+      - name: Collect Atlas server logs
+        if: always() && steps.filter.outputs.src == 'true' && steps.tests.outcome != 'skipped'
+        run: |
+          mkdir -p /tmp/atlas-server-logs
+          # Atlas writes logs to a temp directory; find and copy them
+          find /tmp -maxdepth 3 -name "*.log" -path "*/atlas-test-*/logs/*" -exec cp {} /tmp/atlas-server-logs/ \; 2>/dev/null || true
+          find /tmp -maxdepth 3 -name "*.out" -path "*/atlas-test-*/logs/*" -exec cp {} /tmp/atlas-server-logs/ \; 2>/dev/null || true
+          # Grab the Atlas application.log (FILE appender — has all LOG.info/LOG.error output)
+          cp webapp/target/logs/application.log /tmp/atlas-server-logs/application.log 2>/dev/null || true
+          # Also grab surefire test output files (contain server stdout/stderr)
+          find webapp/target/surefire-reports -name "*-output.txt" -exec cp {} /tmp/atlas-server-logs/ \; 2>/dev/null || true
+          ls -la /tmp/atlas-server-logs/ || echo "No Atlas server logs found"
+
       - name: Upload test reports
         uses: actions/upload-artifact@v4
-        if: always() && steps.tests.outcome != 'skipped'
+        if: always() && steps.filter.outputs.src == 'true' && steps.tests.outcome != 'skipped'
         with:
-          name: integration-test-reports-${{ github.run_id }}
+          name: integration-test-reports-${{ matrix.backend }}-${{ github.run_id }}
           path: |
             webapp/target/surefire-reports/
             webapp/target/site/test-report.html
             test-output.log
+            /tmp/atlas-server-logs/
           retention-days: 14
 
       - name: Fail if tests failed
-        if: steps.tests.outputs.exit_code != '0'
+        if: steps.filter.outputs.src == 'true' && steps.tests.outputs.exit_code != '0'
         run: |
           echo "Integration tests failed with exit code ${{ steps.tests.outputs.exit_code }}"
           exit 1

@@ -297,5 +297,28 @@ public class NullServletContext implements ServletContext {
         return null;
     }
 
+    public String getRequestCharacterEncoding() {
+        return null;
+    }
 
+    public void setRequestCharacterEncoding(String encoding) {
+    }
+
+    public String getResponseCharacterEncoding() {
+        return null;
+    }
+
+    public void setResponseCharacterEncoding(String encoding) {
+    }
+
+    public int getSessionTimeout() {
+        return 0;
+    }
+
+    public void setSessionTimeout(int sessionTimeout) {
+    }
+
+    public javax.servlet.ServletRegistration.Dynamic addJspFile(String servletName, String jspFile) {
+        return null;
+    }
 }

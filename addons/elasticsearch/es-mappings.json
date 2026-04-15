@@ -1,5 +1,21 @@
 {
   "properties": {
+    "__qualifiedNameHierarchy": {
+      "type": "text",
+      "analyzer": "atlan_path_analyzer",
+      "search_analyzer": "keyword"
+    },
+    "nestedColumnOrder": {
+      "type": "nested",
+      "properties": {
+        "version": {
+          "type": "version"
+        },
+        "order": {
+          "type": "keyword"
+        }
+      }
+    },
     "relationshipList": {
       "type": "nested",
       "properties": {

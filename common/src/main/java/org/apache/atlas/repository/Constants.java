@@ -19,10 +19,7 @@
 package org.apache.atlas.repository;
 
 import org.apache.atlas.ApplicationProperties;
-import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
-import org.apache.atlas.service.FeatureFlag;
-import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -39,7 +36,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
 
-import static org.apache.atlas.service.FeatureFlag.USE_TEMP_ES_INDEX;
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.encodePropertyKey;
 import static org.apache.atlas.type.AtlasStructType.UNIQUE_ATTRIBUTE_SHADE_PROPERTY_PREFIX;
 
@@ -144,6 +140,7 @@ public final class Constants {
      */
     public static final String DATA_DOMAIN_ENTITY_TYPE     = "DataDomain";
     public static final String DATA_PRODUCT_ENTITY_TYPE    = "DataProduct";
+    public static final String DATASET_ENTITY_TYPE         = "DataMeshDataset";
 
     public static final String AI_APPLICATION       = "AIApplication";
     public static final String AI_MODEL             = "AIModel";
@@ -282,12 +279,42 @@ public final class Constants {
     public static final String FULLTEXT_INDEX = "fulltext_index";
 
     /**
-     * elasticsearch index prefix.
+     * Elasticsearch index prefix.
+     *
+     * Derived automatically from atlas.graphdb.backend:
+     *   - "cassandra" → "atlas_graph_"
+     *   - "janus" (default) → "janusgraph_"
+     *
+     * Can be overridden explicitly via atlas.graph.index.search.es.prefix,
+     * but normally you should just set the backend and let this follow.
      */
-    public static final String INDEX_PREFIX = "janusgraph_";
+    public static final String ES_INDEX_PREFIX_PROPERTY = "atlas.graph.index.search.es.prefix";
+    public static final String INDEX_PREFIX;
+    public static final String VERTEX_INDEX_NAME;
+    public static final String EDGE_INDEX_NAME;
 
-    public static final String VERTEX_INDEX_NAME = INDEX_PREFIX + VERTEX_INDEX;
-    public static final String EDGE_INDEX_NAME = INDEX_PREFIX + EDGE_INDEX;
+    static {
+        String prefix;
+        try {
+            Configuration config = ApplicationProperties.get();
+
+            // Derive default prefix from the graphdb backend
+            String backend = config.getString(ApplicationProperties.GRAPHDB_BACKEND_CONF,
+                                              ApplicationProperties.DEFAULT_GRAPHDB_BACKEND);
+            String backendDefault = ApplicationProperties.GRAPHDB_BACKEND_CASSANDRA.equalsIgnoreCase(backend)
+                                    ? "atlas_graph_" : "janusgraph_";
+
+            // Allow explicit override, but default follows the backend
+            prefix = config.getString(ES_INDEX_PREFIX_PROPERTY, backendDefault);
+        } catch (Exception e) {
+            prefix = "janusgraph_";
+            LOG.warn("Failed to read ES index prefix from config, using default: {}", prefix);
+        }
+        INDEX_PREFIX = prefix;
+        VERTEX_INDEX_NAME = INDEX_PREFIX + VERTEX_INDEX;
+        EDGE_INDEX_NAME   = INDEX_PREFIX + EDGE_INDEX;
+        LOG.info("ES index prefix: '{}', vertex_index: '{}', edge_index: '{}'", INDEX_PREFIX, VERTEX_INDEX_NAME, EDGE_INDEX_NAME);
+    }
 
     public static final String NAME                                    = "name";
     public static final String QUALIFIED_NAME                          = "qualifiedName";
@@ -303,6 +330,8 @@ public final class Constants {
     public static final String INDEX_SEARCH_VERTEX_PREFIX_DEFAULT      = "$v$";
     public static final String DOMAIN_GUIDS                            = "domainGUIDs";
     public static final String PRODUCT_GUIDS                           = "productGUIDs";
+    public static final String CATALOG_DATASET_GUID_ATTR               = "catalogDatasetGuid";
+    public static final String DATASET_TYPE_ATTR                       = "dataMeshDatasetType";
 
     public static final String ATTR_TENANT_ID = "tenantId";
     public static final String DEFAULT_TENANT_ID = "default";
@@ -563,19 +592,6 @@ public final class Constants {
         }
     }
 
-    public static String getESIndex() {
-        String indexSuffix  = null;
-        if(AtlasConfiguration.ATLAS_MAINTENANCE_MODE.getBoolean()) {
-            try {
-                if (FeatureFlagStore.evaluate( USE_TEMP_ES_INDEX.getKey(), "true")) {
-                    indexSuffix = "_temp";
-                }
-            } catch (Exception e) {
-                LOG.error("Failed to evaluate feature flag with error", e);
-            }
-        }
-        return indexSuffix == null ? VERTEX_INDEX_NAME : VERTEX_INDEX_NAME + indexSuffix;
-    }
 
     public static String getStaticFileAsString(String fileName) throws IOException {
         String atlasHomeDir  = System.getProperty("atlas.home");

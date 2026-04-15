@@ -34,6 +34,7 @@ import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.instance.AtlasRelationship;
 import org.apache.atlas.repository.VertexEdgePropertiesCache;
 import org.apache.atlas.model.instance.AtlasStruct;
+import org.apache.atlas.repository.graphdb.cassandra.CassandraGraph;
 import org.apache.atlas.repository.graphdb.janus.*;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
@@ -306,8 +307,28 @@ public final class GraphHelper {
         }
 
         Iterator<AtlasEdge> ret = null;
-        if(instanceVertex != null && edgeLabel != null) {
-            ret = instanceVertex.getEdges(direction, edgeLabel).iterator();
+        if (instanceVertex != null && edgeLabel != null) {
+            if (instanceVertex instanceof AtlasJanusVertex) {
+                AtlasJanusVertex janusVertex = (AtlasJanusVertex) instanceVertex;
+                AtlasJanusGraph  janusGraph  = janusVertex.getAtlasJanusGraph();
+                var              g           = janusGraph.getGraph().traversal();
+                Stream<Edge>     edgeStream;
+
+                if (direction == AtlasEdgeDirection.IN) {
+                    edgeStream = g.V(instanceVertex.getId()).inE(edgeLabel).toStream();
+                } else if (direction == AtlasEdgeDirection.OUT) {
+                    edgeStream = g.V(instanceVertex.getId()).outE(edgeLabel).toStream();
+                } else {
+                    edgeStream = g.V(instanceVertex.getId()).bothE(edgeLabel).toStream();
+                }
+
+                ret = (Iterator<AtlasEdge>) (Iterator) edgeStream
+                        .map(e -> GraphDbObjectFactory.createEdge(janusGraph, e))
+                        .iterator();
+            } else {
+                // CassandraGraph and other backends — use the generic AtlasVertex API
+                ret = instanceVertex.getEdges(direction, edgeLabel).iterator();
+            }
         }
 
         RequestContext.get().endMetricRecord(metric);
@@ -1010,25 +1031,46 @@ public final class GraphHelper {
         return ret;
     }
 
-    public static List<String> getTraitNamesV2(AtlasVertex entityVertex, Boolean propagated) {
-        List<String>     ret   = new ArrayList<>();
-        try {
-            TagDAO tagDAOCassandra = TagDAOCassandraImpl.getInstance();
-            if (!propagated) {
-                ret = tagDAOCassandra.getAllDirectClassificationsForVertex(entityVertex.getIdForDisplay())
-                                     .stream()
-                                     .map(AtlasClassification::getTypeName)
-                                     .collect(Collectors.toList());
-            } else {
-                ret = tagDAOCassandra.findByVertexIdAndPropagated(entityVertex.getIdForDisplay())
-                                     .stream()
-                                     .map(AtlasClassification::getTypeName)
-                                     .collect(Collectors.toList());
+    /**
+     * Reads classification names from denormalized JanusGraph vertex properties (V1/legacy path).
+     * When TagV2 is enabled, prefer {@code TagDAO.getClassificationNamesForVertex()} which queries
+     * Cassandra directly with a lightweight query that avoids JSON deserialization.
+     */
+    public static List<String> getClassificationNamesFromVertex(AtlasVertex entityVertex) {
+        List<String> ret = new ArrayList<>();
+        String delimitedNames = entityVertex.getProperty(CLASSIFICATION_NAMES_KEY, String.class);
+        if (StringUtils.isNotEmpty(delimitedNames)) {
+            String[] names = StringUtils.split(delimitedNames, CLASSIFICATION_NAME_DELIMITER);
+            for (String name : names) {
+                if (StringUtils.isNotBlank(name)) {
+                    ret.add(name);
+                }
             }
+        }
+        return ret;
+    }
+
+    public static List<String> getPropagatedClassificationNamesFromVertex(AtlasVertex entityVertex) {
+        List<String> ret = new ArrayList<>();
+        String delimitedNames = entityVertex.getProperty(PROPAGATED_CLASSIFICATION_NAMES_KEY, String.class);
+        if (StringUtils.isNotEmpty(delimitedNames)) {
+            String[] names = StringUtils.split(delimitedNames, CLASSIFICATION_NAME_DELIMITER);
+            for (String name : names) {
+                if (StringUtils.isNotBlank(name)) {
+                    ret.add(name.trim());
+                }
+            }
+        }
+        return ret;
+    }
+
+    public static List<String> getTraitNamesV2(AtlasVertex entityVertex, Boolean propagated) {
+        try {
+            TagDAO tagDAO = TagDAOCassandraImpl.getInstance();
+            return tagDAO.getClassificationNamesForVertex(entityVertex.getIdForDisplay(), propagated);
         } catch (AtlasBaseException e) {
             throw new RuntimeException(e);
         }
-        return ret;
     }
 
     public static List<AtlasVertex> getPropagatableClassifications(AtlasEdge edge) {
@@ -2264,6 +2306,10 @@ public final class GraphHelper {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("GraphHelper.retrieveEdgeLabelsAndTypeName");
         long timeoutSeconds = org.apache.atlas.AtlasConfiguration.TIMEOUT_SUPER_VERTEX_FETCH.getLong();
         try {
+            if (graph instanceof CassandraGraph) {
+                return retrieveEdgeLabelsAndTypeNameViaAtlasApi(vertex);
+            }
+
             // Use try-with-resources to ensure stream is properly closed
             try (Stream<Map<String, Object>> stream = ((AtlasJanusGraph) graph).getGraph().traversal()
                     .V(vertex.getId())
@@ -2296,6 +2342,25 @@ public final class GraphHelper {
         finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
+    }
+
+    private Set<AbstractMap.SimpleEntry<String,String>> retrieveEdgeLabelsAndTypeNameViaAtlasApi(AtlasVertex vertex) {
+        Set<AbstractMap.SimpleEntry<String,String>> ret = new HashSet<>();
+        Iterable<AtlasEdge> edges = vertex.getEdges(AtlasEdgeDirection.BOTH);
+
+        for (AtlasEdge edge : edges) {
+            String state = edge.getProperty(STATE_PROPERTY_KEY, String.class);
+            if (!ACTIVE_STATE_VALUE.equals(state)) {
+                continue;
+            }
+
+            String label = edge.getLabel();
+            String typeName = edge.getProperty(TYPE_NAME_PROPERTY_KEY, String.class);
+            if (label != null && !label.isEmpty()) {
+                ret.add(new AbstractMap.SimpleEntry<>(label, typeName != null ? typeName : ""));
+            }
+        }
+        return ret;
     }
 
     /**

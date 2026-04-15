@@ -94,6 +94,23 @@ resources_standard:
   limits:
     memory: "5Gi"
 
+vpa:
+  enabled: false
+  updateMode: "Off"
+  recommender:
+    name: ""  # Set to use a custom VPA recommender; leave empty for the default recommender
+  # minReplicas is always computed as (replicas - 1), floored at 2.
+  controlledResources:
+    - cpu
+    - memory
+  controlledValues: "RequestsAndLimits"
+  minAllowed:
+    cpu: "500m"
+    memory: "6Gi"
+  maxAllowed:
+    cpu: "3000m"
+    memory: "8Gi"
+
 podAnnotations: {}
   # iam.amazonaws.com/role: es-cluster
 
@@ -173,20 +190,6 @@ antiAffinity: "hard"
 # https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#node-affinity-beta-feature
 nodeAffinity:
   preferredDuringSchedulingIgnoredDuringExecution:
-  - weight: 1
-    preference:
-      matchExpressions:
-      - key: eks.amazonaws.com/capacityType   #AWS
-        operator: In
-        values:
-        - ON_DEMAND
-  - weight: 1
-    preference:
-      matchExpressions:
-      - key: lifecycle     #Azure
-        operator: In
-        values:
-        - ondemand
   - weight: 1
     preference:
       matchExpressions:
