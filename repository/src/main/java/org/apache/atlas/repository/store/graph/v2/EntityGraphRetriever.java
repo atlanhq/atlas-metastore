@@ -1169,10 +1169,28 @@ public class EntityGraphRetriever {
      * direction from which the edge should be queried (IN, OUT, or BOTH), enabling
      * the edge fetch layer to query only the correct Cassandra table per label instead
      * of always querying both edges_out and edges_in.
+     *
+     * <p>Returns the flat union of labels across all types in the result set. When the
+     * same label is contributed by different types with different directions (rare),
+     * the merge falls back to {@link AtlasEdgeDirection#BOTH} for safety.
      */
     private Map<String, AtlasEdgeDirection> collectEdgeLabelsWithDirection(VertexEdgePropertiesCache cache,
                                                                            Set<String> vertexIds,
                                                                            Set<String> attributes) {
+        return flattenPerTypeDirections(collectEdgeLabelsPerTypeWithDirection(cache, vertexIds, attributes));
+    }
+
+    /**
+     * Collects edge labels grouped by entity typeName, with each label mapped to its
+     * relationship direction. Used by the ZeroGraph path in {@link #enrichVertexPropertiesByVertexIds}
+     * to group vertices by type and query only the labels relevant to each type, in the
+     * correct direction. Combines per-type filtering with direction-aware fetching.
+     *
+     * @return Map of typeName -> (edge label -> direction). Types with no relevant
+     *         relationship attributes are omitted.
+     */
+    private Map<String, Map<String, AtlasEdgeDirection>> collectEdgeLabelsPerTypeWithDirection(
+            VertexEdgePropertiesCache cache, Set<String> vertexIds, Set<String> attributes) {
         if (attributes == null || attributes.isEmpty()) {
             return Collections.emptyMap();
         }
@@ -1182,20 +1200,39 @@ public class EntityGraphRetriever {
                 .filter(StringUtils::isNotEmpty)
                 .collect(Collectors.toSet());
 
-        Map<String, AtlasEdgeDirection> edgeLabelDirections = new HashMap<>();
-
+        Map<String, Map<String, AtlasEdgeDirection>> perTypeLabels = new HashMap<>();
         for (String typeName : typeNames) {
             AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
             if (entityType == null) {
                 continue;
             }
 
+            Map<String, AtlasEdgeDirection> labelsForType = new HashMap<>();
             for (String attribute : attributes) {
-                processRelationshipAttribute(entityType, attribute, edgeLabelDirections);
+                processRelationshipAttribute(entityType, attribute, labelsForType);
+            }
+            if (!labelsForType.isEmpty()) {
+                perTypeLabels.put(typeName, labelsForType);
             }
         }
+        return perTypeLabels;
+    }
 
-        return edgeLabelDirections;
+    /**
+     * Flattens a per-type label+direction map into a single map. When the same label
+     * appears in multiple types with different directions, merges to
+     * {@link AtlasEdgeDirection#BOTH} to preserve correctness.
+     */
+    private static Map<String, AtlasEdgeDirection> flattenPerTypeDirections(
+            Map<String, Map<String, AtlasEdgeDirection>> perType) {
+        Map<String, AtlasEdgeDirection> flat = new HashMap<>();
+        for (Map<String, AtlasEdgeDirection> typeMap : perType.values()) {
+            for (Map.Entry<String, AtlasEdgeDirection> entry : typeMap.entrySet()) {
+                flat.merge(entry.getKey(), entry.getValue(),
+                        (existing, incoming) -> existing == incoming ? existing : AtlasEdgeDirection.BOTH);
+            }
+        }
+        return flat;
     }
 
     private void processRelationshipAttribute(AtlasEntityType entityType,
@@ -1514,16 +1551,55 @@ public class EntityGraphRetriever {
            }
            vertexEdgePropertyCache.addVertices(vertexCache.getValue1());
 
-           Map<String, AtlasEdgeDirection> edgeLabelDirections = collectEdgeLabelsWithDirection(vertexEdgePropertyCache, vertexIds, attributes);
-           Set<String> edgeLabelsToProcess = edgeLabelDirections.keySet();
+           Map<String, Map<String, AtlasEdgeDirection>> perTypeEdgeLabels =
+                   collectEdgeLabelsPerTypeWithDirection(vertexEdgePropertyCache, vertexIds, attributes);
+
+           // Union of all labels across types — used by the edge processing loop below
+           // to filter out any stray edges that don't match a requested label.
+           Set<String> edgeLabelsToProcess = new HashSet<>();
+           for (Map<String, AtlasEdgeDirection> typeMap : perTypeEdgeLabels.values()) {
+               edgeLabelsToProcess.addAll(typeMap.keySet());
+           }
 
            Set<String> vertexIdsToProcess = new HashSet<>();
            if (!CollectionUtils.isEmpty(edgeLabelsToProcess)) {
+               boolean bulkFetch = AtlasConfiguration.ATLAS_INDEXSEARCH_EDGE_BULK_FETCH_ENABLE.getBoolean();
                List<Map<String, Object>> relationEdges;
-               if (AtlasConfiguration.ATLAS_INDEXSEARCH_EDGE_BULK_FETCH_ENABLE.getBoolean()) {
-                   relationEdges = getConnectedRelationEdgesVertexBatching(vertexIds, edgeLabelDirections, relationAttrsSize);
+
+               if (graph instanceof CassandraGraph) {
+                   // ZeroGraph: group vertices by type so each type-group only queries the
+                   // labels relevant to that type, in the correct direction. This compounds
+                   // the per-type filtering optimization with direction-aware fetching —
+                   // a Table vertex won't fire CQL for glossary/domain labels that a mixed
+                   // result set contributes to the flat union.
+                   relationEdges = new ArrayList<>();
+                   Map<String, Set<String>> typeToVertexIds = new HashMap<>();
+                   for (String vertexId : vertexIds) {
+                       String typeName = vertexEdgePropertyCache.getTypeName(vertexId);
+                       if (StringUtils.isNotEmpty(typeName) && perTypeEdgeLabels.containsKey(typeName)) {
+                           typeToVertexIds.computeIfAbsent(typeName, k -> new LinkedHashSet<>()).add(vertexId);
+                       }
+                   }
+
+                   for (Map.Entry<String, Set<String>> entry : typeToVertexIds.entrySet()) {
+                       Set<String> typeVertexIds = entry.getValue();
+                       Map<String, AtlasEdgeDirection> typeEdgeLabels = perTypeEdgeLabels.get(entry.getKey());
+                       if (CollectionUtils.isEmpty(typeEdgeLabels)) {
+                           continue;
+                       }
+                       List<Map<String, Object>> typeEdges = bulkFetch
+                               ? getConnectedRelationEdgesVertexBatching(typeVertexIds, typeEdgeLabels, relationAttrsSize)
+                               : getConnectedRelationEdges(typeVertexIds, typeEdgeLabels, relationAttrsSize);
+                       relationEdges.addAll(typeEdges);
+                   }
                } else {
-                   relationEdges = getConnectedRelationEdges(vertexIds, edgeLabelDirections, relationAttrsSize);
+                   // JanusGraph: single Gremlin traversal with the flat union of labels.
+                   // Per-type grouping would turn 1 traversal into N with no storage-level
+                   // savings, adding per-call overhead — so we keep the existing behavior here.
+                   Map<String, AtlasEdgeDirection> edgeLabelDirections = flattenPerTypeDirections(perTypeEdgeLabels);
+                   relationEdges = bulkFetch
+                           ? getConnectedRelationEdgesVertexBatching(vertexIds, edgeLabelDirections, relationAttrsSize)
+                           : getConnectedRelationEdges(vertexIds, edgeLabelDirections, relationAttrsSize);
                }
 
 

@@ -37,6 +37,7 @@ on:
       - ms-864-keycloak-jwks-internal-url
       - ms-911-add-observability
       - ms-610-ranges-policy-cache
+      - ms-692-per-type-edge-labels-latest
       - ms-901-hidelineage
       - ms-894-override-classification
     paths-ignore:
