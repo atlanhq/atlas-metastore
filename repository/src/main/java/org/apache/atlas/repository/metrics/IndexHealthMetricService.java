@@ -21,9 +21,12 @@ import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import org.apache.atlas.model.TypeCategory;
+import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
+import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasGraphIndex;
 import org.apache.atlas.repository.graphdb.AtlasGraphManagement;
 import org.apache.atlas.repository.graphdb.AtlasPropertyKey;
+import org.apache.atlas.repository.store.graph.v2.ESConnector;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasBusinessMetadataType;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
@@ -80,6 +83,10 @@ public class IndexHealthMetricService {
     private final AtomicInteger bmMissing = new AtomicInteger(0);
     private final AtomicInteger coreMissingTotal = new AtomicInteger(0);
     private final AtomicInteger healthStatus = new AtomicInteger(1);
+    // MS-973: counts attributes where JG says "indexed" but ES has no mapping.
+    // Non-zero indicates JG schema cache / ES drift — a silent-failure class that
+    // the original audit couldn't detect (see olympus MS-973).
+    private final AtomicInteger cacheDriftTotal = new AtomicInteger(0);
     // Bounded cardinality: one entry per entity type (~100-500 per tenant, not user-generated)
     private final Map<String, AtomicInteger> perTypeMissing = new HashMap<>();
     private boolean gaugesRegistered = false;
@@ -150,6 +157,10 @@ public class IndexHealthMetricService {
                 .description("Overall index health: 1 = healthy, 0 = unhealthy")
                 .tags(tenantTag).register(meterRegistry);
 
+        Gauge.builder(METRIC_PREFIX + "_cache_drift_total", cacheDriftTotal, AtomicInteger::get)
+                .description("MS-973: attributes where JG schema reports indexed but ES mapping is missing — silent-failure drift signal")
+                .tags(tenantTag).register(meterRegistry);
+
         gaugesRegistered = true;
     }
 
@@ -188,6 +199,19 @@ public class IndexHealthMetricService {
         }
         Set<AtlasPropertyKey> indexedFieldKeys = new HashSet<>(vertexIndex.getFieldKeys());
 
+        // MS-973: Ground-truth cross-check against ES.
+        // JanusGraph's schema cache can diverge from ES mapping (e.g., a propertyKey is
+        // reported as registered by JG but ES has no mapping for it — observed on olympus).
+        // Fetch ES mapping once per audit; empty set = ES unreachable → skip cross-check
+        // and fall back to JG-only (never under-report missing by ES unavailability).
+        Set<String> esMappedFields = ESConnector.getVertexIndexMappedFields();
+        boolean esCrossCheckAvailable = !esMappedFields.isEmpty();
+        int driftCount = 0;
+        if (!esCrossCheckAvailable) {
+            LOG.warn("INDEX HEALTH AUDIT: ES vertex_index mapping fetch returned empty or failed — "
+                    + "cross-check disabled for this audit, counts reflect JG-only view");
+        }
+
         // Audit entity types
         for (AtlasEntityType entityType : typeRegistry.getAllEntityDefs()
                 .stream()
@@ -209,10 +233,24 @@ public class IndexHealthMetricService {
 
                 totalExpected++;
 
-                // Check mixed index registration — not just property key existence.
-                // A property key can exist in the schema but NOT be in the vertex_index.
                 AtlasPropertyKey propertyKey = managementSystem.getPropertyKey(attribute.getVertexPropertyName());
-                if (propertyKey != null && indexedFieldKeys.contains(propertyKey)) {
+                boolean jgIndexed = propertyKey != null && indexedFieldKeys.contains(propertyKey);
+
+                // ES-side cross-check — only meaningful when JG claims indexed (see class javadoc)
+                boolean esIndexed = true;
+                if (jgIndexed && esCrossCheckAvailable) {
+                    boolean isStringField = AtlasAttributeDef.IndexType.STRING.equals(attribute.getIndexType());
+                    String esFieldName = managementSystem.getIndexFieldName(Constants.VERTEX_INDEX, propertyKey, isStringField);
+                    esIndexed = esFieldName != null && esMappedFields.contains(esFieldName);
+                    if (!esIndexed) {
+                        driftCount++;
+                        LOG.warn("INDEX HEALTH DRIFT: JG reports {}.{} as indexed (propertyKey={}) but ES has no mapping "
+                                + "for field '{}'. JG schema cache likely diverged from ES — counting as missing.",
+                                typeName, attribute.getName(), propertyKey.getName(), esFieldName);
+                    }
+                }
+
+                if (jgIndexed && esIndexed) {
                     totalIndexed++;
                 } else {
                     totalMissing++;
@@ -248,7 +286,22 @@ public class IndexHealthMetricService {
                 totalBmExpected++;
 
                 AtlasPropertyKey propertyKey = managementSystem.getPropertyKey(attribute.getVertexPropertyName());
-                if (propertyKey != null && indexedFieldKeys.contains(propertyKey)) {
+                boolean jgIndexed = propertyKey != null && indexedFieldKeys.contains(propertyKey);
+
+                boolean esIndexed = true;
+                if (jgIndexed && esCrossCheckAvailable) {
+                    boolean isStringField = AtlasAttributeDef.IndexType.STRING.equals(attribute.getIndexType());
+                    String esFieldName = managementSystem.getIndexFieldName(Constants.VERTEX_INDEX, propertyKey, isStringField);
+                    esIndexed = esFieldName != null && esMappedFields.contains(esFieldName);
+                    if (!esIndexed) {
+                        driftCount++;
+                        LOG.warn("INDEX HEALTH DRIFT: JG reports BM {}.{} as indexed (propertyKey={}) but ES has no mapping "
+                                + "for field '{}'. JG schema cache likely diverged from ES — counting as missing.",
+                                bmType.getTypeName(), attribute.getName(), propertyKey.getName(), esFieldName);
+                    }
+                }
+
+                if (jgIndexed && esIndexed) {
                     totalBmIndexed++;
                 } else {
                     totalBmMissing++;
@@ -267,6 +320,7 @@ public class IndexHealthMetricService {
         bmIndexed.set(totalBmIndexed);
         bmMissing.set(totalBmMissing);
         coreMissingTotal.set(totalCoreMissing);
+        cacheDriftTotal.set(driftCount);
 
         boolean isHealthy = (totalMissing + totalBmMissing) == 0;
 
