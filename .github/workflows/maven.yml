@@ -33,6 +33,7 @@ on:
       - ms-664-fix-audit-search
       - hotfix-reindex-refresh
       - ms-864-keycloak-jwks-internal-url
+      - DQ-665-fix-guid-resolution-relationship-mapping
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
