@@ -796,6 +796,14 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
         }
 
         @Override
+        public String getVertexId() {
+            if (resolvedVertex != null) {
+                return resolvedVertex.getId().toString();
+            }
+            return decodeDocId(hit.getId());
+        }
+
+        @Override
         public double getScore() {
             if (hit != null) {
                 return hit.getScore();
@@ -872,6 +880,11 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
                 LOG.debug("ResultImplDirect.getVertex: found vertex. ES docId='{}' → vertexId='{}'", docId, v.getId());
             }
             return v;
+        }
+
+        @Override
+        public String getVertexId() {
+            return decodeDocId(String.valueOf(hit.get("_id")));
         }
 
         @Override
