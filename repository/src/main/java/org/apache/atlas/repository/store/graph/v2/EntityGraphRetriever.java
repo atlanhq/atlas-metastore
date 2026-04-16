@@ -1520,6 +1520,66 @@ public class EntityGraphRetriever {
         return allResults;
     }
 
+    /**
+     * Fetches ALL edges for the given vertices using bulk partition reads (2 CQL per vertex:
+     * one for edges_out, one for edges_in), then filters by the requested edge labels in memory.
+     *
+     * This is more efficient than per-label CQL queries for indexsearch because it trades
+     * a few extra rows fetched for dramatically fewer network round-trips:
+     *   - Per-label approach: N vertices × L labels × directions = ~1,500 CQL for 100 results
+     *   - Full-scan approach: N vertices × 2 = 200 CQL for 100 results
+     *
+     * The limitPerLabel constraint is NOT enforced here — it is enforced downstream by
+     * {@link VertexEdgePropertiesCache#addEdgeLabelToVertexIds} which caps edges per (vertex, label).
+     */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> fetchEdgesViaFullScan(Set<String> vertexIds, Set<String> edgeLabels) {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("fetchEdgesViaFullScan");
+        try {
+            Map<String, List<AtlasEdge>> allEdgesMap = (Map) graph.getEdgesForVertices(vertexIds);
+
+            List<Map<String, Object>> results = new ArrayList<>();
+            Set<String> seenEdgeIds = new HashSet<>();
+
+            for (String vertexId : vertexIds) {
+                List<AtlasEdge> edges = allEdgesMap.getOrDefault(vertexId, Collections.emptyList());
+
+                for (AtlasEdge edge : edges) {
+                    String edgeId = edge.getIdForDisplay();
+                    if (!seenEdgeIds.add(edgeId)) continue;
+
+                    String label = edge.getLabel();
+                    if (!edgeLabels.contains(label)) continue;
+
+                    String state = edge.getProperty(STATE_PROPERTY_KEY, String.class);
+                    if (!ACTIVE.name().equals(state)) continue;
+
+                    String relGuid = edge.getProperty(RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
+                    if (relGuid == null) continue;
+
+                    Map<String, Object> edgeInfo = new HashMap<>();
+                    edgeInfo.put("id", edge.getId());
+
+                    LinkedHashMap<String, Object> valueMap = new LinkedHashMap<>();
+                    for (String key : edge.getPropertyKeys()) {
+                        valueMap.put(key, edge.getProperty(key, Object.class));
+                    }
+                    edgeInfo.put("valueMap", valueMap);
+                    edgeInfo.put("label", label);
+                    edgeInfo.put("inVertexId", edge.getInVertex().getId());
+                    edgeInfo.put("outVertexId", edge.getOutVertex().getId());
+                    results.add(edgeInfo);
+                }
+            }
+
+            LOG.debug("fetchEdgesViaFullScan: {} vertices, {} labels, {} edges found",
+                      vertexIds.size(), edgeLabels.size(), results.size());
+
+            return results;
+        } finally {
+            RequestContext.get().endMetricRecord(metricRecorder);
+        }
+    }
 
     public VertexEdgePropertiesCache enrichVertexPropertiesByVertexIds(Set<String> vertexIds, Set<String> attributes) {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("enrichVertexPropertiesByVertexIds");
@@ -1563,43 +1623,22 @@ public class EntityGraphRetriever {
 
            Set<String> vertexIdsToProcess = new HashSet<>();
            if (!CollectionUtils.isEmpty(edgeLabelsToProcess)) {
-               boolean bulkFetch = AtlasConfiguration.ATLAS_INDEXSEARCH_EDGE_BULK_FETCH_ENABLE.getBoolean();
                List<Map<String, Object>> relationEdges;
 
                if (graph instanceof CassandraGraph) {
-                   // ZeroGraph: group vertices by type so each type-group only queries the
-                   // labels relevant to that type, in the correct direction. This compounds
-                   // the per-type filtering optimization with direction-aware fetching —
-                   // a Table vertex won't fire CQL for glossary/domain labels that a mixed
-                   // result set contributes to the flat union.
-                   relationEdges = new ArrayList<>();
-                   Map<String, Set<String>> typeToVertexIds = new HashMap<>();
-                   for (String vertexId : vertexIds) {
-                       String typeName = vertexEdgePropertyCache.getTypeName(vertexId);
-                       if (StringUtils.isNotEmpty(typeName) && perTypeEdgeLabels.containsKey(typeName)) {
-                           typeToVertexIds.computeIfAbsent(typeName, k -> new LinkedHashSet<>()).add(vertexId);
-                       }
-                   }
-
-                   for (Map.Entry<String, Set<String>> entry : typeToVertexIds.entrySet()) {
-                       Set<String> typeVertexIds = entry.getValue();
-                       Map<String, AtlasEdgeDirection> typeEdgeLabels = perTypeEdgeLabels.get(entry.getKey());
-                       if (MapUtils.isEmpty(typeEdgeLabels)) {
-                           continue;
-                       }
-                       List<Map<String, Object>> typeEdges = bulkFetch
-                               ? getConnectedRelationEdgesVertexBatching(typeVertexIds, typeEdgeLabels, relationAttrsSize)
-                               : getConnectedRelationEdges(typeVertexIds, typeEdgeLabels, relationAttrsSize);
-                       relationEdges.addAll(typeEdges);
-                   }
+                   // ZeroGraph: fetch ALL edges per vertex (2 CQL per vertex, async) instead
+                   // of per-label CQL (N×L queries). Filters by requested labels in memory.
+                   // For 100 results × 15 labels: 200 CQL vs 1,500 — 7.5× fewer round-trips.
+                   // The downstream addEdgeLabelToVertexIds enforces limitPerLabel.
+                   relationEdges = fetchEdgesViaFullScan(vertexIds, edgeLabelsToProcess);
                } else {
-                   // JanusGraph: single Gremlin traversal with the flat union of labels.
-                   // Per-type grouping would turn 1 traversal into N with no storage-level
-                   // savings, adding per-call overhead — so we keep the existing behavior here.
+                   // JanusGraph: existing Gremlin traversal path — unchanged
                    Map<String, AtlasEdgeDirection> edgeLabelDirections = flattenPerTypeDirections(perTypeEdgeLabels);
-                   relationEdges = bulkFetch
-                           ? getConnectedRelationEdgesVertexBatching(vertexIds, edgeLabelDirections, relationAttrsSize)
-                           : getConnectedRelationEdges(vertexIds, edgeLabelDirections, relationAttrsSize);
+                   if (AtlasConfiguration.ATLAS_INDEXSEARCH_EDGE_BULK_FETCH_ENABLE.getBoolean()) {
+                       relationEdges = getConnectedRelationEdgesVertexBatching(vertexIds, edgeLabelDirections, relationAttrsSize);
+                   } else {
+                       relationEdges = getConnectedRelationEdges(vertexIds, edgeLabelDirections, relationAttrsSize);
+                   }
                }
 
 
