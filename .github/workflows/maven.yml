@@ -27,6 +27,7 @@ on:
       - lite_master
       - switchable-graph-provider
       - ring-*
+      - ms927
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
