@@ -570,12 +570,12 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 return;
             }
             Set<String> vertexIds = results.stream().map(result -> {
-                AtlasVertex vertex = result.getVertex();
-                if (vertex == null) {
-                    LOG.warn("vertex in null");
+                String vertexId = result.getVertexId();
+                if (vertexId == null) {
+                    LOG.warn("vertex id is null for result");
                     return null;
                 }
-                return vertex.getId().toString();
+                return vertexId;
             }).filter(Objects::nonNull).collect(Collectors.toSet());
             VertexEdgePropertiesCache vertexEdgePropertiesCache;
             if (useVertexEdgeBulkFetching) {
