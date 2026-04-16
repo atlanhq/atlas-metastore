@@ -35,6 +35,9 @@ import java.util.stream.Collectors;
 import static org.apache.atlas.AtlasErrorCode.RESOURCE_NOT_FOUND;
 import static org.apache.atlas.auth.client.keycloak.AtlasKeycloakClient.getKeycloakClient;
 
+import org.apache.atlas.auth.client.heracles.AtlasHeraclesClient;
+import org.apache.atlas.auth.client.heracles.models.IdentityRoleRepresentation;
+
 public class KeycloakStore {
     private static final Logger LOG = LoggerFactory.getLogger(KeycloakStore.class);
 
@@ -383,12 +386,22 @@ public class KeycloakStore {
     }
 
     private RoleRepresentation getRoleById(String roleId) throws AtlasBaseException {
+        // Try Redis-backed identity API first (fast path)
+        try {
+            IdentityRoleRepresentation identity = AtlasHeraclesClient.getHeraclesClient()
+                    .getIdentityRoleById(roleId, "clientRole", "description");
+            if (identity != null) {
+                return identity.toKeycloakRole();
+            }
+        } catch (Exception e) {
+            LOG.warn("Identity API lookup failed for role {}, falling back to Keycloak: {}", roleId, e.getMessage());
+        }
 
+        // Fallback to Keycloak
         try {
             return getKeycloakClient().getRoleById(roleId);
         } catch (Exception e) {
-            if(e instanceof AtlasBaseException && Objects.equals(RESOURCE_NOT_FOUND.getErrorCode(), ((AtlasBaseException) e).getAtlasErrorCode().getErrorCode()))
-            {
+            if (e instanceof AtlasBaseException && Objects.equals(RESOURCE_NOT_FOUND.getErrorCode(), ((AtlasBaseException) e).getAtlasErrorCode().getErrorCode())) {
                 LOG.error("Role not found with id {}", roleId);
                 throw new AtlasBaseException(RESOURCE_NOT_FOUND, "Role with id " + roleId);
             }
