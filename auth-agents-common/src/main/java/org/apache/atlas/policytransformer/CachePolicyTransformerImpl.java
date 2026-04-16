@@ -383,21 +383,35 @@ public class CachePolicyTransformerImpl {
             policyDeltas.add(delta);
         }
 
-        // handle delete changes separately as they won't be present in atlas policies
+        // Collect GUIDs of enabled policies that were actually fetched for this service
+        Set<String> fetchedEnabledGuids = atlasPolicies.stream()
+                .map(AtlasEntityHeader::getGuid)
+                .collect(Collectors.toSet());
+
+        // Handle delete changes separately as they won't be present in atlas policies.
+        // Also treat policies that had a non-DELETE audit event but are absent from the
+        // fetched results as deletes — this covers policies that were disabled (isEnabled=false)
+        // since getAtlasPolicies now always filters on isEnabled=true.
         List<RangerPolicyDelta> deletedPolicyDeltas = new ArrayList<>();
         for (String policyGuid : policyGuids) {
             Integer deltaChangeType = auditEventToDeltaChangeType.get(policyChanges.get(policyGuid));
             if (deltaChangeType == null) {
                 continue;
             }
-            if (deltaChangeType == RangerPolicyDelta.CHANGE_TYPE_POLICY_DELETE) {
+            boolean isActualDelete = deltaChangeType == RangerPolicyDelta.CHANGE_TYPE_POLICY_DELETE;
+            boolean isNowDisabled  = !isActualDelete && !fetchedEnabledGuids.contains(policyGuid);
+
+            if (isActualDelete || isNowDisabled) {
+                if (isNowDisabled) {
+                    LOG.info("PolicyDelta: {}: policy guid={} is disabled, emitting DELETE delta", serviceName, policyGuid);
+                }
                 RangerPolicy deletedPolicy = new RangerPolicy();
                 deletedPolicy.setGuid(policyGuid);
                 deletedPolicy.setService(serviceName);
                 deletedPolicy.setServiceType(serviceType);
                 RangerPolicyDelta deletedPolicyDelta = new RangerPolicyDelta(
                         deletedPolicy.getId(),
-                        deltaChangeType,
+                        RangerPolicyDelta.CHANGE_TYPE_POLICY_DELETE,
                         deletedPolicy.getVersion(),
                         deletedPolicy
                 );
@@ -713,8 +727,8 @@ public class CachePolicyTransformerImpl {
                 mustClauseList.add(getMap("terms", getMap("__guid", policyGuids)));
             } else {
                 mustClauseList.add(getMap("term", getMap(ATTR_POLICY_SERVICE_NAME, serviceName)));
-                mustClauseList.add(getMap("term", getMap(ATTR_POLICY_IS_ENABLED, true)));
             }
+            mustClauseList.add(getMap("term", getMap(ATTR_POLICY_IS_ENABLED, true)));
 
             dsl.put("query", getMap("bool", getMap("must", mustClauseList)));
 
