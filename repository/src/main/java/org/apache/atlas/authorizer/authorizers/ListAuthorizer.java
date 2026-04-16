@@ -105,6 +105,8 @@ public class ListAuthorizer {
         List<String> combinedEntities = new ArrayList<>();
         Set<String> combinedEntityTypes = new HashSet<>();
         List<Map<String, Object>> shouldClauses = new ArrayList<>();
+        // Group policies by their entity-type set to merge entity patterns into fewer clauses
+        Map<Set<String>, List<String>> groupedByEntityType = new HashMap<>();
 
         for (RangerPolicy policy : policies) {
             if (MapUtils.isNotEmpty(policy.getResources())) {
@@ -120,25 +122,36 @@ public class ListAuthorizer {
                 }
 
                 if (entities.contains("*") && entityTypesRaw.contains("*")) {
-                    Map<String, String> emptyMap = new HashMap<>();
                     shouldClauses.clear();
-                    shouldClauses.add(getMap("match_all",emptyMap));
-                    break;
+                    shouldClauses.add(getMap("match_all", new HashMap<>()));
+                    return shouldClauses;
                 }
 
-                entities.remove("*");
+                boolean hadWildcardEntity = entities.remove("*");
                 entityTypesRaw.remove("*");
-                
+
                 if (!entities.isEmpty() && entityTypesRaw.isEmpty()) {
                     combinedEntities.addAll(entities);
                 } else if (entities.isEmpty() && !entityTypesRaw.isEmpty()) {
                     combinedEntityTypes.addAll(entityTypesRaw);
                 } else if (!entities.isEmpty() && !entityTypesRaw.isEmpty()) {
-                    Map<String, Object> dslForPolicyResources = getDSLForResources(entities, new HashSet<>(entityTypesRaw), null, null);
-                    shouldClauses.add(dslForPolicyResources);
+                    // Group by entity-type set: merge entity patterns with same types into one clause
+                    Set<String> entityTypeKey = new HashSet<>(entityTypesRaw);
+                    groupedByEntityType.computeIfAbsent(entityTypeKey, k -> new ArrayList<>()).addAll(entities);
+                } else if (hadWildcardEntity) {
+                    // entity=["*"] with no entity-type restriction → match_all
+                    shouldClauses.clear();
+                    shouldClauses.add(getMap("match_all", new HashMap<>()));
+                    return shouldClauses;
                 }
             }
         }
+
+        // Emit one clause per entity-type group instead of one per policy
+        for (Map.Entry<Set<String>, List<String>> entry : groupedByEntityType.entrySet()) {
+            shouldClauses.add(getDSLForResources(entry.getValue(), entry.getKey(), null, null));
+        }
+
         if (!combinedEntities.isEmpty()) {
             shouldClauses.add(getDSLForResources(combinedEntities, new HashSet<>(), null, null));
         }
@@ -230,22 +243,23 @@ public class ListAuthorizer {
     }
 
     public static List<Map<String, Object>> getDSLForAbacPolicies(List<RangerPolicy> policies) {
-        List<String> dslList = new ArrayList<>();
+        // Use a Set to deduplicate identical DSL strings from different personas
+        Set<String> dslSet = new HashSet<>();
 
         for (RangerPolicy policy : policies) {
             JsonNode entityFilterCriteriaNode = policy.getPolicyParsedFilterCriteria("entity");
             if (entityFilterCriteriaNode != null) {
                 JsonNode dsl = JsonToElasticsearchQuery.convertJsonToQuery(entityFilterCriteriaNode);
-                dslList.add(dsl.toString());
+                dslSet.add(dsl.toString());
             }
         }
 
         List<Map<String, Object>> clauses = new ArrayList<>();
-        for (String dsl: dslList) {
-            String policyDSLBase64 = Base64.getEncoder().encodeToString(dsl.getBytes());;
+        for (String dsl : dslSet) {
+            String policyDSLBase64 = Base64.getEncoder().encodeToString(dsl.getBytes());
             clauses.add(getMap("wrapper", getMap("query", policyDSLBase64)));
         }
-        LOG.info("ABAC_AUTH: FULL_RESTRICTION: filter for abac policies: {}", dslList);
+        LOG.info("ABAC_AUTH: FULL_RESTRICTION: filter for abac policies: {}", dslSet);
         return clauses;
     }
 
