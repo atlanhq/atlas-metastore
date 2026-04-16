@@ -25,6 +25,7 @@ import static org.apache.atlas.repository.Constants.CLASSIFICATION_TEXT_KEY;
 import static org.apache.atlas.repository.Constants.PROPAGATED_CLASSIFICATION_NAMES_KEY;
 import static org.apache.atlas.repository.Constants.PROPAGATED_TRAIT_NAMES_PROPERTY_KEY;
 import static org.apache.atlas.repository.Constants.TRAIT_NAMES_PROPERTY_KEY;
+import static org.apache.atlas.repository.Constants.EDGE_INDEX_NAME;
 import static org.apache.atlas.repository.Constants.VERTEX_INDEX_NAME;
 import static org.apache.atlas.repository.audit.ESBasedAuditRepository.getHttpHosts;
 
@@ -400,6 +401,61 @@ public class ESConnector implements Closeable {
     public void close() throws IOException {
         if (lowLevelClient != null) {
             lowLevelClient.close();
+        }
+    }
+
+    /**
+     * MS-1008: Ensure the edge index exists in ES and has dynamic_templates mapping
+     * strings to keyword. Prevents relationship attributes (toTypeLabel, fromTypeLabel)
+     * from being dynamically mapped as text — which breaks aggregations/sorts with HTTP 400.
+     *
+     * Handles two failure scenarios:
+     *   1. Edge index missing in ES (JG schema still references it from Cassandra) — creates it
+     *   2. Edge index exists but has no dynamic_templates — applies them
+     *
+     * Idempotent. Safe to call on every startup.
+     */
+    public static void ensureEdgeIndexDynamicTemplates() {
+        try {
+            // Ensure the ES index exists — JG's schema may reference an edge index
+            // that was deleted/lost in ES (cluster recovery, manual deletion).
+            try {
+                Request headReq = new Request("HEAD", "/" + EDGE_INDEX_NAME);
+                Response headResp = lowLevelClient.performRequest(headReq);
+                if (headResp.getStatusLine().getStatusCode() == 404) {
+                    Request createReq = new Request("PUT", "/" + EDGE_INDEX_NAME);
+                    createReq.setEntity(new StringEntity("{}", ContentType.APPLICATION_JSON));
+                    lowLevelClient.performRequest(createReq);
+                    LOG.info("ESConnector: created missing ES edge index: {}", EDGE_INDEX_NAME);
+                }
+            } catch (org.elasticsearch.client.ResponseException re) {
+                if (re.getResponse().getStatusLine().getStatusCode() == 404) {
+                    Request createReq = new Request("PUT", "/" + EDGE_INDEX_NAME);
+                    createReq.setEntity(new StringEntity("{}", ContentType.APPLICATION_JSON));
+                    lowLevelClient.performRequest(createReq);
+                    LOG.info("ESConnector: created missing ES edge index: {}", EDGE_INDEX_NAME);
+                }
+            }
+
+            String body = "{\"dynamic_templates\":[{\"edge_strings\":" +
+                    "{\"match_mapping_type\":\"string\",\"mapping\":" +
+                    "{\"type\":\"keyword\",\"ignore_above\":5120}}}]}";
+
+            Request request = new Request("PUT", "/" + EDGE_INDEX_NAME + "/_mapping");
+            request.setEntity(new StringEntity(body, ContentType.APPLICATION_JSON));
+
+            Response response = lowLevelClient.performRequest(request);
+            int statusCode = response.getStatusLine().getStatusCode();
+
+            if (statusCode >= 200 && statusCode < 300) {
+                LOG.info("ESConnector: ensured dynamic_templates on edge index (strings → keyword)");
+            } else {
+                String responseBody = EntityUtils.toString(response.getEntity());
+                LOG.warn("ESConnector: failed to apply dynamic_templates to edge index (HTTP {}): {}",
+                        statusCode, responseBody);
+            }
+        } catch (Exception e) {
+            LOG.warn("ESConnector: failed to ensure edge index dynamic_templates — non-fatal, existing mappings may suffice", e);
         }
     }
 

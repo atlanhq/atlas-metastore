@@ -284,12 +284,29 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
 
         typeDefs.addAll(typeRegistry.getAllEntityDefs());
         typeDefs.addAll(typeRegistry.getAllBusinessMetadataDefs());
+        // MS-1008: Include relationship types so edge-index property keys (toTypeLabel,
+        // fromTypeLabel, etc.) are re-registered on startup. Without this, pod restarts
+        // after ES edge-index recreation leave relationship attributes without keyword
+        // mappings — ES falls back to dynamic text mapping, breaking aggregations/sorts.
+        typeDefs.addAll(typeRegistry.getAllRelationshipDefs());
 
         ChangedTypeDefs      changedTypeDefs = new ChangedTypeDefs(null, new ArrayList<>(typeDefs), null);
         AtlasGraphManagement management      = null;
 
         try {
             management = provider.get().getManagementSystem();
+
+            // MS-1008: Ensure edge index exists in ES and has dynamic_templates BEFORE
+            // processing typedefs. CassandraGraph's schema says the edge index exists (from
+            // Cassandra) but the actual ES index may be missing (ES maintenance, cluster
+            // recovery, manual deletion). Without the ES index, updateIndexForTypeDef's
+            // addMixedIndex calls fail silently. Also applies dynamic_templates so any
+            // unregistered string fields default to keyword instead of text.
+            try {
+                ESConnector.ensureEdgeIndexDynamicTemplates();
+            } catch (Exception e) {
+                LOG.warn("Failed to ensure edge index — non-fatal, typedef processing may partially fail", e);
+            }
 
             // Ensure property keys and mixed index entries exist for all entity attributes.
             // For persistent-schema backends (JanusGraph) this is a no-op since the schema
