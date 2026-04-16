@@ -1584,7 +1584,7 @@ public class EntityGraphRetriever {
                    for (Map.Entry<String, Set<String>> entry : typeToVertexIds.entrySet()) {
                        Set<String> typeVertexIds = entry.getValue();
                        Map<String, AtlasEdgeDirection> typeEdgeLabels = perTypeEdgeLabels.get(entry.getKey());
-                       if (CollectionUtils.isEmpty(typeEdgeLabels)) {
+                       if (MapUtils.isEmpty(typeEdgeLabels)) {
                            continue;
                        }
                        List<Map<String, Object>> typeEdges = bulkFetch
