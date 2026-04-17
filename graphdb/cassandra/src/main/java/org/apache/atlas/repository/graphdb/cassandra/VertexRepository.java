@@ -90,32 +90,48 @@ public class VertexRepository {
 
     /**
      * Fetch multiple vertices concurrently using async Cassandra queries.
-     * All queries are fired in parallel and results collected, reducing
-     * wall-clock time from N sequential round-trips to ~1 round-trip.
+     * Queries are sub-batched (200 at a time) and throttled to cap concurrent
+     * in-flight requests to Cassandra.
      */
     public Map<String, CassandraVertex> getVerticesAsync(Collection<String> vertexIds, CassandraGraph graph) {
+        return getVerticesAsync(vertexIds, graph, null);
+    }
+
+    public Map<String, CassandraVertex> getVerticesAsync(Collection<String> vertexIds,
+                                                          CassandraGraph graph,
+                                                          CassandraAsyncThrottle throttle) {
         if (vertexIds == null || vertexIds.isEmpty()) {
             return Collections.emptyMap();
         }
 
-        // Fire all queries concurrently
-        Map<String, CompletionStage<AsyncResultSet>> futures = new LinkedHashMap<>();
-        for (String vertexId : vertexIds) {
-            futures.put(vertexId, session.executeAsync(selectVertexStmt.bind(vertexId)));
-        }
-
-        // Collect results
+        final int SUB_BATCH = 200;
         Map<String, CassandraVertex> results = new LinkedHashMap<>();
-        for (Map.Entry<String, CompletionStage<AsyncResultSet>> entry : futures.entrySet()) {
-            try {
-                AsyncResultSet rs = entry.getValue().toCompletableFuture().join();
-                Row row = rs.one();
-                if (row != null) {
-                    CassandraVertex vertex = rowToVertex(row, graph);
-                    results.put(vertex.getIdString(), vertex);
+        List<String> idList = new ArrayList<>(vertexIds);
+
+        for (int b = 0; b < idList.size(); b += SUB_BATCH) {
+            List<String> batch = idList.subList(b, Math.min(b + SUB_BATCH, idList.size()));
+
+            Map<String, CompletionStage<AsyncResultSet>> futures = new LinkedHashMap<>();
+            for (String vertexId : batch) {
+                if (throttle != null) {
+                    futures.put(vertexId, throttle.throttle(
+                            () -> session.executeAsync(selectVertexStmt.bind(vertexId))));
+                } else {
+                    futures.put(vertexId, session.executeAsync(selectVertexStmt.bind(vertexId)));
                 }
-            } catch (Exception e) {
-                LOG.warn("Failed to fetch vertex {}", entry.getKey(), e);
+            }
+
+            for (Map.Entry<String, CompletionStage<AsyncResultSet>> entry : futures.entrySet()) {
+                try {
+                    AsyncResultSet rs = entry.getValue().toCompletableFuture().join();
+                    Row row = rs.one();
+                    if (row != null) {
+                        CassandraVertex vertex = rowToVertex(row, graph);
+                        results.put(vertex.getIdString(), vertex);
+                    }
+                } catch (Exception e) {
+                    LOG.warn("Failed to fetch vertex {}", entry.getKey(), e);
+                }
             }
         }
 

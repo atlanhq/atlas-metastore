@@ -2,6 +2,7 @@ package org.apache.atlas.repository.graphdb.cassandra;
 
 // CassandraGraph: direct Cassandra + ES graph backend implementation
 import com.datastax.oss.driver.api.core.CqlSession;
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.ESAliasRequestBuilder;
@@ -78,6 +79,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     private final Set<String>         multiProperties;
     private final RuntimeIdStrategy   idStrategy;
     private final boolean             claimEnabled;
+    private final CassandraAsyncThrottle asyncThrottle;
 
     // Transaction buffer: accumulates changes in memory, flushed on commit
     private final ThreadLocal<TransactionBuffer> txBuffer = ThreadLocal.withInitial(TransactionBuffer::new);
@@ -109,6 +111,8 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         this.multiProperties     = ConcurrentHashMap.newKeySet();
         this.idStrategy          = idStrategy != null ? idStrategy : RuntimeIdStrategy.LEGACY;
         this.claimEnabled        = claimEnabled;
+        this.asyncThrottle       = new CassandraAsyncThrottle(
+                AtlasConfiguration.CASSANDRA_ASYNC_MAX_CONCURRENT.getInt());
 
         // Start background processors
         this.esOutboxProcessor.start();
@@ -166,7 +170,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
         // Fetch uncached vertices in parallel using async queries
         if (!uncachedIds.isEmpty()) {
-            Map<String, CassandraVertex> fetched = vertexRepository.getVerticesAsync(uncachedIds, this);
+            Map<String, CassandraVertex> fetched = vertexRepository.getVerticesAsync(uncachedIds, this, asyncThrottle);
             for (CassandraVertex v : fetched.values()) {
                 vertexCache.get().put(v.getIdString(), v);
                 result.add(v);
@@ -185,7 +189,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     public Map<String, List<CassandraEdge>> getAllEdgesForVertices(Collection<String> vertexIds) {
         // Fetch persisted edges for all vertices in parallel
         Map<String, List<CassandraEdge>> persisted =
-            edgeRepository.getEdgesForVerticesAsync(vertexIds, AtlasEdgeDirection.BOTH, this);
+            edgeRepository.getEdgesForVerticesAsync(vertexIds, AtlasEdgeDirection.BOTH, this, asyncThrottle);
 
         // Merge with transaction buffer
         Map<String, List<CassandraEdge>> result = new LinkedHashMap<>();
@@ -234,7 +238,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
         // Fetch persisted edges filtered by labels
         Map<String, List<CassandraEdge>> persisted =
-            edgeRepository.getEdgesForVerticesByLabelsAsync(vertexIds, edgeLabels, AtlasEdgeDirection.BOTH, this);
+            edgeRepository.getEdgesForVerticesByLabelsAsync(vertexIds, edgeLabels, AtlasEdgeDirection.BOTH, this, asyncThrottle);
 
         // Merge with transaction buffer (filtered by labels)
         Map<String, List<AtlasEdge<CassandraVertex, CassandraEdge>>> result = new LinkedHashMap<>();
@@ -276,7 +280,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         }
 
         Map<String, List<CassandraEdge>> persisted =
-            edgeRepository.getEdgesForVerticesByLabelsAsync(vertexIds, edgeLabels, AtlasEdgeDirection.BOTH, this, limitPerLabel);
+            edgeRepository.getEdgesForVerticesByLabelsAsync(vertexIds, edgeLabels, AtlasEdgeDirection.BOTH, this, limitPerLabel, asyncThrottle);
 
         Map<String, List<AtlasEdge<CassandraVertex, CassandraEdge>>> result = new LinkedHashMap<>();
         for (String vertexId : vertexIds) {

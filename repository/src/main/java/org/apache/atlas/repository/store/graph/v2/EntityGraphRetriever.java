@@ -998,30 +998,116 @@ public class EntityGraphRetriever {
                 // Batch fetch vertices at current level in sub-batches of 500
                 final int VERTEX_FETCH_BATCH = 500;
                 List<String> levelIds = new ArrayList<>(verticesAtCurrentLevel);
-                Set<AtlasVertex> levelVertices = new HashSet<>();
+                @SuppressWarnings("unchecked")
+                Map<String, AtlasVertex> levelVertexMap = new LinkedHashMap<>();
                 for (int b = 0; b < levelIds.size(); b += VERTEX_FETCH_BATCH) {
                     int end = Math.min(b + VERTEX_FETCH_BATCH, levelIds.size());
-                    levelVertices.addAll(graph.getVertices(levelIds.subList(b, end).toArray(new String[0])));
+                    Set<AtlasVertex> batchVertices = graph.getVertices(levelIds.subList(b, end).toArray(new String[0]));
+                    for (AtlasVertex v : batchVertices) {
+                        levelVertexMap.put(v.getIdForDisplay(), v);
+                    }
                 }
 
-                List<CompletableFuture<Set<String>>> futures = new ArrayList<>();
-                for (AtlasVertex entityVertex : levelVertices) {
-                    visitedVerticesIds.add(entityVertex.getIdForDisplay());
+                // Step 1: Mark visited and collect propagation edge labels per vertex
+                Map<String, String[]> vertexPropEdges = new LinkedHashMap<>();
+                Set<String> allEdgeLabels = new LinkedHashSet<>();
 
-                    if (storeVerticesWithoutClassification && !verticesWithClassification.contains(entityVertex.getIdForDisplay())) {
-                        verticesToPropagateTo.add(entityVertex.getIdForDisplay());
+                for (AtlasVertex entityVertex : levelVertexMap.values()) {
+                    String vertexId = entityVertex.getIdForDisplay();
+                    visitedVerticesIds.add(vertexId);
+
+                    if (storeVerticesWithoutClassification && !verticesWithClassification.contains(vertexId)) {
+                        verticesToPropagateTo.add(vertexId);
                     }
 
-                    futures.add(CompletableFuture.supplyAsync(() -> getAdjacentVerticesIds(entityVertex, classificationId,
-                            relationshipGuidToExclude, edgeLabelsToCheck, toExclude, visitedVerticesIds), executorService));
+                    AtlasEntityType entityType = typeRegistry.getEntityTypeByName(getTypeName(entityVertex));
+                    String[] tagPropEdges = entityType != null ? entityType.getTagPropagationEdgesArray() : null;
+
+                    if (tagPropEdges == null || tagPropEdges.length == 0) {
+                        continue;
+                    }
+
+                    // Apply edge label filter
+                    if (edgeLabelsToCheck != null && !edgeLabelsToCheck.isEmpty()) {
+                        if (toExclude) {
+                            tagPropEdges = Arrays.stream(tagPropEdges)
+                                    .filter(x -> !edgeLabelsToCheck.contains(x))
+                                    .toArray(String[]::new);
+                        } else {
+                            tagPropEdges = Arrays.stream(tagPropEdges)
+                                    .filter(edgeLabelsToCheck::contains)
+                                    .toArray(String[]::new);
+                        }
+                    }
+
+                    if (tagPropEdges.length > 0) {
+                        vertexPropEdges.put(vertexId, tagPropEdges);
+                        Collections.addAll(allEdgeLabels, tagPropEdges);
+                    }
                 }
 
-                futures.stream().map(CompletableFuture::join).forEach(x -> {
-                    if (x != null) {
-                        verticesToVisitNextLevel.addAll(x);
-                        traversedVerticesIds.addAll(x);
+                // Step 2: Bulk edge fetch — one call for all vertices + labels (throttled internally)
+                @SuppressWarnings("unchecked")
+                Map<String, List<AtlasEdge>> allEdges = !allEdgeLabels.isEmpty() && !vertexPropEdges.isEmpty()
+                        ? (Map) graph.getEdgesForVertices(vertexPropEdges.keySet(), allEdgeLabels)
+                        : Collections.emptyMap();
+
+                // Step 3: Process pre-fetched edges in-memory (same filtering as getAdjacentVerticesIds)
+                RequestContext requestContext2 = RequestContext.get();
+                for (Map.Entry<String, String[]> entry : vertexPropEdges.entrySet()) {
+                    String vertexId = entry.getKey();
+                    String[] propEdges = entry.getValue();
+                    Set<String> propEdgeSet = new HashSet<>(Arrays.asList(propEdges));
+                    AtlasVertex entityVertex = levelVertexMap.get(vertexId);
+
+                    List<AtlasEdge> edges = allEdges.getOrDefault(vertexId, Collections.emptyList());
+                    for (AtlasEdge propagationEdge : edges) {
+                        // Filter: only edges matching this vertex's propagation labels
+                        if (!propEdgeSet.contains(propagationEdge.getLabel())) {
+                            continue;
+                        }
+
+                        if (getEdgeStatus(propagationEdge) != ACTIVE
+                                && !(requestContext2.getCurrentTask() != null
+                                     && requestContext2.getDeletedEdgesIds().contains(propagationEdge.getIdForDisplay()))) {
+                            continue;
+                        }
+
+                        PropagateTags tagPropagation = getPropagateTags(propagationEdge);
+                        if (tagPropagation == null || tagPropagation == NONE) {
+                            continue;
+                        } else if (tagPropagation == TWO_TO_ONE) {
+                            if (isOutVertex(entityVertex, propagationEdge)) {
+                                continue;
+                            }
+                        } else if (tagPropagation == ONE_TO_TWO) {
+                            if (!isOutVertex(entityVertex, propagationEdge)) {
+                                continue;
+                            }
+                        }
+
+                        if (relationshipGuidToExclude != null) {
+                            if (StringUtils.equals(getRelationshipGuid(propagationEdge), relationshipGuidToExclude)) {
+                                continue;
+                            }
+                        }
+
+                        if (classificationId != null) {
+                            List<String> blockedClassificationIds = getBlockedClassificationIds(propagationEdge);
+                            if (CollectionUtils.isNotEmpty(blockedClassificationIds) && blockedClassificationIds.contains(classificationId)) {
+                                continue;
+                            }
+                        }
+
+                        AtlasVertex adjacentVertex = getOtherVertex(propagationEdge, entityVertex);
+                        String adjacentVertexId = adjacentVertex.getIdForDisplay();
+
+                        if (!visitedVerticesIds.contains(adjacentVertexId)) {
+                            verticesToVisitNextLevel.add(adjacentVertexId);
+                            traversedVerticesIds.add(adjacentVertexId);
+                        }
                     }
-                });
+                }
 
                 verticesAtCurrentLevel.clear();
                 verticesAtCurrentLevel.addAll(verticesToVisitNextLevel);
