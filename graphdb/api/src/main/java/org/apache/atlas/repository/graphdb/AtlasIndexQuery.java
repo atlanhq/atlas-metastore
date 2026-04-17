@@ -115,16 +115,6 @@ public interface AtlasIndexQuery<V, E> {
 
         Map<String, List<String>> getHighLights();
         ArrayList<Object> getSort();
-
-        /**
-         * Returns the vertex ID for this result without necessarily loading the full vertex.
-         * ZeroGraph overrides this to extract the ID from the ES doc _id (CPU-only, no CQL).
-         * Default falls back to getVertex().getId() for backward compatibility.
-         */
-        default String getVertexId() {
-            AtlasVertex<V, E> vertex = getVertex();
-            return vertex != null ? vertex.getId().toString() : null;
-        }
     }
 
 }

@@ -42,6 +42,7 @@ import org.apache.atlas.repository.VertexEdgePropertiesCache;
 import org.apache.atlas.repository.graph.GraphBackedSearchIndexer;
 import org.apache.atlas.repository.graphdb.*;
 import org.apache.atlas.repository.graphdb.AtlasIndexQuery.Result;
+import org.apache.atlas.repository.graphdb.cassandra.CassandraIndexQuery;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.userprofile.UserProfileService;
@@ -570,12 +571,18 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 return;
             }
             Set<String> vertexIds = results.stream().map(result -> {
-                String vertexId = result.getVertexId();
-                if (vertexId == null) {
-                    LOG.warn("vertex id is null for result");
+                if (result instanceof CassandraIndexQuery.ResultImplDirect) {
+                    return ((CassandraIndexQuery.ResultImplDirect) result).getVertexId();
+                }
+                if (result instanceof CassandraIndexQuery.ResultImpl) {
+                    return ((CassandraIndexQuery.ResultImpl) result).getVertexId();
+                }
+                AtlasVertex vertex = result.getVertex();
+                if (vertex == null) {
+                    LOG.warn("vertex in null");
                     return null;
                 }
-                return vertexId;
+                return vertex.getId().toString();
             }).filter(Objects::nonNull).collect(Collectors.toSet());
             VertexEdgePropertiesCache vertexEdgePropertiesCache;
             if (useVertexEdgeBulkFetching) {

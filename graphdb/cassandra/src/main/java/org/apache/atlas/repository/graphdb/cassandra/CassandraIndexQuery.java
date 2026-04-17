@@ -795,12 +795,11 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
             return v;
         }
 
-        @Override
         public String getVertexId() {
             if (resolvedVertex != null) {
                 return resolvedVertex.getId().toString();
             }
-            return decodeDocId(hit.getId());
+            return hit.getId();
         }
 
         @Override
@@ -882,9 +881,8 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
             return v;
         }
 
-        @Override
         public String getVertexId() {
-            return decodeDocId(String.valueOf(hit.get("_id")));
+            return String.valueOf(hit.get("_id"));
         }
 
         @Override
