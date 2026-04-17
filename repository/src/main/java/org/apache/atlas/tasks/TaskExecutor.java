@@ -142,17 +142,6 @@ public class TaskExecutor {
                     TASK_LOG.warn("Task not scheduled as status was COMPLETE!", task);
                     return;
                 }
-                String tagTypeName = task.getTagTypeName();
-                if (task.getType() != null && task.getType().startsWith("CLASSIFICATION_PROPAGATION")
-                        && (tagTypeName == null || tagTypeName.isEmpty())) {
-                    LOG.warn("Task {} has empty tagTypeName, marking as FAILED immediately", task.getGuid());
-                    task.setStatus(AtlasTask.Status.FAILED);
-                    task.setAttemptCount(MAX_ATTEMPT_COUNT);
-                    task.setErrorMessage("Task has empty classificationTypeName");
-                    registry.updateStatus(taskVertex, task);
-                    return;
-                }
-
                 if (perfEnabled) {
                     perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, String.format("atlas.task:%s", task.getGuid(), task.getType()));
                 }
