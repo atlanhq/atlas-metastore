@@ -404,6 +404,51 @@ public class ESConnector implements Closeable {
     }
 
     /**
+     * MS-973: Fetch the set of field names currently mapped in the vertex_index ES index.
+     * Used by IndexHealthMetricService as a ground-truth cross-check against JG's
+     * schema cache — catches cases where JG reports a propertyKey as registered but
+     * ES has no actual mapping for it (cache-divergence bug observed on olympus).
+     *
+     * Returns an empty set on failure (ES unreachable, parse error, etc.), which the
+     * caller treats as "skip ES cross-check, fall back to JG-only".
+     */
+    public static Set<String> getVertexIndexMappedFields() {
+        try {
+            Request request = new Request("GET", "/" + VERTEX_INDEX_NAME + "/_mapping");
+            Response response = lowLevelClient.performRequest(request);
+            int statusCode = response.getStatusLine().getStatusCode();
+            if (statusCode < 200 || statusCode >= 300) {
+                LOG.warn("ESConnector: failed to fetch {}/_mapping (HTTP {}); index-health cross-check will skip",
+                        VERTEX_INDEX_NAME, statusCode);
+                return Collections.emptySet();
+            }
+            String body = EntityUtils.toString(response.getEntity());
+            // Response shape: { "<actual_index_name>": { "mappings": { "properties": { "field1": {...}, ... } } } }
+            // The outer key may be the index name or an alias; iterate over all top-level entries.
+            Map<String, Object> parsed = AtlasType.fromJson(body, Map.class);
+            Set<String> fieldNames = new HashSet<>();
+            if (parsed != null) {
+                for (Object indexValue : parsed.values()) {
+                    if (!(indexValue instanceof Map)) continue;
+                    Object mappings = ((Map<?, ?>) indexValue).get("mappings");
+                    if (!(mappings instanceof Map)) continue;
+                    Object properties = ((Map<?, ?>) mappings).get("properties");
+                    if (!(properties instanceof Map)) continue;
+                    for (Object key : ((Map<?, ?>) properties).keySet()) {
+                        if (key instanceof String) {
+                            fieldNames.add((String) key);
+                        }
+                    }
+                }
+            }
+            return fieldNames;
+        } catch (Exception e) {
+            LOG.warn("ESConnector: getVertexIndexMappedFields failed — returning empty set; index-health cross-check will skip", e);
+            return Collections.emptySet();
+        }
+    }
+
+    /**
      * Result of a bulk ES write operation for tag denorm attributes.
      */
     public static class TagDenormESWriteResult {

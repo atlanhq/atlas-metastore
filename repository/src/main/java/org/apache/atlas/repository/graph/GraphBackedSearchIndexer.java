@@ -652,13 +652,28 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
 
     private void resolveIndexFieldName(AtlasGraphManagement managementSystem, AtlasAttribute attribute) {
         try {
-            if (attribute.getIndexFieldName() == null && TypeCategory.PRIMITIVE.equals(attribute.getAttributeType().getTypeCategory())) {
-                AtlasStructType definedInType = attribute.getDefinedInType();
-                AtlasAttribute  baseInstance  = definedInType != null ? definedInType.getAttribute(attribute.getName()) : null;
+            if (attribute.getIndexFieldName() != null) {
+                return;
+            }
 
-                if (baseInstance != null && baseInstance.getIndexFieldName() != null) {
-                    attribute.setIndexFieldName(baseInstance.getIndexFieldName());
-                } else if (isIndexApplicable(getPrimitiveClass(attribute.getTypeName()), toAtlasCardinality(attribute.getAttributeDef().getCardinality()))) {
+            // MS-973: resolve the index "primitive" Class based on TypeCategory so self-heal
+            // also covers ENUM and array<string> attributes (previously only PRIMITIVE attrs
+            // reached this method's body — all other categories fell through silently).
+            //   - PRIMITIVE → the corresponding Java class (String, Integer, etc.)
+            //   - ENUM     → String.class (JG stores enum values as strings in the mixed index)
+            //   - ARRAY<string> → String.class (element is primitive string)
+            //   - other categories → null, self-heal not applicable here
+            Class primitiveClass = resolveIndexPrimitiveClass(attribute);
+            if (primitiveClass == null) {
+                return;
+            }
+
+            AtlasStructType definedInType = attribute.getDefinedInType();
+            AtlasAttribute  baseInstance  = definedInType != null ? definedInType.getAttribute(attribute.getName()) : null;
+
+            if (baseInstance != null && baseInstance.getIndexFieldName() != null) {
+                attribute.setIndexFieldName(baseInstance.getIndexFieldName());
+            } else if (isIndexApplicable(primitiveClass, toAtlasCardinality(attribute.getAttributeDef().getCardinality()))) {
                     AtlasPropertyKey propertyKey = managementSystem.getPropertyKey(attribute.getVertexPropertyName());
                     boolean isStringField = AtlasAttributeDef.IndexType.STRING.equals(attribute.getIndexType());
                     if (propertyKey != null) {
@@ -698,7 +713,6 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                                 + "attempting auto-repair for vertexPropertyName={}",
                                 attribute.getQualifiedName(), attribute.getVertexPropertyName());
                         try {
-                            Class primitiveClass = getPrimitiveClass(attribute.getTypeName());
                             AtlasCardinality cardinality = toAtlasCardinality(attribute.getAttributeDef().getCardinality());
                             // Match createIndexForAttribute logic: isStringField only true
                             // when the primitive class IS String AND indexType is STRING
@@ -783,10 +797,46 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                         }
                     }
                 }
-            }
         } catch (Exception excp) {
             LOG.warn("resolveIndexFieldName(attribute={}) failed.", attribute.getQualifiedName(), excp);
         }
+    }
+
+    /**
+     * MS-973: Resolve the Class used for mixed-index registration based on the attribute's TypeCategory.
+     * Returns null when self-heal is not applicable for the attribute's category.
+     * <p>
+     * Supported categories:
+     * <ul>
+     *   <li>PRIMITIVE — the matching Java class (String, Integer, etc.)</li>
+     *   <li>ENUM — String.class (JG stores enum values as strings in the mixed index)</li>
+     *   <li>ARRAY&lt;string&gt; — String.class</li>
+     * </ul>
+     * All other categories (STRUCT, MAP, CLASSIFICATION, ENTITY, array of non-string, etc.)
+     * return null and are skipped by the caller.
+     */
+    private Class resolveIndexPrimitiveClass(AtlasAttribute attribute) {
+        AtlasType    attributeType = attribute.getAttributeType();
+        TypeCategory category      = attributeType.getTypeCategory();
+
+        if (category == TypeCategory.PRIMITIVE) {
+            // May throw IllegalArgumentException for unknown primitive typenames —
+            // let it propagate to the outer try-catch in resolveIndexFieldName, which
+            // logs a WARN. Preserves pre-MS973 observability for this edge case.
+            return getPrimitiveClass(attribute.getTypeName());
+        } else if (category == TypeCategory.ENUM) {
+            return String.class;
+        } else if (category == TypeCategory.ARRAY && attributeType instanceof AtlasArrayType) {
+            AtlasType elementType = ((AtlasArrayType) attributeType).getElementType();
+            // Scope (MS-973): only array<string> for now. Other array<primitive> variants
+            // (int/long/boolean/date) or array<enum> can be added later if observed.
+            if (elementType != null
+                    && elementType.getTypeCategory() == TypeCategory.PRIMITIVE
+                    && AtlasBaseTypeDef.ATLAS_TYPE_STRING.equalsIgnoreCase(elementType.getTypeName())) {
+                return String.class;
+            }
+        }
+        return null;
     }
 
     private void createCommonVertexIndex(AtlasGraphManagement management,
