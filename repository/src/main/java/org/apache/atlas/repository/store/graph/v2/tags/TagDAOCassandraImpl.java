@@ -235,9 +235,6 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
                             .setConsistencyLevel(DefaultConsistencyLevel.LOCAL_ONE)
                             .build());
 
-            // === Health check statement ===
-            healthCheckStmt = prepare("SELECT release_version FROM system.local");
-
         } catch (Exception e) {
             LOG.error("Failed to initialize TagDAO", e);
             throw new AtlasBaseException("Failed to initialize TagDAO", e);
