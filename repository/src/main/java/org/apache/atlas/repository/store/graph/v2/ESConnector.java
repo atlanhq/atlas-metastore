@@ -456,7 +456,10 @@ public class ESConnector implements Closeable {
             }
         } catch (Exception e) {
             LOG.warn("ESConnector: failed to ensure edge index dynamic_templates — non-fatal, existing mappings may suffice", e);
-     * MS-973: Fetch the set of field names currently mapped in the vertex_index ES index.
+        }
+    }
+
+    /** MS-973: Fetch the set of field names currently mapped in the vertex_index ES index.
      * Used by IndexHealthMetricService as a ground-truth cross-check against JG's
      * schema cache — catches cases where JG reports a propertyKey as registered but
      * ES has no actual mapping for it (cache-divergence bug observed on olympus).
