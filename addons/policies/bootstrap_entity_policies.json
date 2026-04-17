@@ -4096,6 +4096,70 @@
                     "entity-delete"
                 ]
             }
+        },
+        {
+            "typeName": "AuthPolicy",
+            "attributes": {
+                "name": "READ_KNOWLEDGE_ENTITIES",
+                "qualifiedName": "READ_KNOWLEDGE_ENTITIES",
+                "description": "Allows all users to read Knowledge assets.",
+                "policyCategory": "bootstrap",
+                "policySubCategory": "default",
+                "policyServiceName": "atlas",
+                "policyType": "allow",
+                "policyPriority": 0,
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
+                    "$admin",
+                    "$member",
+                    "$guest",
+                    "$api-token-default-access"
+                ],
+                "policyResourceCategory": "ENTITY",
+                "isPolicyEnabled": true,
+                "policyResources": [
+                    "entity-type:KnowledgeFolder",
+                    "entity-type:KnowledgeFile",
+                    "entity-classification:*",
+                    "entity:*"
+                ],
+                "policyActions": [
+                    "entity-read"
+                ]
+            }
+        },
+        {
+            "typeName": "AuthPolicy",
+            "attributes": {
+                "name": "CUD_KNOWLEDGE_ENTITIES",
+                "qualifiedName": "CUD_KNOWLEDGE_ENTITIES",
+                "description": "Allows admins and API tokens to perform CUD operations on Knowledge assets.",
+                "policyCategory": "bootstrap",
+                "policySubCategory": "default",
+                "policyServiceName": "atlas",
+                "policyType": "allow",
+                "policyPriority": 0,
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
+                    "$admin",
+                    "$api-token-default-access"
+                ],
+                "policyResourceCategory": "ENTITY",
+                "isPolicyEnabled": true,
+                "policyResources": [
+                    "entity-type:KnowledgeFolder",
+                    "entity-type:KnowledgeFile",
+                    "entity-classification:*",
+                    "entity:*"
+                ],
+                "policyActions": [
+                    "entity-create",
+                    "entity-update",
+                    "entity-delete"
+                ]
+            }
         }
     ]
 }

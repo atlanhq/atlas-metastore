@@ -27,6 +27,7 @@ on:
       - lite_master
       - switchable-graph-provider
       - ring-*
+      - fplt-83
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
