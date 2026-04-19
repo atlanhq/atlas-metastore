@@ -1654,6 +1654,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         return TAG_DENORM_ATTRIBUTES.contains(key);
     }
 
+
     private Map<String, Object> filterPropertiesForES(Map<String, Object> props) {
         Map<String, Object> filtered = new LinkedHashMap<>(props.size());
 
@@ -1680,13 +1681,29 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 continue;
             }
 
-            // Fix double-encoded JSON array strings from setJsonProperty().
-            // Only parse arrays ([...]), NOT objects ({...}) — see __customAttributes bug.
+            // Fix double-encoded JSON array strings from Cassandra round-trip.
+            // List properties (e.g., __traitNames, __labels) are stored as JSON array
+            // strings like '["PII","Confidential"]'. ES expects these as actual arrays.
+            //
+            // Parse any [...] string, but if the result is a List containing Maps/Objects
+            // (e.g., rawDataTypeDefinition = '[{"name":"street","type":"string"}]'), keep
+            // the original string — ES maps these as text, not nested objects.
+            // Real list properties are always List<String>, never List<Map>.
             if (value instanceof String) {
                 String strVal = (String) value;
                 if (strVal.length() > 1 && strVal.charAt(0) == '[' && strVal.charAt(strVal.length() - 1) == ']') {
                     try {
-                        value = AtlasType.fromJson(strVal, Object.class);
+                        Object parsed = AtlasType.fromJson(strVal, Object.class);
+                        if (parsed instanceof List) {
+                            List<?> list = (List<?>) parsed;
+                            if (!list.isEmpty() && list.get(0) instanceof Map) {
+                                // List of objects (e.g., rawDataTypeDefinition) — keep as string
+                                // ES expects text, not nested objects
+                            } else {
+                                // List of primitives (e.g., __traitNames = ["PII"]) — use parsed array
+                                value = parsed;
+                            }
+                        }
                     } catch (Exception e) {
                         // Not valid JSON — keep as plain string
                     }
