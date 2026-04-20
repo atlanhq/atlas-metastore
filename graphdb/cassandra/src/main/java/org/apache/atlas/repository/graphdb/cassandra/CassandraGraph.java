@@ -1,6 +1,5 @@
 package org.apache.atlas.repository.graphdb.cassandra;
 
-// CassandraGraph: direct Cassandra + ES graph backend implementation
 import com.datastax.oss.driver.api.core.CqlSession;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
@@ -32,6 +31,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
+// CassandraGraph: direct Cassandra + ES graph backend for Atlas
 public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge> {
 
     private static final Logger LOG = LoggerFactory.getLogger(CassandraGraph.class);
