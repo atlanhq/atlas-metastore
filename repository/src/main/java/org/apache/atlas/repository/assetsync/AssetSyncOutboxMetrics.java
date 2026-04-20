@@ -17,15 +17,13 @@ import static org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry;
 
 /**
  * Layer 2 Prometheus surface for the asset-sync outbox (MS-1010).
- *
- * <p>Static-accessible facade — same pattern as
+ * Static-accessible facade — same pattern as
  * {@code ESConnectorMetrics} so the outbox internals (which live below the
  * Spring container during early bootstrap) can record metrics without
- * needing injection.</p>
- *
- * <p>Storage gauges (pending/processing/failed counts) are designed to be
+ * needing injection.
+ * Storage gauges (pending/processing/failed counts) are designed to be
  * updated by the relay leader on each poll cycle so the values reflect
- * the actual outbox state without per-pod read amplification on Cassandra.</p>
+ * the actual outbox state without per-pod read amplification on Cassandra.
  */
 public final class AssetSyncOutboxMetrics {
     private static final Logger LOG = LoggerFactory.getLogger(AssetSyncOutboxMetrics.class);
