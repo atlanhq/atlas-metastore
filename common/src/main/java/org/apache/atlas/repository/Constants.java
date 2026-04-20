@@ -157,6 +157,9 @@ public final class Constants {
     public static final String REL_DATA_PRODUCT_TO_OUTPUT_PORTS = "data_products_output_ports";
     public static final String REL_DATA_PRODUCT_TO_INPUT_PORTS  = "data_products_input_ports";
 
+    public static final String REL_TABLEAU_PROJECT_PROJECTS  = "tableau_project_tableau_project";
+    public static final String REL_TABLEAU_DASHBOARDS_DASHBOARDS  = "tableau_parent_dashboards_tableau_embedded_dashboards";
+
     public static final String INPUT_PORT_PRODUCT_EDGE_LABEL = "__Asset.inputPortDataProducts";
     public static final String OUTPUT_PORT_PRODUCT_EDGE_LABEL = "__Asset.outputPortDataProducts";
 
