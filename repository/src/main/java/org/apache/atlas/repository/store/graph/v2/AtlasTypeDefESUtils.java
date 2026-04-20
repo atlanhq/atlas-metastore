@@ -36,6 +36,7 @@ public final class AtlasTypeDefESUtils {
 
     private static final Logger LOG = LoggerFactory.getLogger(AtlasTypeDefESUtils.class);
 
+    // TODO: Add struct-type awareness once ZeroGraph indexes struct vertices to ES
     private AtlasTypeDefESUtils() {}
 
     /**
