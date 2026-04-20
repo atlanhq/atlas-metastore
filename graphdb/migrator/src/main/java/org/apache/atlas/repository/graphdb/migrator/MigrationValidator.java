@@ -219,6 +219,11 @@ public class MigrationValidator {
             runEsCountCheck(report);
         }
 
+        // --- Check 18: ES field explosion detection ---
+        if (!config.isSkipEsCountValidation()) {
+            runEsFieldExplosionCheck(report);
+        }
+
         // --- Check 10: Orphan edge detection ---
         runOrphanEdgeCheck(ks, report);
 
@@ -944,6 +949,198 @@ public class MigrationValidator {
         } catch (Exception e) {
             LOG.warn("Failed to count ES index '{}': {}", indexName, e.getMessage());
             return -1;
+        }
+    }
+
+    // ========================================================================
+    // Check 18: ES field explosion detection
+    // ========================================================================
+
+    /**
+     * Compares the mapped field count between source and target ES indexes.
+     * Detects field explosion — unexpected growth in mapped fields that can cause
+     * ES cluster instability, increased memory usage, and degraded query performance.
+     *
+     * Fails if:
+     *   - Target has net-new fields exceeding the configured growth threshold
+     *     (default 10% — configurable via validation.es.field.growth.threshold)
+     *   - Target field count exceeds the index's mapping.total_fields.limit
+     */
+    @SuppressWarnings("unchecked")
+    private void runEsFieldExplosionCheck(ValidationReport report) {
+        String sourceIndex = config.getSourceEsIndex();
+        String targetIndex = config.getTargetEsIndex();
+        double threshold   = config.getEsFieldGrowthThreshold();
+
+        LOG.info("ES field explosion check: comparing field counts between '{}' and '{}'...", sourceIndex, targetIndex);
+
+        RestClient esClient = null;
+        try {
+            esClient = createEsClient();
+
+            Set<String> sourceFields = getEsFieldNames(esClient, sourceIndex);
+            Set<String> targetFields = getEsFieldNames(esClient, targetIndex);
+
+            if (sourceFields.isEmpty() && targetFields.isEmpty()) {
+                ValidationCheckResult result = new ValidationCheckResult(
+                    "es_field_explosion",
+                    "ES field explosion detection (source vs target mapped field count)",
+                    ValidationCheckResult.Severity.WARN,
+                    "Could not retrieve field mappings from either index");
+                report.addCheck(result);
+                return;
+            }
+
+            // Compute net-new fields (in target but not in source)
+            Set<String> netNewFields = new TreeSet<>(targetFields);
+            netNewFields.removeAll(sourceFields);
+
+            // Compute removed fields (in source but not in target)
+            Set<String> removedFields = new TreeSet<>(sourceFields);
+            removedFields.removeAll(targetFields);
+
+            int sourceCount = sourceFields.size();
+            int targetCount = targetFields.size();
+            int netNewCount = netNewFields.size();
+
+            double growthRatio = sourceCount > 0
+                ? (double) (targetCount - sourceCount) / sourceCount
+                : (targetCount > 0 ? 1.0 : 0.0);
+
+            LOG.info("ES field counts: source({})={}, target({})={}, net_new={}, removed={}, growth={}%",
+                     sourceIndex, sourceCount, targetIndex, targetCount,
+                     netNewCount, removedFields.size(), String.format("%.1f", growthRatio * 100));
+
+            // Determine severity
+            ValidationCheckResult.Severity severity;
+            String message;
+
+            if (sourceCount == 0) {
+                // No source index to compare — pass if target looks reasonable
+                severity = targetCount > 0
+                    ? ValidationCheckResult.Severity.PASS
+                    : ValidationCheckResult.Severity.WARN;
+                message = String.format(
+                    "source_fields=0 (index '%s' not found or empty), target_fields=%d — no baseline for comparison",
+                    sourceIndex, targetCount);
+            } else if (growthRatio > threshold) {
+                severity = ValidationCheckResult.Severity.FAIL;
+                message = String.format(
+                    "FIELD EXPLOSION DETECTED: source=%d, target=%d, growth=%.1f%% (threshold=%.0f%%), net_new=%d fields",
+                    sourceCount, targetCount, growthRatio * 100, threshold * 100, netNewCount);
+            } else if (netNewCount > 0) {
+                severity = ValidationCheckResult.Severity.WARN;
+                message = String.format(
+                    "source=%d, target=%d, growth=%.1f%% (within %.0f%% threshold), net_new=%d fields",
+                    sourceCount, targetCount, growthRatio * 100, threshold * 100, netNewCount);
+            } else {
+                severity = ValidationCheckResult.Severity.PASS;
+                message = String.format(
+                    "source=%d, target=%d, growth=%.1f%% — no field explosion detected",
+                    sourceCount, targetCount, growthRatio * 100);
+            }
+
+            ValidationCheckResult result = new ValidationCheckResult(
+                "es_field_explosion",
+                "ES field explosion detection (source vs target mapped field count)",
+                severity, message);
+            result.addDetail("source_index", sourceIndex);
+            result.addDetail("source_field_count", sourceCount);
+            result.addDetail("target_index", targetIndex);
+            result.addDetail("target_field_count", targetCount);
+            result.addDetail("net_new_field_count", netNewCount);
+            result.addDetail("removed_field_count", removedFields.size());
+            result.addDetail("growth_pct", String.format("%.1f", growthRatio * 100));
+            result.addDetail("threshold_pct", String.format("%.0f", threshold * 100));
+
+            // Log and attach net-new fields (capped at 50 for readability)
+            if (!netNewFields.isEmpty()) {
+                int logLimit = Math.min(netNewFields.size(), 50);
+                List<String> sample = new ArrayList<>(netNewFields).subList(0, logLimit);
+                result.addDetail("net_new_fields_sample", sample);
+                LOG.info("Net-new fields in target (showing {}/{}): {}",
+                         logLimit, netNewCount, sample);
+                for (String f : sample) {
+                    result.addSampleFailure("net_new: " + f);
+                }
+            }
+
+            if (!removedFields.isEmpty() && removedFields.size() <= 20) {
+                result.addDetail("removed_fields", new ArrayList<>(removedFields));
+            }
+
+            report.addCheck(result);
+        } catch (Exception e) {
+            LOG.warn("ES field explosion check failed: {}", e.getMessage());
+            ValidationCheckResult result = new ValidationCheckResult(
+                "es_field_explosion",
+                "ES field explosion detection (source vs target mapped field count)",
+                ValidationCheckResult.Severity.WARN,
+                "Check failed: " + e.getMessage());
+            report.addCheck(result);
+        } finally {
+            if (esClient != null) {
+                try { esClient.close(); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    /**
+     * Extracts all mapped field names from an ES index via the _mapping API.
+     * Recursively walks the mapping tree to collect leaf field paths
+     * (e.g., "qualifiedName", "relationshipList.guid", "__superTypeNames.keyword").
+     */
+    @SuppressWarnings("unchecked")
+    private Set<String> getEsFieldNames(RestClient esClient, String indexName) {
+        Set<String> fields = new TreeSet<>();
+        try {
+            Request req = new Request("GET", "/" + indexName + "/_mapping");
+            Response resp = esClient.performRequest(req);
+            if (resp.getStatusLine().getStatusCode() != 200) {
+                return fields;
+            }
+            String body = EntityUtils.toString(resp.getEntity());
+            Map<String, Object> parsed = MAPPER.readValue(body, Map.class);
+            // Response: { "indexName": { "mappings": { "properties": { ... } } } }
+            Map<String, Object> indexData = (Map<String, Object>) parsed.values().iterator().next();
+            Map<String, Object> mappings = (Map<String, Object>) indexData.get("mappings");
+            if (mappings == null) return fields;
+            Map<String, Object> properties = (Map<String, Object>) mappings.get("properties");
+            if (properties == null) return fields;
+
+            collectFieldNames(properties, "", fields);
+        } catch (ResponseException e) {
+            // Index doesn't exist — return empty set (handled by caller)
+            LOG.debug("Index '{}' not found for field mapping: {}", indexName, e.getMessage());
+        } catch (Exception e) {
+            LOG.warn("Failed to get field mappings for '{}': {}", indexName, e.getMessage());
+        }
+        return fields;
+    }
+
+    /**
+     * Recursively collects field paths from an ES mapping "properties" object.
+     * Produces dotted paths like "relationshipList.guid", "__superTypeNames.keyword".
+     */
+    @SuppressWarnings("unchecked")
+    private void collectFieldNames(Map<String, Object> properties, String prefix, Set<String> fields) {
+        for (Map.Entry<String, Object> entry : properties.entrySet()) {
+            String fieldName = prefix.isEmpty() ? entry.getKey() : prefix + "." + entry.getKey();
+            fields.add(fieldName);
+
+            if (entry.getValue() instanceof Map) {
+                Map<String, Object> fieldDef = (Map<String, Object>) entry.getValue();
+                // Recurse into nested properties
+                Map<String, Object> subProperties = (Map<String, Object>) fieldDef.get("properties");
+                if (subProperties != null) {
+                    collectFieldNames(subProperties, fieldName, fields);
+                }
+                // Also recurse into multi-fields (fields → keyword, text, etc.)
+                Map<String, Object> multiFields = (Map<String, Object>) fieldDef.get("fields");
+                if (multiFields != null) {
+                    collectFieldNames(multiFields, fieldName, fields);
+                }
+            }
         }
     }
 

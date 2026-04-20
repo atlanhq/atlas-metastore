@@ -86,3 +86,13 @@ migration.queue.capacity=20000
 # Resume: if true, skip token ranges already completed in previous runs.
 # Set to false for a fresh start (or use --fresh flag).
 migration.resume=true
+
+# -----------------------------------------------------------------------------
+# Validation
+# -----------------------------------------------------------------------------
+
+# ES field explosion threshold: maximum allowed field count growth (as a ratio).
+# After migration, the validator compares source and target ES index field counts.
+# If (target - source) / source exceeds this threshold, validation FAILs.
+# Default: 0.10 (10% growth). Set to 0 for strict no-growth, or 1.0 to allow doubling.
+#validation.es.field.growth.threshold=0.10

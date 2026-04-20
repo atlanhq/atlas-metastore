@@ -119,6 +119,7 @@ public class MigratorConfig {
     private final boolean skipSuperVertexDetection;
     private final boolean skipEsCountValidation;
     private final String  validationTenantId;
+    private final double  esFieldGrowthThreshold;
 
     public MigratorConfig(String configPath) throws IOException {
         this.props = new Properties();
@@ -223,6 +224,7 @@ public class MigratorConfig {
         this.skipSuperVertexDetection    = getBoolean("validation.skip.super.vertex.detection", false);
         this.skipEsCountValidation       = getBoolean("validation.skip.es.count", false);
         this.validationTenantId          = get("validation.tenant.id", "unknown");
+        this.esFieldGrowthThreshold      = getDouble("validation.es.field.growth.threshold", 0.10);
 
         // Initialize effective values to config defaults (may be overridden by MigrationSizer)
         this.effectiveScannerThreads      = this.scannerThreads;
@@ -244,6 +246,11 @@ public class MigratorConfig {
     private boolean getBoolean(String key, boolean defaultValue) {
         String val = props.getProperty(key);
         return val != null ? Boolean.parseBoolean(val.trim()) : defaultValue;
+    }
+
+    private double getDouble(String key, double defaultValue) {
+        String val = props.getProperty(key);
+        return val != null ? Double.parseDouble(val.trim()) : defaultValue;
     }
 
     /**
@@ -367,4 +374,5 @@ public class MigratorConfig {
     public String  getValidationTenantId()          { return validationTenantId; }
     public String  getAnalyzeMode()                 { return analyzeMode; }
     public boolean isPushToMixpanel()               { return pushToMixpanel; }
+    public double  getEsFieldGrowthThreshold()      { return esFieldGrowthThreshold; }
 }
