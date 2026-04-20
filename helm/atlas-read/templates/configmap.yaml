@@ -342,7 +342,7 @@ data:
     atlas.graph.cache.redis-cache-sentinel-urls={{ .Values.atlas.redis.sentinel_urls }}
     atlas.graph.cache.redis-cache-lock-watchdog-ms=300000
     atlas.graph.cache.redis-cache-username={{ .Values.atlas.redis.username }}
-    atlas.graph.cache.redis-cache-password={{ .Values.atlas.redis.password }}
+    atlas.graph.cache.redis-cache-password=${env:REDIS_PASSWORD}
     atlas.graph.cache.redis-cache-mastername={{ .Values.atlas.redis.master_name }}
     atlas.graph.cache.redis-cache-connectTimeout=2000
     {{- end }}
@@ -428,7 +428,7 @@ data:
     ########## Add query metastore ###########
     atlan.cache.redis.host={{ .Values.atlas.redis.host }}
     atlan.cache.redis.port={{ .Values.atlas.redis.port }}
-    atlan.cache.redis.password={{ .Values.atlas.redis.password }}
+    atlan.cache.redis.password=${env:REDIS_PASSWORD}
     atlas.cache.redis.maxConnections={{ .Values.atlas.redis.maxConnections }}
     atlas.cache.redis.timeout={{ .Values.atlas.redis.timeout }}
     atlan.EntityCacheListener.impl=org.apache.atlas.repository.cache.EntityCacheListenerV2
@@ -453,7 +453,7 @@ data:
     ########## Ranger Credentials
 
     atlas.ranger.username = admin
-    atlas.ranger.password = {{ .Values.atlas.ranger.RANGER_PASSWORD }}
+    atlas.ranger.password = ${env:RANGER_PASSWORD}
     atlas.ranger.base.url = {{ .Values.atlas.ranger.RANGER_SERVICE_URL }}
 
     ####### Redis credentials #######
@@ -465,7 +465,7 @@ data:
     atlas.redis.url = redis://{{ .Values.atlas.redis.host }}:{{ .Values.atlas.redis.port }}
     atlas.redis.sentinel.urls = {{ .Values.atlas.redis.sentinel_urls }}
     atlas.redis.username = {{ .Values.atlas.redis.username }}
-    atlas.redis.password = {{ .Values.atlas.redis.password }}
+    atlas.redis.password = ${env:REDIS_PASSWORD}
     atlas.redis.master_name = {{ .Values.atlas.redis.master_name }}
     atlas.redis.lock.wait_time.ms=15000
     # Renew lock for every 10mins
