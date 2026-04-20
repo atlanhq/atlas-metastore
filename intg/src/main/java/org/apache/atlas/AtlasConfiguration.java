@@ -30,11 +30,15 @@ public enum AtlasConfiguration {
     WEBSERVER_MAX_THREADS("atlas.webserver.maxthreads", 100),
     WEBSERVER_RESERVED_THREADS("atlas.webserver.reservedthreads", 40),
     WEBSERVER_KEEPALIVE_SECONDS("atlas.webserver.keepalivetimesecs", 60),
-    WEBSERVER_QUEUE_SIZE("atlas.webserver.queuesize", 100),
+    WEBSERVER_QUEUE_SIZE("atlas.webserver.queuesize", 10),
     WEBSERVER_REQUEST_BUFFER_SIZE("atlas.jetty.request.buffer.size", 16192),
     WEBSERVER_IDLE_TIMEOUT_MS("atlas.webserver.idle.timeout.ms", 900000),
 
     QUERY_PARAM_MAX_LENGTH("atlas.query.param.max.length", 4*1024),
+
+    INDEX_REPAIR_CONSUMER_ENABLED("atlas.index.repair.consumer.enabled", false),
+    INDEX_REPAIR_BATCH_SIZE("atlas.index.repair.batch.size", 100),
+    INDEX_REPAIR_BATCH_DELAY_MS("atlas.index.repair.batch.delay.ms", 500),
 
     REST_API_ENABLE_DELETE_TYPE_OVERRIDE("atlas.rest.enable.delete.type.override", false),
     NOTIFICATION_RELATIONSHIPS_ENABLED("atlas.notification.relationships.enabled", true),
