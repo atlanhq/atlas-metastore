@@ -55,16 +55,16 @@ public class AtlasElasticsearchDatabase {
     
     public static final String INDEX_BACKEND_CONF = "atlas.graph.index.search.hostname";
     
-    // Simple, conservative connection pool configuration
-    // Optimized for 2-8 pod deployments without overwhelming Elasticsearch
-    private static final int DEFAULT_CONNECTIONS_TOTAL = 15;  // Conservative per pod
-    private static final int DEFAULT_CONNECTIONS_PER_ROUTE = 10;  // 70% of total
+    // Connection pool sized for production workloads with concurrent async search
+    // Each ES async_search holds 2 connections (submit + poll), so effective concurrency = total/2
+    private static final int DEFAULT_CONNECTIONS_TOTAL = 40;
+    private static final int DEFAULT_CONNECTIONS_PER_ROUTE = 25;
     
     // Allow override via configuration if needed
     private static final int BASE_CONNECTIONS_TOTAL;
     private static final int BASE_CONNECTIONS_PER_ROUTE;
     
-    private static final int CONNECTION_REQUEST_TIMEOUT = 5000; // 5 seconds
+    private static final int CONNECTION_REQUEST_TIMEOUT = 10000; // 10 seconds — longer grace before lease timeout
     private static final int CONNECTION_TIME_TO_LIVE = 300000; // 5 minutes
     private static final int IO_THREAD_COUNT = Runtime.getRuntime().availableProcessors();
     
@@ -86,9 +86,9 @@ public class AtlasElasticsearchDatabase {
                     BASE_CONNECTIONS_TOTAL, BASE_CONNECTIONS_PER_ROUTE);
                     
             // Validate configuration
-            if (BASE_CONNECTIONS_TOTAL > 50) {
-                LOG.warn("Connection pool size ({}) is quite large. For 2-8 pod deployments, consider 10-20 connections per pod.", 
-                        BASE_CONNECTIONS_TOTAL);
+            if (BASE_CONNECTIONS_TOTAL > 100) {
+                LOG.warn("Connection pool size ({}) is very large. With 8 pods this means {} total connections to ES — verify ES can handle this.",
+                        BASE_CONNECTIONS_TOTAL, BASE_CONNECTIONS_TOTAL * 8);
             }
         } catch (Exception e) {
             throw new ExceptionInInitializerError("Failed to load Elasticsearch connection configuration: " + e.getMessage());
