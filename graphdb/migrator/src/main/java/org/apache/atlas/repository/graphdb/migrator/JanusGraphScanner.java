@@ -429,15 +429,38 @@ public class JanusGraphScanner implements AutoCloseable {
 
     /**
      * Check if a decoded vertex should be skipped based on config flags.
+     *
      * Classification vertices have __entityGuid (Constants.CLASSIFICATION_ENTITY_GUID).
      * Task vertices have __task_guid (Constants.TASK_GUID).
+     * Task status is in __task_status: PENDING, IN_PROGRESS, COMPLETE, FAILED, DELETED.
+     *
+     * Skip hierarchy:
+     *   1. skipClassifications → skip ALL classification vertices
+     *   2. skipTasks → skip ALL task vertices (overrides skipCompletedTasks)
+     *   3. skipCompletedTasks → skip only COMPLETE/FAILED/DELETED tasks (keep PENDING/IN_PROGRESS)
      */
     private boolean shouldSkipVertex(DecodedVertex vertex) {
         if (config.isSkipClassifications() && vertex.getProperties().containsKey("__entityGuid")) {
+            metrics.incrSkippedClassifications();
             return true;
         }
-        if (config.isSkipTasks() && vertex.getProperties().containsKey("__task_guid")) {
-            return true;
+        if (vertex.getProperties().containsKey("__task_guid")) {
+            // skipTasks takes precedence: skip ALL tasks regardless of status
+            if (config.isSkipTasks()) {
+                metrics.incrSkippedAllTasks();
+                return true;
+            }
+            // skipCompletedTasks: skip only terminal-state tasks
+            if (config.isSkipCompletedTasks()) {
+                Object taskStatus = vertex.getProperties().get("__task_status");
+                if (taskStatus != null) {
+                    String status = String.valueOf(taskStatus);
+                    if ("COMPLETE".equals(status) || "FAILED".equals(status) || "DELETED".equals(status)) {
+                        metrics.incrSkippedCompletedTasks();
+                        return true;
+                    }
+                }
+            }
         }
         return false;
     }

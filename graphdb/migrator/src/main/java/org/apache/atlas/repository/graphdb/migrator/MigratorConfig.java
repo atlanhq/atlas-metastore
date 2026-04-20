@@ -81,6 +81,7 @@ public class MigratorConfig {
     private final boolean skipEsReindex;
     private final boolean skipClassifications;
     private final boolean skipTasks;
+    private final boolean skipCompletedTasks;
 
     // Auxiliary keyspace migration flags
     private final boolean migrateConfigStore;
@@ -120,6 +121,7 @@ public class MigratorConfig {
     private final boolean skipEsCountValidation;
     private final String  validationTenantId;
     private final double  esFieldGrowthThreshold;
+    private final boolean skipRequiredPropertiesCheck;
 
     public MigratorConfig(String configPath) throws IOException {
         this.props = new Properties();
@@ -194,6 +196,7 @@ public class MigratorConfig {
         this.skipEsReindex      = getBoolean("migration.skip.es.reindex", false);
         this.skipClassifications = getBoolean("migration.skip.classifications", false);
         this.skipTasks           = getBoolean("migration.skip.tasks", false);
+        this.skipCompletedTasks  = getBoolean("migration.skip.completed.tasks", true);
 
         // Auxiliary keyspace migration flags
         this.migrateConfigStore = getBoolean("migration.migrate.config.store", false);
@@ -225,6 +228,7 @@ public class MigratorConfig {
         this.skipEsCountValidation       = getBoolean("validation.skip.es.count", false);
         this.validationTenantId          = get("validation.tenant.id", "unknown");
         this.esFieldGrowthThreshold      = getDouble("validation.es.field.growth.threshold", 0.10);
+        this.skipRequiredPropertiesCheck = getBoolean("validation.skip.required.properties.check", false);
 
         // Initialize effective values to config defaults (may be overridden by MigrationSizer)
         this.effectiveScannerThreads      = this.scannerThreads;
@@ -346,6 +350,7 @@ public class MigratorConfig {
     public boolean isSkipEsReindex()      { return skipEsReindex; }
     public boolean isSkipClassifications() { return skipClassifications; }
     public boolean isSkipTasks()           { return skipTasks; }
+    public boolean isSkipCompletedTasks() { return skipCompletedTasks; }
 
     public boolean isMigrateConfigStore()  { return migrateConfigStore; }
     public boolean isMigrateTags()         { return migrateTags; }
@@ -375,4 +380,5 @@ public class MigratorConfig {
     public String  getAnalyzeMode()                 { return analyzeMode; }
     public boolean isPushToMixpanel()               { return pushToMixpanel; }
     public double  getEsFieldGrowthThreshold()      { return esFieldGrowthThreshold; }
+    public boolean isSkipRequiredPropertiesCheck()  { return skipRequiredPropertiesCheck; }
 }

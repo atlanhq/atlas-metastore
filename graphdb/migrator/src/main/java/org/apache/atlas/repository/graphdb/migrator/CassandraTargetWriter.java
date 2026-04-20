@@ -299,8 +299,8 @@ public class CassandraTargetWriter implements AutoCloseable {
     }
 
     /**
-     * Writer loop: drains items from the queue, builds UNLOGGED batches,
-     * and fires them asynchronously with a Semaphore cap on in-flight requests.
+     * Writer loop: drains items from the queue and fires individual async statements,
+     * using a Semaphore cap on in-flight requests per thread.
      *
      * Dispatches based on item type:
      *   - DecodedVertex → full vertex + indexes + edges
@@ -557,9 +557,8 @@ public class CassandraTargetWriter implements AutoCloseable {
     }
 
     /**
-     * Fire a single statement (BoundStatement or BatchStatement) asynchronously,
-     * respecting the per-thread inflight semaphore.
-     * Retries up to maxRetries times with exponential backoff on failure.
+     * Fire a single BoundStatement asynchronously, respecting the per-thread
+     * inflight semaphore. Retries up to maxRetries times with exponential backoff on failure.
      */
     private void fireAsyncStatement(com.datastax.oss.driver.api.core.cql.Statement<?> stmt,
                                       Semaphore inflight, String vertexId) throws InterruptedException {

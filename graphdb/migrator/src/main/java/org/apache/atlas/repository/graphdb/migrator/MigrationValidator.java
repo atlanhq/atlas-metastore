@@ -26,7 +26,7 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * Enhanced post-migration validation.
  *
- * Runs 18 correctness checks against the target Cassandra (and optionally ES).
+ * Runs 19 correctness checks against the target Cassandra (and optionally ES).
  * Returns a structured {@link ValidationReport} with per-check results, per-type
  * statistics, super vertex detection, and source baseline comparison.
  *
@@ -36,6 +36,16 @@ public class MigrationValidator {
 
     private static final Logger LOG = LoggerFactory.getLogger(MigrationValidator.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /** Properties that MUST exist on every entity vertex. Missing any → FAIL. */
+    private static final Set<String> REQUIRED_ENTITY_PROPERTIES = new LinkedHashSet<>(Arrays.asList(
+        "__guid", "__typeName", "__state", "qualifiedName"
+    ));
+
+    /** Properties expected on entity vertices. Missing on >5% of entities → WARN. */
+    private static final Set<String> EXPECTED_ENTITY_PROPERTIES = new LinkedHashSet<>(Arrays.asList(
+        "__createdBy", "__modifiedBy", "__timestamp", "__modificationTimestamp"
+    ));
 
     /**
      * The product's connector aggregation query. Sent to the target ES index to verify
@@ -212,6 +222,11 @@ public class MigrationValidator {
 
         // --- Check 8: Property corruption detection ---
         runPropertyCorruptionCheck(ks, report);
+
+        // --- Check 19: Required properties validation (full scan) ---
+        if (!config.isSkipRequiredPropertiesCheck()) {
+            runRequiredPropertiesCheck(ks, report);
+        }
 
         // --- Check 9: ES document count comparison ---
         if (!config.isSkipEsCountValidation()) {
@@ -863,6 +878,266 @@ public class MigrationValidator {
         result.addDetail("corrupted", corrupted);
         for (String f : sampleFailures) result.addSampleFailure(f);
         report.addCheck(result);
+    }
+
+    // ========================================================================
+    // Check 19: Required properties validation (full scan)
+    // ========================================================================
+
+    @SuppressWarnings("unchecked")
+    private void runRequiredPropertiesCheck(String ks, ValidationReport report) {
+        LOG.info("Required properties check: full scan of {}.vertices ...", ks);
+
+        long entityCount = 0;
+        long systemCount = 0;
+        long classificationCount = 0;
+        long jsonErrors = 0;
+
+        // Per-property violation tracking (REQUIRED)
+        Map<String, Long> requiredMissingCounts = new LinkedHashMap<>();
+        Map<String, List<String>> requiredMissingSamples = new LinkedHashMap<>();
+        for (String prop : REQUIRED_ENTITY_PROPERTIES) {
+            requiredMissingCounts.put(prop, 0L);
+            requiredMissingSamples.put(prop, new ArrayList<>());
+        }
+
+        // Track which types are missing required properties (for diagnostics)
+        Map<String, Long> missingGuidByType = new LinkedHashMap<>();
+
+        // Per-property violation tracking (EXPECTED)
+        Map<String, Long> expectedMissingCounts = new LinkedHashMap<>();
+        for (String prop : EXPECTED_ENTITY_PROPERTIES) {
+            expectedMissingCounts.put(prop, 0L);
+        }
+
+        // Denormalization consistency
+        long typeNameMismatch = 0;
+        long stateMismatch = 0;
+        List<String> denormSamples = new ArrayList<>();
+
+        try {
+            ResultSet rs = targetSession.execute(
+                SimpleStatement.builder(
+                    "SELECT vertex_id, type_name, state, properties FROM " + ks + ".vertices")
+                    .setPageSize(5000)
+                    .setTimeout(java.time.Duration.ofMinutes(30))
+                    .build());
+
+            for (Row row : rs) {
+                String typeName = row.getString("type_name");
+
+                // Skip system vertices (no type_name = not an entity)
+                if (typeName == null || typeName.isEmpty()) {
+                    systemCount++;
+                    continue;
+                }
+
+                String propsJson = row.getString("properties");
+                if (propsJson == null || propsJson.isEmpty()) {
+                    // No properties at all — count as entity with all required props missing
+                    entityCount++;
+                    for (String prop : REQUIRED_ENTITY_PROPERTIES) {
+                        requiredMissingCounts.merge(prop, 1L, Long::sum);
+                        addSampleViolation(requiredMissingSamples.get(prop), row.getString("vertex_id"));
+                    }
+                    for (String prop : EXPECTED_ENTITY_PROPERTIES) {
+                        expectedMissingCounts.merge(prop, 1L, Long::sum);
+                    }
+                    missingGuidByType.merge(typeName, 1L, Long::sum);
+                    continue;
+                }
+
+                Map<String, Object> props;
+                try {
+                    props = MAPPER.readValue(propsJson, Map.class);
+                } catch (Exception e) {
+                    jsonErrors++;
+                    continue; // JSON errors are caught by Check 6
+                }
+
+                // Classification vertices have __entityGuid (the entity they're attached to)
+                // but do NOT have their own __guid or qualifiedName — this is expected.
+                // Skip them from the entity required-properties check.
+                if (hasNonEmpty(props, "__entityGuid")) {
+                    classificationCount++;
+                    continue;
+                }
+
+                entityCount++;
+
+                if (entityCount % 100_000 == 0) {
+                    LOG.info("  ... required properties check: {} entity vertices scanned ({} classifications skipped)",
+                             String.format("%,d", entityCount), String.format("%,d", classificationCount));
+                }
+
+                String vertexId = row.getString("vertex_id");
+
+                // Check REQUIRED properties
+                for (String prop : REQUIRED_ENTITY_PROPERTIES) {
+                    boolean present;
+                    if ("qualifiedName".equals(prop)) {
+                        // Accept either qualifiedName or legacy Referenceable.qualifiedName
+                        present = hasNonEmpty(props, "qualifiedName") || hasNonEmpty(props, "Referenceable.qualifiedName");
+                    } else {
+                        present = hasNonEmpty(props, prop);
+                    }
+                    if (!present) {
+                        requiredMissingCounts.merge(prop, 1L, Long::sum);
+                        addSampleViolation(requiredMissingSamples.get(prop), vertexId);
+                        if ("__guid".equals(prop)) {
+                            missingGuidByType.merge(typeName, 1L, Long::sum);
+                        }
+                    }
+                }
+
+                // Check EXPECTED properties
+                for (String prop : EXPECTED_ENTITY_PROPERTIES) {
+                    if (!hasNonEmpty(props, prop)) {
+                        expectedMissingCounts.merge(prop, 1L, Long::sum);
+                    }
+                }
+
+                // Denormalization consistency: type_name column vs __typeName in JSON
+                Object jsonTypeName = props.get("__typeName");
+                if (jsonTypeName != null && !typeName.equals(jsonTypeName.toString())) {
+                    typeNameMismatch++;
+                    if (denormSamples.size() < 10) {
+                        denormSamples.add(vertexId + ": column=" + typeName + " json=" + jsonTypeName);
+                    }
+                }
+
+                // Denormalization consistency: state column vs __state in JSON
+                String stateCol = row.getString("state");
+                Object jsonState = props.get("__state");
+                if (stateCol != null && jsonState != null && !stateCol.equals(jsonState.toString())) {
+                    stateMismatch++;
+                    if (denormSamples.size() < 10) {
+                        denormSamples.add(vertexId + ": state_col=" + stateCol + " json=" + jsonState);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOG.error("Required properties check failed: {}", e.getMessage(), e);
+            ValidationCheckResult result = new ValidationCheckResult(
+                "required_properties",
+                "All entity vertices have required properties (__guid, __typeName, __state, qualifiedName)",
+                ValidationCheckResult.Severity.WARN,
+                "Check failed with exception: " + e.getMessage());
+            report.addCheck(result);
+            return;
+        }
+
+        LOG.info("Required properties check complete: {} entity vertices, {} classification vertices, {} system vertices",
+                 String.format("%,d", entityCount), String.format("%,d", classificationCount),
+                 String.format("%,d", systemCount));
+
+        // Determine severity
+        long totalRequiredViolations = 0;
+        for (long count : requiredMissingCounts.values()) {
+            totalRequiredViolations += count;
+        }
+
+        boolean anyExpectedWarning = false;
+        for (Map.Entry<String, Long> entry : expectedMissingCounts.entrySet()) {
+            if (entityCount > 0 && (double) entry.getValue() / entityCount > 0.05) {
+                anyExpectedWarning = true;
+                break;
+            }
+        }
+
+        boolean hasDenormMismatch = typeNameMismatch > 0 || stateMismatch > 0;
+
+        ValidationCheckResult.Severity severity;
+        if (totalRequiredViolations > 0) {
+            severity = ValidationCheckResult.Severity.FAIL;
+        } else if (anyExpectedWarning || hasDenormMismatch) {
+            severity = ValidationCheckResult.Severity.WARN;
+        } else {
+            severity = ValidationCheckResult.Severity.PASS;
+        }
+
+        // Build message
+        StringBuilder msg = new StringBuilder();
+        msg.append(String.format("entity_vertices=%d, classification_vertices=%d, system_vertices=%d",
+                                 entityCount, classificationCount, systemCount));
+        if (totalRequiredViolations > 0) {
+            msg.append(" [FAIL: missing required properties — ");
+            List<String> parts = new ArrayList<>();
+            for (Map.Entry<String, Long> entry : requiredMissingCounts.entrySet()) {
+                if (entry.getValue() > 0) {
+                    parts.add(entry.getKey() + "=" + entry.getValue());
+                }
+            }
+            msg.append(String.join(", ", parts)).append("]");
+        }
+        if (hasDenormMismatch) {
+            msg.append(String.format(" [WARN: denormalization mismatch — type_name=%d, state=%d]",
+                                     typeNameMismatch, stateMismatch));
+        }
+
+        ValidationCheckResult result = new ValidationCheckResult(
+            "required_properties",
+            "All entity vertices have required properties (__guid, __typeName, __state, qualifiedName)",
+            severity, msg.toString());
+        result.addDetail("entity_vertices", entityCount);
+        result.addDetail("classification_vertices", classificationCount);
+        result.addDetail("system_vertices", systemCount);
+        result.addDetail("json_errors", jsonErrors);
+
+        // Add type breakdown for vertices missing __guid (helps identify non-entity types)
+        if (!missingGuidByType.isEmpty()) {
+            result.addDetail("missing_guid_by_type", missingGuidByType);
+        }
+
+        // Add required property violation details
+        for (Map.Entry<String, Long> entry : requiredMissingCounts.entrySet()) {
+            result.addDetail("missing_" + entry.getKey(), entry.getValue());
+            List<String> samples = requiredMissingSamples.get(entry.getKey());
+            if (!samples.isEmpty()) {
+                result.addDetail("missing_" + entry.getKey() + "_samples", samples);
+            }
+        }
+
+        // Add expected property missing counts
+        for (Map.Entry<String, Long> entry : expectedMissingCounts.entrySet()) {
+            if (entry.getValue() > 0) {
+                String pct = entityCount > 0 ? String.format("%.2f%%", 100.0 * entry.getValue() / entityCount) : "N/A";
+                result.addDetail("expected_missing_" + entry.getKey(), entry.getValue() + " (" + pct + ")");
+            }
+        }
+
+        // Add denormalization details
+        if (hasDenormMismatch) {
+            result.addDetail("denorm_type_name_mismatch", typeNameMismatch);
+            result.addDetail("denorm_state_mismatch", stateMismatch);
+            for (String s : denormSamples) {
+                result.addSampleFailure("denorm: " + s);
+            }
+        }
+
+        // Add sample failures for required violations
+        for (Map.Entry<String, List<String>> entry : requiredMissingSamples.entrySet()) {
+            for (String sample : entry.getValue()) {
+                result.addSampleFailure("missing " + entry.getKey() + ": vertex_id=" + sample);
+            }
+        }
+
+        report.addCheck(result);
+    }
+
+    /** Check if a property exists in the map and has a non-null, non-empty value. */
+    private static boolean hasNonEmpty(Map<String, Object> props, String key) {
+        Object val = props.get(key);
+        if (val == null) return false;
+        if (val instanceof String) return !((String) val).isEmpty();
+        return true; // non-null, non-string (numbers, lists, etc.) are considered present
+    }
+
+    /** Add a vertex ID to the violation samples list, capped at 10. */
+    private static void addSampleViolation(List<String> samples, String vertexId) {
+        if (samples.size() < 10) {
+            samples.add(vertexId);
+        }
     }
 
     // ========================================================================

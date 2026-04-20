@@ -87,6 +87,13 @@ migration.queue.capacity=20000
 # Set to false for a fresh start (or use --fresh flag).
 migration.resume=true
 
+# Skip completed/failed task vertices during migration.
+# Task vertices with status COMPLETE, FAILED, or DELETED are historical/transient
+# data not needed in the new backend. Skipping them reduces migration time and storage.
+# PENDING and IN_PROGRESS tasks are always migrated.
+# Default: true. Set to false to migrate all tasks regardless of status.
+#migration.skip.completed.tasks=true
+
 # -----------------------------------------------------------------------------
 # Validation
 # -----------------------------------------------------------------------------
