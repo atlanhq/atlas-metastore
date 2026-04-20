@@ -19,6 +19,8 @@ import org.slf4j.LoggerFactory;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.ThreadLocalRandom;
+import io.micrometer.core.instrument.Timer;
 
 import static org.apache.atlas.repository.Constants.CLASSIFICATION_NAMES_KEY;
 import static org.apache.atlas.repository.Constants.CLASSIFICATION_TEXT_KEY;
@@ -125,28 +127,40 @@ public class ESConnector implements Closeable {
      */
     public static void writeTagProperties(Map<String, Map<String, Object>> entitiesMap, boolean upsert) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("writeTagPropertiesES");
+        Timer.Sample latencySample = ESConnectorMetrics.startLatencyTimer();
 
         try {
             if (MapUtils.isEmpty(entitiesMap))
                 return;
+
+            ESConnectorMetrics.recordAttempt();
+            ESConnectorMetrics.recordBulkDocCount(entitiesMap.size());
+
+            if (!ESCircuitBreaker.allowRequest()) {
+                ESConnectorMetrics.recordCircuitBreakerShortCircuit();
+                ESConnectorMetrics.recordFailure("circuit_open");
+                throw new ESWriteCircuitOpenException(
+                        "ES circuit breaker is OPEN — short-circuiting bulk write for " + entitiesMap.size() + " entities");
+            }
 
             // Track docId → vertexId mapping for failure reporting
             Map<String, String> docIdToVertexId = new LinkedHashMap<>();
             StringBuilder bulkRequestBody = buildBulkBody(entitiesMap, docIdToVertexId, null, upsert);
 
             int maxRetries = AtlasConfiguration.ES_MAX_RETRIES.getInt();
-            long initialRetryDelay = AtlasConfiguration.ES_RETRY_DELAY_MS.getLong();
 
             // Track which doc IDs still need to be retried
             Set<String> pendingDocIds = new LinkedHashSet<>(docIdToVertexId.keySet());
+            int totalPermanentlyFailed = 0;
 
             for (int retryCount = 0; retryCount < maxRetries && !pendingDocIds.isEmpty(); retryCount++) {
                 if (retryCount > 0) {
+                    ESConnectorMetrics.recordRetry();
                     try {
-                        long exponentialBackoffDelay = initialRetryDelay * (long) Math.pow(2, retryCount - 1);
-                        Thread.sleep(exponentialBackoffDelay);
+                        Thread.sleep(computeBackoffMs(retryCount));
                     } catch (InterruptedException interruptedException) {
                         Thread.currentThread().interrupt();
+                        ESConnectorMetrics.recordFailure("interrupted");
                         throw new RuntimeException("ES update interrupted during retry delay", interruptedException);
                     }
                 }
@@ -172,7 +186,10 @@ public class ESConnector implements Closeable {
                             Set<String> permanentlyFailed = new LinkedHashSet<>();
                             parseBulkResponse(responseBody, retryableDocIds, permanentlyFailed);
 
+                            ESConnectorMetrics.recordPartialFailure(permanentlyFailed.size() + retryableDocIds.size());
+                            totalPermanentlyFailed += permanentlyFailed.size();
                             if (!permanentlyFailed.isEmpty()) {
+                                ESConnectorMetrics.recordFailure("non_retryable_status");
                                 LOG.error("writeTagProperties: {} items permanently failed (4xx): {}",
                                         permanentlyFailed.size(), permanentlyFailed);
                             }
@@ -181,32 +198,47 @@ public class ESConnector implements Closeable {
                             pendingDocIds.retainAll(retryableDocIds);
 
                             if (pendingDocIds.isEmpty()) {
-                                return; // All retryable items resolved
+                                if (totalPermanentlyFailed == 0) {
+                                    ESCircuitBreaker.recordSuccess();
+                                    ESConnectorMetrics.recordSuccess();
+                                }
+                                return; // All retryable items resolved (some may have permanently failed)
                             }
 
                             LOG.warn("writeTagProperties: {} items have retryable failures, will retry ({}/{})",
                                     pendingDocIds.size(), retryCount + 1, maxRetries);
                         } else {
+                            if (totalPermanentlyFailed == 0) {
+                                ESCircuitBreaker.recordSuccess();
+                                ESConnectorMetrics.recordSuccess();
+                            }
                             return; // All items succeeded
                         }
                     } else if (statusCode >= 500) {
+                        ESConnectorMetrics.recordFailure("server_error_5xx");
                         LOG.warn("Failed to update ES doc due to server error ({}). Retrying... ({}/{})",
                                 statusCode, retryCount + 1, maxRetries);
                     } else {
                         String responseBody = EntityUtils.toString(response.getEntity());
+                        ESConnectorMetrics.recordFailure("non_retryable_status");
+                        ESCircuitBreaker.recordFailure();
                         throw new RuntimeException("Failed to update ES doc. Status: " + statusCode + ", Body: " + responseBody);
                     }
                 } catch (IOException e) {
+                    ESConnectorMetrics.recordFailure("io_exception");
                     LOG.warn("Failed to update ES doc for denorm attributes. Retrying... ({}/{})", retryCount + 1, maxRetries, e);
                 }
             }
 
             if (!pendingDocIds.isEmpty()) {
+                ESConnectorMetrics.recordFailure("retries_exhausted");
+                ESCircuitBreaker.recordFailure();
                 throw new RuntimeException("Failed to update ES doc for denorm attributes after " + maxRetries +
                         " retries. " + pendingDocIds.size() + " items still pending.");
             }
         } finally {
             RequestContext.get().endMetricRecord(recorder);
+            ESConnectorMetrics.stopLatencyTimer(latencySample);
         }
     }
 
@@ -217,17 +249,27 @@ public class ESConnector implements Closeable {
      */
     public static TagDenormESWriteResult writeTagPropertiesWithResult(Map<String, Map<String, Object>> entitiesMap, boolean upsert) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("writeTagPropertiesES");
+        Timer.Sample latencySample = ESConnectorMetrics.startLatencyTimer();
 
         try {
             if (MapUtils.isEmpty(entitiesMap))
                 return TagDenormESWriteResult.allSuccess(0);
+
+            ESConnectorMetrics.recordAttempt();
+            ESConnectorMetrics.recordBulkDocCount(entitiesMap.size());
+
+            if (!ESCircuitBreaker.allowRequest()) {
+                ESConnectorMetrics.recordCircuitBreakerShortCircuit();
+                ESConnectorMetrics.recordFailure("circuit_open");
+                LOG.warn("writeTagPropertiesWithResult: circuit breaker OPEN — short-circuiting {} entities", entitiesMap.size());
+                return TagDenormESWriteResult.allFailed(entitiesMap.keySet());
+            }
 
             // Track docId → vertexId mapping for failure reporting
             Map<String, String> docIdToVertexId = new LinkedHashMap<>();
             StringBuilder bulkRequestBody = buildBulkBody(entitiesMap, docIdToVertexId, null, upsert);
 
             int maxRetries = AtlasConfiguration.ES_MAX_RETRIES.getInt();
-            long initialRetryDelay = AtlasConfiguration.ES_RETRY_DELAY_MS.getLong();
 
             // Track which doc IDs still need to be retried and which permanently failed
             Set<String> pendingDocIds = new LinkedHashSet<>(docIdToVertexId.keySet());
@@ -235,11 +277,12 @@ public class ESConnector implements Closeable {
 
             for (int retryCount = 0; retryCount < maxRetries && !pendingDocIds.isEmpty(); retryCount++) {
                 if (retryCount > 0) {
+                    ESConnectorMetrics.recordRetry();
                     try {
-                        long exponentialBackoffDelay = initialRetryDelay * (long) Math.pow(2, retryCount - 1);
-                        Thread.sleep(exponentialBackoffDelay);
+                        Thread.sleep(computeBackoffMs(retryCount));
                     } catch (InterruptedException interruptedException) {
                         Thread.currentThread().interrupt();
+                        ESConnectorMetrics.recordFailure("interrupted");
                         throw new RuntimeException("ES update interrupted during retry delay", interruptedException);
                     }
                 }
@@ -264,6 +307,10 @@ public class ESConnector implements Closeable {
                             Set<String> batchPermanentlyFailed = new LinkedHashSet<>();
                             parseBulkResponse(responseBody, retryableDocIds, batchPermanentlyFailed);
 
+                            ESConnectorMetrics.recordPartialFailure(batchPermanentlyFailed.size() + retryableDocIds.size());
+                            if (!batchPermanentlyFailed.isEmpty()) {
+                                ESConnectorMetrics.recordFailure("non_retryable_status");
+                            }
                             permanentlyFailedDocIds.addAll(batchPermanentlyFailed);
 
                             // Only retry items with transient failures (5xx/429)
@@ -280,13 +327,17 @@ public class ESConnector implements Closeable {
                             break;
                         }
                     } else if (statusCode >= 500) {
+                        ESConnectorMetrics.recordFailure("server_error_5xx");
                         LOG.warn("Failed to update ES doc due to server error ({}). Retrying... ({}/{})",
                                 statusCode, retryCount + 1, maxRetries);
                     } else {
                         String responseBody = EntityUtils.toString(response.getEntity());
+                        ESConnectorMetrics.recordFailure("non_retryable_status");
+                        ESCircuitBreaker.recordFailure();
                         throw new RuntimeException("Failed to update ES doc. Status: " + statusCode + ", Body: " + responseBody);
                     }
                 } catch (IOException e) {
+                    ESConnectorMetrics.recordFailure("io_exception");
                     LOG.warn("Failed to update ES doc for denorm attributes. Retrying... ({}/{})", retryCount + 1, maxRetries, e);
                 }
             }
@@ -304,7 +355,15 @@ public class ESConnector implements Closeable {
             }
 
             int successCount = entitiesMap.size() - failedVertexIds.size();
-            if (!failedVertexIds.isEmpty()) {
+
+            if (failedVertexIds.isEmpty()) {
+                ESCircuitBreaker.recordSuccess();
+                ESConnectorMetrics.recordSuccess();
+            } else {
+                if (!pendingDocIds.isEmpty()) {
+                    ESConnectorMetrics.recordFailure("retries_exhausted");
+                    ESCircuitBreaker.recordFailure();
+                }
                 LOG.error("writeTagPropertiesWithResult: {}/{} docs failed after retries ({} permanent, {} retries exhausted)",
                         failedVertexIds.size(), entitiesMap.size(),
                         permanentlyFailedDocIds.size(), pendingDocIds.size());
@@ -312,7 +371,42 @@ public class ESConnector implements Closeable {
             return new TagDenormESWriteResult(successCount, failedVertexIds);
         } finally {
             RequestContext.get().endMetricRecord(recorder);
+            ESConnectorMetrics.stopLatencyTimer(latencySample);
         }
+    }
+
+    /**
+     * Compute the retry delay for a given retry attempt: exponential backoff
+     * (initial * 2^(retry-1)), capped at the configured maximum, and optionally
+     * with equal jitter applied to spread retries across pods (avoids thundering
+     * herd when many pods fail at the same time).
+     *
+     * @param retryCount the 1-based retry index (1 = first retry, 2 = second, ...)
+     */
+    static long computeBackoffMs(int retryCount) {
+        long initial = AtlasConfiguration.ES_RETRY_DELAY_MS.getLong();
+        long max     = AtlasConfiguration.ES_RETRY_MAX_DELAY_MS.getLong();
+        long base    = initial * (long) Math.pow(2, Math.max(0, retryCount - 1));
+        long capped  = Math.min(Math.max(initial, base), max);
+
+        if (!AtlasConfiguration.ES_RETRY_JITTER_ENABLED.getBoolean()) {
+            return capped;
+        }
+        // Equal jitter: half of capped is fixed, the other half is random in [0, capped/2)
+        long half = capped / 2;
+        if (half <= 0) {
+            return capped;
+        }
+        return half + ThreadLocalRandom.current().nextLong(half);
+    }
+
+    /**
+     * Thrown when an ES write is short-circuited because the per-pod circuit
+     * breaker is OPEN. Distinct from a generic RuntimeException so callers
+     * (and the outbox in MS-1010) can detect this case explicitly.
+     */
+    public static class ESWriteCircuitOpenException extends RuntimeException {
+        public ESWriteCircuitOpenException(String message) { super(message); }
     }
 
     /** Parses an ES bulk response to separate retryable (5xx/429) from permanently
@@ -345,6 +439,7 @@ public class ESConnector implements Closeable {
                 }
             }
         } catch (Exception e) {
+            ESConnectorMetrics.recordFailure("parse_error");
             LOG.warn("writeTagProperties: failed to parse bulk response: {}. Raw (truncated): {}",
                     e.getMessage(), respBody.substring(0, Math.min(4000, respBody.length())));
         }
