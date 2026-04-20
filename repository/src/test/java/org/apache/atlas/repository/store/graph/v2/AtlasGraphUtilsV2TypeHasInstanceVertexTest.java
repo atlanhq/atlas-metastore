@@ -84,7 +84,7 @@ class AtlasGraphUtilsV2TypeHasInstanceVertexTest {
         boolean result = AtlasTypeDefESUtils.typeHasInstanceVertex("Table");
 
         assertTrue(result);
-        verify(mockIndexQuery).countIndexQuery(contains("__typeName"));
+        verify(mockIndexQuery).countIndexQuery(contains("__typeName.keyword"));
         verify(mockIndexQuery).countIndexQuery(contains("Table"));
     }
 
@@ -136,7 +136,7 @@ class AtlasGraphUtilsV2TypeHasInstanceVertexTest {
 
         verify(mockGraph).elasticsearchQuery(Constants.VERTEX_INDEX_NAME);
         verify(mockIndexQuery).countIndexQuery(contains("DataSet"));
-        verify(mockIndexQuery).countIndexQuery(contains(Constants.TYPE_NAME_PROPERTY_KEY));
+        verify(mockIndexQuery).countIndexQuery(contains(Constants.TYPE_NAME_PROPERTY_KEY + ".keyword"));
     }
 
     @Test

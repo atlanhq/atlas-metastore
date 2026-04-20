@@ -50,7 +50,7 @@ public final class AtlasTypeDefESUtils {
             AtlasIndexQuery indexQuery = getGraphInstance().elasticsearchQuery(indexName);
 
             String esQuery = String.format(
-                "{\"query\":{\"bool\":{\"filter\":[{\"term\":{\"%s\":\"%s\"}}]}}}",
+                "{\"query\":{\"bool\":{\"filter\":[{\"term\":{\"%s.keyword\":\"%s\"}}]}}}",
                 Constants.TYPE_NAME_PROPERTY_KEY, typeName
             );
             Long count = indexQuery.countIndexQuery(esQuery);
@@ -104,23 +104,7 @@ public final class AtlasTypeDefESUtils {
 
     private static String buildClassificationReferenceQuery(String typeName) {
         return String.format(
-            "{\n" +
-            "  \"query\": {\n" +
-            "    \"bool\": {\n" +
-            "      \"filter\": [\n" +
-            "        {\n" +
-            "          \"bool\": {\n" +
-            "            \"should\": [\n" +
-            "              {\"term\": {\"%s\": \"%s\"}},\n" +
-            "              {\"term\": {\"%s\": \"%s\"}}\n" +
-            "            ],\n" +
-            "            \"minimum_should_match\": 1\n" +
-            "          }\n" +
-            "        }\n" +
-            "      ]\n" +
-            "    }\n" +
-            "  }\n" +
-            "}",
+            "{\"query\":{\"bool\":{\"filter\":[{\"bool\":{\"should\":[{\"term\":{\"%s\":\"%s\"}},{\"term\":{\"%s\":\"%s\"}}],\"minimum_should_match\":1}}]}}}",
             Constants.TRAIT_NAMES_PROPERTY_KEY, typeName,
             Constants.PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, typeName
         );
