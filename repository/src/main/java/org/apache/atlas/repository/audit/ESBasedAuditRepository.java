@@ -302,9 +302,6 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
             return;
         }
 
-        // Snapshot the write config once — consistent writeIndex and bulkMetadata for the entire call
-        WriteConfig cfg = this.writeConfig;
-
         Map<String, String> requestContextHeaders = RequestContext.get().getRequestContextHeaders();
         String entityPayloadTemplate = getQueryTemplate(requestContextHeaders);
 
