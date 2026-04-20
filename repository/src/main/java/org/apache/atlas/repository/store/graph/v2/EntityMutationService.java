@@ -418,10 +418,12 @@ public class EntityMutationService {
      * Publish an async ingestion event to Kafka if the graph transaction succeeded
      * and async ingestion is enabled. Best-effort: catches all exceptions.
      *
-     * <p>The payload must be a pre-mutation snapshot of the original REST request body,
-     * so the Kafka event faithfully represents what the caller sent. Callers are
-     * responsible for deep-copying the payload before passing it to any mutating
-     * store operation (e.g. via BulkRequestContext.setOriginalEntities).</p>
+     * <p>For BULK_CREATE_OR_UPDATE, the payload is the post-mutation state of the
+     * entities — i.e. with server-assigned GUIDs and preprocessor-generated
+     * qualifiedNames. The WAL consumer uses these values to pin the replaying
+     * graph (JanusGraph) to the same GUID/QN assignments made by the primary
+     * graph (ZeroGraph), so both graphs end up with identical entity identity
+     * after replay. Other event types pass through real GUIDs already.</p>
      */
     private void publishAsyncIngestionEvent(boolean isGraphTransactionFailed, String eventType,
                                             Map<String, Object> operationMetadata, Object payload) {
