@@ -26,7 +26,7 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * Enhanced post-migration validation.
  *
- * Runs 17 correctness checks against the target Cassandra (and optionally ES).
+ * Runs 18 correctness checks against the target Cassandra (and optionally ES).
  * Returns a structured {@link ValidationReport} with per-check results, per-type
  * statistics, super vertex detection, and source baseline comparison.
  *
@@ -185,14 +185,13 @@ public class MigrationValidator {
 
         // --- Check 11 (run early): Super vertex detection ---
         // Runs before edge consistency checks so actual row counts from full scan
-        // can be used instead of unreliable system.size_estimates.
+        // can be reused (avoiding a second scan in edge consistency checks).
         if (!config.isSkipSuperVertexDetection()) {
             runSuperVertexDetection(ks, report);
         } else {
             // Even when super vertex detection is skipped, we still need accurate
             // edge counts for validation. Run count-only pass (Pass 1 only) to get
-            // exact row counts from edges_out/in/by_id instead of falling back to
-            // unreliable system.size_estimates (8-30% inaccurate after bulk writes).
+            // exact row counts from edges_out/in/by_id.
             runEdgeCountOnlyPass(ks, report);
         }
 
@@ -374,8 +373,8 @@ public class MigrationValidator {
     // ========================================================================
 
     private void runEdgeConsistencyChecks(String ks, ValidationReport report) {
-        // Use actual row counts from super vertex detection full scan when available.
-        // Falls back to system.size_estimates which are unreliable after bulk writes.
+        // Use row counts from super vertex detection full scan when available.
+        // Falls back to exact paginated scan via countTable().
         SuperVertexReport svReport = report.getSuperVertexReport();
         boolean usingActualCounts = svReport != null;
 
@@ -383,24 +382,24 @@ public class MigrationValidator {
         if (usingActualCounts) {
             edgeOutCount = svReport.getEdgesOutRowCount();
             edgeInCount  = svReport.getEdgesInRowCount();
-            LOG.info("Edge consistency: using actual counts from super vertex full scan " +
+            LOG.info("Edge consistency: using counts from super vertex full scan " +
                      "(edges_out={}, edges_in={})", String.format("%,d", edgeOutCount),
                      String.format("%,d", edgeInCount));
         } else {
             edgeOutCount = countTable(ks + ".edges_out");
             edgeInCount  = countTable(ks + ".edges_in");
-            LOG.info("Edge consistency: using estimated counts from size_estimates " +
+            LOG.info("Edge consistency: using exact counts from paginated scan " +
                      "(edges_out={}, edges_in={})", String.format("%,d", edgeOutCount),
                      String.format("%,d", edgeInCount));
         }
         long edgeByIdCount;
         if (usingActualCounts) {
             edgeByIdCount = svReport.getEdgesByIdRowCount();
-            LOG.info("Edge consistency: edges_by_id={} (actual full scan)",
+            LOG.info("Edge consistency: edges_by_id={} (full scan)",
                      String.format("%,d", edgeByIdCount));
         } else {
             edgeByIdCount = countTable(ks + ".edges_by_id");
-            LOG.info("Edge consistency: edges_by_id={} (estimated from size_estimates)",
+            LOG.info("Edge consistency: edges_by_id={} (exact paginated scan)",
                      String.format("%,d", edgeByIdCount));
         }
 
@@ -408,7 +407,7 @@ public class MigrationValidator {
         report.setEdgeInCount(edgeInCount);
         report.setEdgeByIdCount(edgeByIdCount);
 
-        String countSource = usingActualCounts ? "actual full scan" : "estimated, 5% tolerance";
+        String countSource = usingActualCounts ? "full scan" : "exact paginated scan";
 
         // Check: Source baseline vs target edge count
         // This catches silent edge loss during migration — if all three target tables
@@ -435,14 +434,13 @@ public class MigrationValidator {
             sourceEdgeCheck.addDetail("source_baseline_edges", sourceBaseline.totalEdges);
             sourceEdgeCheck.addDetail("target_edges_out", edgeOutCount);
             sourceEdgeCheck.addDetail("ratio", ratio);
-            sourceEdgeCheck.addDetail("count_source", usingActualCounts ? "full_scan" : "size_estimates");
+            sourceEdgeCheck.addDetail("count_source", usingActualCounts ? "full_scan" : "exact_paginated_scan");
             report.addCheck(sourceEdgeCheck);
         }
 
         // Check 2: edges_out vs edges_in
-        // With actual counts (full scan): exact match required, FAIL on mismatch (real data issue)
-        // With estimates (size_estimates): 5% tolerance, FAIL on mismatch (edge consistency is critical)
-        double outInTolerance = usingActualCounts ? 0.0 : 0.05;
+        // All counts are now exact (full scan or paginated scan), so exact match is required.
+        double outInTolerance = 0.0;
         boolean outInMatch = isWithinTolerance(edgeOutCount, edgeInCount, outInTolerance);
         ValidationCheckResult outInCheck = new ValidationCheckResult(
             "edge_out_in_consistency",
@@ -452,25 +450,23 @@ public class MigrationValidator {
                           edgeOutCount, edgeInCount, Math.abs(edgeOutCount - edgeInCount), countSource));
         outInCheck.addDetail("edges_out_count", edgeOutCount);
         outInCheck.addDetail("edges_in_count", edgeInCount);
-        outInCheck.addDetail("count_source", usingActualCounts ? "full_scan" : "size_estimates");
+        outInCheck.addDetail("count_source", usingActualCounts ? "full_scan" : "exact_paginated_scan");
         report.addCheck(outInCheck);
 
         // Check 3: edges_by_id vs edges_out
-        // With actual counts (full scan): exact match required, FAIL on mismatch
-        // With estimates (size_estimates): 5% tolerance, WARN on mismatch
-        double byIdTolerance = usingActualCounts ? 0.0 : 0.05;
+        // All counts are now exact, so exact match is required.
+        double byIdTolerance = 0.0;
         boolean byIdMatch = isWithinTolerance(edgeByIdCount, edgeOutCount, byIdTolerance);
-        String byIdSource = usingActualCounts ? "actual full scan" : "estimated, 5% tolerance";
+        String byIdSource = usingActualCounts ? "full scan" : "exact paginated scan";
         ValidationCheckResult byIdCheck = new ValidationCheckResult(
             "edge_by_id_consistency",
             "edges_by_id count matches edges_out count (" + byIdSource + ")",
-            byIdMatch ? ValidationCheckResult.Severity.PASS :
-                (usingActualCounts ? ValidationCheckResult.Severity.FAIL : ValidationCheckResult.Severity.WARN),
+            byIdMatch ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.FAIL,
             String.format("edges_by_id=%d, edges_out=%d, diff=%d (source: %s)",
                           edgeByIdCount, edgeOutCount, Math.abs(edgeByIdCount - edgeOutCount), byIdSource));
         byIdCheck.addDetail("edges_by_id_count", edgeByIdCount);
         byIdCheck.addDetail("edges_out_count", edgeOutCount);
-        byIdCheck.addDetail("count_source", usingActualCounts ? "full_scan" : "size_estimates");
+        byIdCheck.addDetail("count_source", usingActualCounts ? "full_scan" : "exact_paginated_scan");
         report.addCheck(byIdCheck);
     }
 
@@ -548,8 +544,8 @@ public class MigrationValidator {
     // ========================================================================
 
     private void runTypeDefConsistencyCheck(String ks, ValidationReport report) {
-        long typeDefCount      = scanTableCount(ks + ".type_definitions");
-        long typeDefByCatCount = scanTableCount(ks + ".type_definitions_by_category");
+        long typeDefCount      = countTable(ks + ".type_definitions");
+        long typeDefByCatCount = countTable(ks + ".type_definitions_by_category");
 
         report.setTypeDefCount(typeDefCount);
         report.setTypeDefByCategoryCount(typeDefByCatCount);
@@ -1410,14 +1406,14 @@ public class MigrationValidator {
         long edgeOutCount = report.getEdgeOutCount();
         boolean passed = edgeIndexCount > 0 || edgeOutCount == 0;
 
-        String message = String.format("edge_index=%d (estimated), edges_out=%d (estimated)", edgeIndexCount, edgeOutCount);
+        String message = String.format("edge_index=%d, edges_out=%d", edgeIndexCount, edgeOutCount);
         if (edgeOutCount > 0 && edgeIndexCount == 0) {
             message += " [FAIL: edge_index is empty but edges exist — relationship GUID lookups will fail]";
         }
 
         ValidationCheckResult result = new ValidationCheckResult(
             "edge_index_count",
-            "Edge index table populated for relationship GUID lookups (estimated via size_estimates)",
+            "Edge index table populated for relationship GUID lookups (exact count)",
             passed ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.FAIL,
             message);
         result.addDetail("edge_index_count", edgeIndexCount);
@@ -1460,11 +1456,11 @@ public class MigrationValidator {
                     esEdgeIndex, edgeByIdCount);
             } else if (edgeByIdCount > 0) {
                 double ratio = (double) esEdgeCount / edgeByIdCount;
-                // Allow some tolerance since size_estimates for edges_by_id may be inaccurate
-                severity = ratio >= 0.90 ? ValidationCheckResult.Severity.PASS :
-                           ratio >= 0.50 ? ValidationCheckResult.Severity.WARN :
+                // Cassandra count is now exact; ES count from _count API is also exact.
+                severity = ratio >= 0.99 ? ValidationCheckResult.Severity.PASS :
+                           ratio >= 0.90 ? ValidationCheckResult.Severity.WARN :
                                            ValidationCheckResult.Severity.FAIL;
-                message = String.format("es_edge_index(%s)=%d, edges_by_id=%d (estimated), ratio=%.2f%%",
+                message = String.format("es_edge_index(%s)=%d, edges_by_id=%d, ratio=%.2f%%",
                     esEdgeIndex, esEdgeCount, edgeByIdCount, ratio * 100);
             } else {
                 severity = ValidationCheckResult.Severity.PASS;
@@ -1738,8 +1734,8 @@ public class MigrationValidator {
 
         // Check Cassandra disk space via system keyspace
         try {
-            // Query system.local for data_file_directories info
-            // Use size_estimates as a proxy for Cassandra data size
+            // Use size_estimates as a proxy for Cassandra data size (bytes, not row counts)
+            // This is appropriate here: disk size estimation, not row counting accuracy
             String ks = config.getTargetCassandraKeyspace();
             ResultSet rs = targetSession.execute(
                 "SELECT mean_partition_size, partitions_count FROM system.size_estimates " +
@@ -1806,25 +1802,14 @@ public class MigrationValidator {
         String sourceKs = config.getSourceCassandraKeyspace();
         String edgestoreTable = config.getSourceEdgestoreTable();
 
-        // Estimate source edgestore rows via system.size_estimates (instant, ~95% accurate)
+        // Exact source edgestore row count via paginated scan of partition key column
         long sourceEdgestoreCount = -1;
         try {
-            ResultSet rs = sourceSession.execute(
-                SimpleStatement.builder(
-                    "SELECT partitions_count FROM system.size_estimates " +
-                    "WHERE keyspace_name = ? AND table_name = ?")
-                    .addPositionalValue(sourceKs)
-                    .addPositionalValue(edgestoreTable)
-                    .setTimeout(java.time.Duration.ofSeconds(30))
-                    .build());
-            for (Row row : rs) {
-                sourceEdgestoreCount = (sourceEdgestoreCount < 0 ? 0 : sourceEdgestoreCount)
-                                       + row.getLong("partitions_count");
-            }
-            LOG.info("Source edgestore estimated rows ({}.{}): {}", sourceKs, edgestoreTable,
+            sourceEdgestoreCount = countTableWithSession(sourceSession, sourceKs + "." + edgestoreTable);
+            LOG.info("Source edgestore exact rows ({}.{}): {}", sourceKs, edgestoreTable,
                      String.format("%,d", sourceEdgestoreCount));
         } catch (Exception e) {
-            LOG.warn("Failed to estimate source edgestore ({}.{}): {}",
+            LOG.warn("Failed to count source edgestore ({}.{}): {}",
                      sourceKs, edgestoreTable, e.getMessage());
         }
         report.setSourceEdgestoreCount(sourceEdgestoreCount);
@@ -1853,69 +1838,91 @@ public class MigrationValidator {
     // ========================================================================
 
     /**
-     * Estimate table row count using system.size_estimates.
-     * This is instant even for tables with millions of rows, unlike SELECT count(*).
-     * <p>
-     * WARNING: Accuracy is only ~95% in steady state — immediately after bulk writes
-     * (e.g. migration), estimates can be wildly inaccurate (8-30% of actual) because
-     * data in memtables or un-compacted SSTables is underrepresented.
-     * Prefer actual counts from SuperVertexDetector full scans when available.
+     * Exact table row count via paginated scan of partition key columns only.
+     * Iterates all rows counting client-side — avoids coordinator-level count(*)
+     * which can timeout on large tables (millions of rows).
+     *
+     * Selects only the partition key column(s) to minimize data transfer — for edge
+     * tables with JSON properties, this is 100x less data than SELECT *.
+     *
+     * Logs progress every 500K rows for large tables.
      */
     private long countTable(String fullyQualifiedTable) {
-        // Parse "keyspace.table" format
-        int dot = fullyQualifiedTable.indexOf('.');
-        if (dot < 0) {
-            LOG.warn("Invalid table name (expected keyspace.table): {}", fullyQualifiedTable);
-            return -1;
-        }
-        String keyspace = fullyQualifiedTable.substring(0, dot);
-        String table    = fullyQualifiedTable.substring(dot + 1);
-
+        String selectColumn = resolvePartitionKeyColumn(fullyQualifiedTable);
+        String cql = "SELECT " + selectColumn + " FROM " + fullyQualifiedTable;
         try {
+            long count = 0;
             ResultSet rs = targetSession.execute(
-                SimpleStatement.builder(
-                    "SELECT partitions_count FROM system.size_estimates " +
-                    "WHERE keyspace_name = ? AND table_name = ?")
-                    .addPositionalValue(keyspace)
-                    .addPositionalValue(table)
-                    .setTimeout(java.time.Duration.ofSeconds(30))
+                SimpleStatement.builder(cql)
+                    .setPageSize(10000)
+                    .setTimeout(java.time.Duration.ofMinutes(30))
                     .build());
-
-            long totalPartitions = 0;
             for (Row row : rs) {
-                totalPartitions += row.getLong("partitions_count");
+                count++;
+                if (count % 500_000 == 0) {
+                    LOG.info("  ... counting {}: {} rows so far", fullyQualifiedTable,
+                             String.format("%,d", count));
+                }
             }
-
-            LOG.info("Estimated row count for {}: {} (via system.size_estimates)", fullyQualifiedTable,
-                     String.format("%,d", totalPartitions));
-            return totalPartitions;
+            LOG.info("Exact row count for {}: {}", fullyQualifiedTable, String.format("%,d", count));
+            return count;
         } catch (Exception e) {
-            LOG.warn("Failed to estimate count for {} via size_estimates: {}", fullyQualifiedTable, e.getMessage());
+            LOG.warn("Failed to count {}: {}", fullyQualifiedTable, e.getMessage());
             return -1;
         }
     }
 
     /**
-     * Exact table row count via paginated scan.
-     * Iterates all rows counting client-side — avoids coordinator-level count(*)
-     * which can timeout on some Cassandra configurations.
-     * Fast for small tables (type_definitions ~hundreds of rows).
+     * Exact table row count via paginated scan, using a specific CqlSession.
+     * Used for source-side counting (different Cassandra cluster/session).
      */
-    private long scanTableCount(String fullyQualifiedTable) {
+    private long countTableWithSession(CqlSession session, String fullyQualifiedTable) {
+        String selectColumn = resolvePartitionKeyColumn(fullyQualifiedTable);
+        String cql = "SELECT " + selectColumn + " FROM " + fullyQualifiedTable;
         try {
             long count = 0;
-            ResultSet rs = targetSession.execute(
-                SimpleStatement.builder("SELECT * FROM " + fullyQualifiedTable)
-                    .setPageSize(5000)
+            ResultSet rs = session.execute(
+                SimpleStatement.builder(cql)
+                    .setPageSize(10000)
+                    .setTimeout(java.time.Duration.ofMinutes(30))
                     .build());
             for (Row row : rs) {
                 count++;
+                if (count % 500_000 == 0) {
+                    LOG.info("  ... counting {}: {} rows so far", fullyQualifiedTable,
+                             String.format("%,d", count));
+                }
             }
-            LOG.info("Scanned row count for {}: {}", fullyQualifiedTable, String.format("%,d", count));
+            LOG.info("Exact row count for {}: {}", fullyQualifiedTable, String.format("%,d", count));
             return count;
         } catch (Exception e) {
-            LOG.warn("Failed to scan-count {}: {}", fullyQualifiedTable, e.getMessage());
+            LOG.warn("Failed to count {}: {}", fullyQualifiedTable, e.getMessage());
             return -1;
+        }
+    }
+
+    /**
+     * Returns the lightest column to SELECT for row counting purposes.
+     * Selects only partition key column(s) to avoid reading large properties/JSON fields.
+     */
+    private static String resolvePartitionKeyColumn(String fullyQualifiedTable) {
+        String table = fullyQualifiedTable.contains(".")
+            ? fullyQualifiedTable.substring(fullyQualifiedTable.indexOf('.') + 1)
+            : fullyQualifiedTable;
+        switch (table) {
+            case "vertices":                    return "vertex_id";
+            case "edges_out":                   return "out_vertex_id";
+            case "edges_in":                    return "in_vertex_id";
+            case "edges_by_id":                 return "edge_id";
+            case "vertex_index":                return "index_name";
+            case "vertex_property_index":       return "index_name";
+            case "edge_index":                  return "index_name";
+            case "entity_claims":               return "identity_key";
+            case "type_definitions":            return "type_name";
+            case "type_definitions_by_category":return "type_category";
+            case "schema_registry":             return "property_name";
+            case "edgestore":                   return "key";  // JanusGraph source table
+            default:                            return "*";    // fallback: read all columns
         }
     }
 
