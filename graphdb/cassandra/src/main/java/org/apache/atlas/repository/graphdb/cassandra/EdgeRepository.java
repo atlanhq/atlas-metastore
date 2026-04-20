@@ -116,21 +116,22 @@ public class EdgeRepository {
             "SELECT COUNT(*) FROM edges_in WHERE in_vertex_id = ? AND edge_label = ?"
         );
 
-        // LIMIT 1 variants for existence checks (avoids reading entire partition)
+        // LIMIT 1 variants for existence checks (avoids reading entire partition).
+        // Matches JanusGraph behavior: returns true if ANY edge exists, regardless of state.
         hasEdgesOutByLabelStmt = session.prepare(
-            "SELECT edge_id, state FROM edges_out WHERE out_vertex_id = ? AND edge_label = ? LIMIT 1"
+            "SELECT edge_id FROM edges_out WHERE out_vertex_id = ? AND edge_label = ? LIMIT 1"
         );
 
         hasEdgesInByLabelStmt = session.prepare(
-            "SELECT edge_id, state FROM edges_in WHERE in_vertex_id = ? AND edge_label = ? LIMIT 1"
+            "SELECT edge_id FROM edges_in WHERE in_vertex_id = ? AND edge_label = ? LIMIT 1"
         );
 
         hasEdgesOutStmt = session.prepare(
-            "SELECT edge_id, state FROM edges_out WHERE out_vertex_id = ? LIMIT 1"
+            "SELECT edge_id FROM edges_out WHERE out_vertex_id = ? LIMIT 1"
         );
 
         hasEdgesInStmt = session.prepare(
-            "SELECT edge_id, state FROM edges_in WHERE in_vertex_id = ? LIMIT 1"
+            "SELECT edge_id FROM edges_in WHERE in_vertex_id = ? LIMIT 1"
         );
 
         // Update edge properties/state in all three tables (uses INSERT which upserts in Cassandra)
@@ -273,16 +274,15 @@ public class EdgeRepository {
 
     /**
      * Check if a vertex has at least one edge, using CQL LIMIT 1.
-     * Only selects edge_id and state (no properties deserialization).
+     * Only selects edge_id (no properties deserialization).
      *
-     * Skips edges with state=DELETED. If the first row is DELETED, falls back
-     * to a full edge fetch to check for non-deleted edges. This is rare in practice
-     * since hard-deleted edges are removed from the table.
+     * Matches JanusGraph behavior: returns true if ANY edge row exists,
+     * regardless of state (including soft-deleted edges with state=DELETED).
      *
      * @param vertexId  the vertex to check
      * @param direction OUT, IN, or BOTH
      * @param edgeLabel optional label filter (null = all labels)
-     * @return true if at least one non-deleted edge exists in Cassandra (does NOT check uncommitted buffer)
+     * @return true if at least one edge exists in Cassandra (does NOT check uncommitted buffer)
      */
     public boolean hasEdges(String vertexId, AtlasEdgeDirection direction, String edgeLabel) {
         if (direction == AtlasEdgeDirection.OUT || direction == AtlasEdgeDirection.BOTH) {
@@ -309,20 +309,8 @@ public class EdgeRepository {
             rs = session.execute((isOut ? hasEdgesOutStmt : hasEdgesInStmt)
                     .bind(vertexId));
         }
-        Row row = rs.one();
-        if (row == null) {
-            return false;
-        }
-        String state = row.getString("state");
-        if (!"DELETED".equals(state)) {
-            return true;
-        }
-        // Rare edge case: LIMIT 1 returned a DELETED row. In practice, DELETED edges
-        // are hard-removed from the table at commit time, so this should almost never happen.
-        // Log a warning and return false — the edge effectively doesn't exist if it's deleted.
-        LOG.warn("hasEdgesInDirection: LIMIT 1 row for vertex {} label {} is DELETED — treating as no edges",
-                vertexId, edgeLabel);
-        return false;
+        // Matches JanusGraph: edges().hasNext() — any edge exists, regardless of state
+        return rs.one() != null;
     }
 
     /**

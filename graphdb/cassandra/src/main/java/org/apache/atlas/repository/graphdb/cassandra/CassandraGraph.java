@@ -618,8 +618,9 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     long countBufferedEdgeAdjustment(String vertexId, AtlasEdgeDirection direction, String edgeLabel) {
         TransactionBuffer buffer = txBuffer.get();
 
-        // Count new buffered edges matching the criteria
-        List<CassandraEdge> bufferedNew = buffer.getEdgesForVertex(vertexId, direction, edgeLabel);
+        // Count only truly NEW buffered edges (not dirty). Dirty edges are already
+        // persisted in Cassandra and included in the CQL COUNT(*) result.
+        List<CassandraEdge> bufferedNew = buffer.getNewEdgesOnlyForVertex(vertexId, direction, edgeLabel);
         long newCount = bufferedNew.size();
 
         // Count removed edges matching the criteria (these are still in Cassandra's COUNT)
