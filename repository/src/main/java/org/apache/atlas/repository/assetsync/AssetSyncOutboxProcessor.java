@@ -51,14 +51,13 @@ public final class AssetSyncOutboxProcessor {
     private final int  drainBatchSize;
     private final int  leaseTtlSeconds;
     private final int  leaseHeartbeatSeconds;
-    private final long heartbeatIntervalMs;
 
     // Adaptive state — single-threaded scheduler so plain fields are safe
     private boolean drainMode               = false;
     private int     consecutiveEmptyPolls   = 0;
-    private long    lastHeartbeatMs         = 0L;
     private boolean wasLeader               = false;
     private volatile ScheduledFuture<?>     currentTask;
+    private volatile ScheduledFuture<?>     heartbeatTask;
 
     public AssetSyncOutboxProcessor(Outbox<EntityGuidRef> outbox,
                                     OutboxConsumer<EntityGuidRef> consumer,
@@ -73,7 +72,6 @@ public final class AssetSyncOutboxProcessor {
         this.drainBatchSize        = AtlasConfiguration.ASSET_SYNC_RELAY_DRAIN_BATCH_SIZE.getInt();
         this.leaseTtlSeconds       = AtlasConfiguration.ASSET_SYNC_RELAY_LEASE_TTL_SECONDS.getInt();
         this.leaseHeartbeatSeconds = AtlasConfiguration.ASSET_SYNC_RELAY_LEASE_HEARTBEAT_SECONDS.getInt();
-        this.heartbeatIntervalMs   = Duration.ofSeconds(leaseHeartbeatSeconds).toMillis();
 
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "asset-sync-outbox-relay");
@@ -85,6 +83,11 @@ public final class AssetSyncOutboxProcessor {
     public void start() {
         if (running.compareAndSet(false, true)) {
             scheduleNext(idlePollSeconds);
+            // Heartbeat runs independently of poll cadence so the lease can't expire
+            // between idle polls (previously poll interval == TTL caused routine flap).
+            heartbeatTask = scheduler.scheduleWithFixedDelay(
+                    this::heartbeatTick,
+                    leaseHeartbeatSeconds, leaseHeartbeatSeconds, TimeUnit.SECONDS);
             LOG.info("AssetSyncOutboxProcessor started (pod='{}', idle={}s, drain={}s, " +
                             "idle_batch={}, drain_batch={}, lease_ttl={}s, heartbeat={}s)",
                     AssetSyncPodId.get(), idlePollSeconds, drainPollSeconds,
@@ -96,6 +99,8 @@ public final class AssetSyncOutboxProcessor {
         if (running.compareAndSet(true, false)) {
             ScheduledFuture<?> task = currentTask;
             if (task != null) task.cancel(false);
+            ScheduledFuture<?> hbTask = heartbeatTask;
+            if (hbTask != null) hbTask.cancel(false);
 
             scheduler.shutdown();
             try {
@@ -112,6 +117,7 @@ public final class AssetSyncOutboxProcessor {
                 leaseManager.release(LEASE_NAME);
                 AssetSyncOutboxMetrics.setLeader(false);
                 AssetSyncOutboxMetrics.recordLeaseHandover();
+                clearStorageGauges();
             }
             LOG.info("AssetSyncOutboxProcessor stopped");
         }
@@ -146,6 +152,9 @@ public final class AssetSyncOutboxProcessor {
             if (wasLeader) {
                 wasLeader = false;
                 AssetSyncOutboxMetrics.recordLeaseHandover();
+                // Clear storage gauges so followers don't publish stale values — only
+                // the current leader's snapshot should be authoritative at any time.
+                clearStorageGauges();
                 LOG.info("AssetSyncOutboxProcessor: lost lease '{}' — entering standby", LEASE_NAME);
             }
             return;
@@ -218,31 +227,43 @@ public final class AssetSyncOutboxProcessor {
     }
 
     /**
-     * Acquire the lease if not held; renew via heartbeat if held; return whether
-     * we currently own it. Heartbeats are throttled to once per heartbeat interval.
+     * Return whether this pod currently holds the lease. Leaders are renewed by
+     * {@link #heartbeatTick()} on a dedicated cadence; followers attempt a fresh
+     * acquisition here once per poll.
      */
     private boolean ensureLease() {
-        long now = System.currentTimeMillis();
+        if (wasLeader) return true;
+        boolean ok = leaseManager.tryAcquire(LEASE_NAME, leaseTtlSeconds);
+        AssetSyncOutboxMetrics.recordLeaseAcquireAttempt(ok ? "acquired" : "held_by_other");
+        return ok;
+    }
 
-        if (wasLeader && now - lastHeartbeatMs < heartbeatIntervalMs) {
-            return true; // still inside heartbeat window — assume we hold it
-        }
-
-        boolean ok;
-        if (wasLeader) {
-            ok = leaseManager.heartbeat(LEASE_NAME, leaseTtlSeconds);
+    /**
+     * Dedicated heartbeat tick — runs every {@code leaseHeartbeatSeconds} on the
+     * same single-threaded scheduler as {@link #pollCycle()}, so state is safe
+     * without synchronization. Decoupling renewal from polling prevents the
+     * lease from silently expiring between idle polls when poll interval equals
+     * TTL.
+     */
+    private void heartbeatTick() {
+        if (!running.get() || !wasLeader) return;
+        try {
+            boolean ok = leaseManager.heartbeat(LEASE_NAME, leaseTtlSeconds);
             if (!ok) {
                 AssetSyncOutboxMetrics.recordLeaseAcquireAttempt("heartbeat_lost");
-                // Heartbeat failed — attempt to re-acquire (someone may have stolen it during a pause)
                 ok = leaseManager.tryAcquire(LEASE_NAME, leaseTtlSeconds);
                 AssetSyncOutboxMetrics.recordLeaseAcquireAttempt(ok ? "reacquired" : "held_by_other");
             }
-        } else {
-            ok = leaseManager.tryAcquire(LEASE_NAME, leaseTtlSeconds);
-            AssetSyncOutboxMetrics.recordLeaseAcquireAttempt(ok ? "acquired" : "held_by_other");
+            if (!ok) {
+                wasLeader = false;
+                AssetSyncOutboxMetrics.setLeader(false);
+                AssetSyncOutboxMetrics.recordLeaseHandover();
+                clearStorageGauges();
+                LOG.info("AssetSyncOutboxProcessor: lost lease '{}' during heartbeat — entering standby", LEASE_NAME);
+            }
+        } catch (Throwable t) {
+            LOG.warn("AssetSyncOutboxProcessor: heartbeat tick failed", t);
         }
-        lastHeartbeatMs = now;
-        return ok;
     }
 
     private int attemptCountFor(OutboxEntryId id, List<OutboxEntry<EntityGuidRef>> batch) {
@@ -287,5 +308,19 @@ public final class AssetSyncOutboxProcessor {
         } catch (Exception e) {
             LOG.warn("AssetSyncOutboxProcessor: storage gauge refresh failed (non-fatal): {}", e.getMessage());
         }
+    }
+
+    /**
+     * Zero storage gauges when this pod stops being the authoritative source
+     * (lost lease or shutdown). Without this, ex-leaders publish stale values
+     * forever and any max()/sum() aggregation on the dashboard ends up reading
+     * a snapshot from an hour ago.
+     */
+    private void clearStorageGauges() {
+        AssetSyncOutboxMetrics.setPendingCount(0);
+        AssetSyncOutboxMetrics.setProcessingCount(0);
+        AssetSyncOutboxMetrics.setFailedCount(0);
+        AssetSyncOutboxMetrics.setOldestPendingAgeSeconds(0);
+        lastStorageGaugeRefreshMs = 0L;
     }
 }
