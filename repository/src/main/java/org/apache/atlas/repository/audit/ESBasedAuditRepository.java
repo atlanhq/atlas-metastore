@@ -116,6 +116,9 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
     private static final String ENTITY_AUDITS_INDEX;
     private static final String WRITE_ALIAS;
     private static final String NIOFS_MIGRATION_MARKER_ID = "entity_audits_niofs_migrated";
+    public  static final String ILM_POLICY_NAME    = "entity_audits_policy";
+    public  static final String INDEX_TEMPLATE_NAME = "entity_audits_template";
+    private static final String INDEX_PATTERN;
     private static final int DLQ_POLL_TIMEOUT_SECONDS = 5;
 
     /**
@@ -147,6 +150,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
         INDEX_NAME = auditIndex;
         ENTITY_AUDITS_INDEX = auditIndex;
         WRITE_ALIAS = auditIndex + "_write";
+        INDEX_PATTERN = auditIndex + "-*";
         bulkMetadata = String.format("{ \"index\" : { \"_index\" : \"%s\" } }%n", INDEX_NAME);
         LOG.info("ES audit index name: '{}', write alias: '{}'", INDEX_NAME, WRITE_ALIAS);
     }
@@ -172,7 +176,6 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
     /** Pair returned from {@link #redetectAliasAndRebuild} so local {@code cfg} matches the built {@link Request}. */
     private record WriteAliasRedetectResult(WriteConfig config, Request request) {}
-
     private static final WriteConfig DEFAULT_WRITE_CONFIG = new WriteConfig(INDEX_NAME, bulkMetadata, false);
 
     private volatile WriteConfig writeConfig = DEFAULT_WRITE_CONFIG;
@@ -872,6 +875,8 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                 LOG.info("Create ES index for entity audits in ES Based Audit Repo");
                 createAuditIndex();
             }
+            ensureIlmPolicy();
+            ensureIndexTemplate();
             detectAndConfigureWriteAlias();
             WriteConfig cfg = this.writeConfig;
             LOG.info("Entity audit ES config: aliasMode={}, writeIndex='{}', readIndex='{}', writeAlias='{}'",
@@ -955,6 +960,23 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
         aliases.set(WRITE_ALIAS, writeAliasNode);
         rootObj.set("aliases", aliases);
 
+        ObjectNode settings = (ObjectNode) rootObj.get("settings");
+        if (settings == null) {
+            settings = mapper.createObjectNode();
+            rootObj.set("settings", settings);
+        }
+        ObjectNode indexSettings = (ObjectNode) settings.get("index");
+        if (indexSettings == null) {
+            indexSettings = mapper.createObjectNode();
+            settings.set("index", indexSettings);
+        }
+        ObjectNode lifecycle = mapper.createObjectNode();
+        lifecycle.put("name", ILM_POLICY_NAME);
+        lifecycle.put("rollover_alias", WRITE_ALIAS);
+        indexSettings.set("lifecycle", lifecycle);
+        indexSettings.put("number_of_shards", 4);
+        indexSettings.put("number_of_replicas", 1);
+        indexSettings.put("refresh_interval", "30s");
         HttpEntity entity = new NStringEntity(rootObj.toString(), ContentType.APPLICATION_JSON);
         Request request = new Request("PUT", concreteIndexName);
         request.setEntity(entity);
@@ -1019,6 +1041,153 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
         } catch (IOException e) {
             LOG.error("Error while updating the field limit", e);
         }
+    }
+
+    /**
+     * Creates the ILM policy for entity audits if it does not already exist.
+     * Respects manual operator overrides: if the policy exists (with any settings), it is not overwritten.
+     * The delete phase is only included when {@code atlas.audit.retention.days > 0} (default -1 = disabled).
+     */
+    private void ensureIlmPolicy() {
+        try {
+            Request getPolicy = new Request("GET", "/_ilm/policy/" + ILM_POLICY_NAME);
+            try {
+                Response response = lowLevelClient.performRequest(getPolicy);
+                if (isSuccess(response)) {
+                    LOG.info("ILM policy '{}' already exists", ILM_POLICY_NAME);
+                    return;
+                }
+            } catch (ResponseException e) {
+                if (e.getResponse().getStatusLine().getStatusCode() != 404) {
+                    LOG.warn("Unexpected response checking ILM policy '{}': {}",
+                             ILM_POLICY_NAME, e.getResponse().getStatusLine());
+                    return;
+                }
+            }
+
+            int    retentionDays = AtlasConfiguration.ENTITY_AUDIT_RETENTION_DAYS.getInt();
+            String rolloverSize  = AtlasConfiguration.ENTITY_AUDIT_ILM_ROLLOVER_SIZE.getString();
+
+            String policyBody = buildIlmPolicyJson(retentionDays, rolloverSize);
+
+            Request putPolicy = new Request("PUT", "/_ilm/policy/" + ILM_POLICY_NAME);
+            putPolicy.setEntity(new NStringEntity(policyBody, ContentType.APPLICATION_JSON));
+            Response response = lowLevelClient.performRequest(putPolicy);
+            if (isSuccess(response)) {
+                LOG.info("ILM policy '{}' created (retention={}d, rollover max_size={})",
+                         ILM_POLICY_NAME, retentionDays, rolloverSize);
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to ensure ILM policy '{}', will retry on next startup: {}",
+                     ILM_POLICY_NAME, e.getMessage());
+        }
+    }
+
+    /**
+     * Builds the ILM policy JSON with hot (rollover) and warm (forcemerge) phases.
+     * No shrink action in warm — avoids shard relocation failures on heap-constrained 3-node clusters.
+     * Rollover is size-only ({@code max_size}) — no {@code max_age}, to avoid time-based small-index proliferation.
+     * Delete phase included only when {@code retentionDays > 0}.
+     */
+    private String buildIlmPolicyJson(int retentionDays, String rolloverSize) {
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode root   = mapper.createObjectNode();
+        ObjectNode policy = root.putObject("policy");
+        ObjectNode phases = policy.putObject("phases");
+
+        ObjectNode hot        = phases.putObject("hot");
+        hot.put("min_age", "0ms");
+        ObjectNode hotActions = hot.putObject("actions");
+        ObjectNode rollover   = hotActions.putObject("rollover");
+        rollover.put("max_size", rolloverSize);
+        hotActions.putObject("set_priority").put("priority", 100);
+
+        ObjectNode warm        = phases.putObject("warm");
+        warm.put("min_age", "2d");
+        ObjectNode warmActions = warm.putObject("actions");
+        warmActions.putObject("forcemerge").put("max_num_segments", 1);
+        warmActions.putObject("set_priority").put("priority", 50);
+
+        if (retentionDays > 0) {
+            ObjectNode delete = phases.putObject("delete");
+            delete.put("min_age", retentionDays + "d");
+            delete.putObject("actions").putObject("delete");
+        }
+
+        return root.toString();
+    }
+
+    /**
+     * Creates the index template for {@code entity_audits-*} if it does not already exist.
+     * Uses the legacy {@code _template} API (ES 7.x). Mappings are loaded from
+     * {@code es-audit-mappings.json} (only the mappings node — file-level settings are discarded).
+     */
+    private void ensureIndexTemplate() {
+        try {
+            Request headTemplate = new Request("HEAD", "/_template/" + INDEX_TEMPLATE_NAME);
+            try {
+                Response response = lowLevelClient.performRequest(headTemplate);
+                if (response.getStatusLine().getStatusCode() == 200) {
+                    LOG.info("Index template '{}' already exists", INDEX_TEMPLATE_NAME);
+                    return;
+                }
+            } catch (ResponseException e) {
+                if (e.getResponse().getStatusLine().getStatusCode() != 404) {
+                    LOG.warn("Unexpected response checking index template '{}': {}",
+                             INDEX_TEMPLATE_NAME, e.getResponse().getStatusLine());
+                    return;
+                }
+            }
+
+            String templateBody = buildIndexTemplateJson();
+
+            Request putTemplate = new Request("PUT", "/_template/" + INDEX_TEMPLATE_NAME);
+            putTemplate.setEntity(new NStringEntity(templateBody, ContentType.APPLICATION_JSON));
+            Response response = lowLevelClient.performRequest(putTemplate);
+            if (isSuccess(response)) {
+                LOG.info("Index template '{}' created for pattern '{}'",
+                         INDEX_TEMPLATE_NAME, INDEX_PATTERN);
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to ensure index template '{}', will retry on next startup: {}",
+                     INDEX_TEMPLATE_NAME, e.getMessage());
+        }
+    }
+
+    /**
+     * Builds the index template JSON for {@code entity_audits-*}.
+     * Extracts only the {@code mappings} node from {@code es-audit-mappings.json} to avoid
+     * settings conflicts (the file has refresh_interval=60s, template uses 30s).
+     * Template settings are the single source of truth for shard count, refresh interval, etc.
+     */
+    private String buildIndexTemplateJson() throws IOException {
+        ObjectMapper mapper = new ObjectMapper();
+
+        JsonNode fileRoot    = mapper.readTree(getAuditIndexMappings());
+        JsonNode mappingsNode = fileRoot.get("mappings");
+        if (mappingsNode == null) {
+            throw new IllegalStateException("es-audit-mappings.json missing 'mappings' node");
+        }
+
+        ObjectNode template = mapper.createObjectNode();
+
+        template.putArray("index_patterns").add(INDEX_PATTERN);
+
+        ObjectNode settings      = template.putObject("settings");
+        ObjectNode indexSettings  = settings.putObject("index");
+        indexSettings.put("number_of_shards", 4);
+        indexSettings.put("number_of_replicas", 1);
+        indexSettings.put("refresh_interval", "30s");
+        indexSettings.putObject("store").put("type", "niofs");
+        ObjectNode lifecycle = indexSettings.putObject("lifecycle");
+        lifecycle.put("name", ILM_POLICY_NAME);
+        lifecycle.put("rollover_alias", WRITE_ALIAS);
+
+        template.putObject("aliases").putObject(INDEX_NAME);
+
+        template.set("mappings", mappingsNode);
+
+        return template.toString();
     }
 
     /**
