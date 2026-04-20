@@ -39,6 +39,9 @@ on:
       - ms-610-ranges-policy-cache
       - ms-901-hidelineage
       - ms-894-override-classification
+      - leangraph-dynamic
+      - ms-600-leangraph-ingest
+      - ms-600-leangraph-consumer-on-sgp
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
