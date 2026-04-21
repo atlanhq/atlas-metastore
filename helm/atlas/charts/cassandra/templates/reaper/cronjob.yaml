@@ -65,7 +65,11 @@ spec:
                     )
                     session = cluster.connect()
                     
+                    {{- if eq .Values.global.Infra_Tier "Lite" }}
+                    rf = 1
+                    {{- else }}
                     rf = min({{ .Values.config.cluster_size }}, 3)
+                    {{- end }}
                     print("Creating keyspace reaper_db with RF=" + str(rf) + "...")
                     session.execute(
                         "CREATE KEYSPACE IF NOT EXISTS reaper_db "
@@ -155,7 +159,11 @@ spec:
                   {{- end }}
                   {{- end }}
                     - name: CLUSTER_SEED_HOST
+                    {{- if eq .Values.global.Infra_Tier "Lite" }}
+                      value: "atlas-cassandra-0.atlas-cassandra.atlas.svc.cluster.local"
+                    {{- else }}
                       value: "{{ $seeds := list }}{{- range $i := until (int $.Values.config.cluster_size) }}{{ $seeds = append $seeds (printf "atlas-cassandra-%d.atlas-cassandra.atlas.svc.cluster.local" $i) }}{{- end }}{{ join "," $seeds }}"
+                    {{- end }}
                   resources:
                     {{- toYaml .Values.reaper.sidecar.resources | nindent 20 }}
             imagePullSecrets: 
