@@ -43,6 +43,11 @@ public final class AssetSyncOutboxMetrics {
     // ---- Layer 2d: leader election ----
     private static final AtomicInteger leaderGauge = new AtomicInteger(0);
 
+    // ---- Layer 2e: reconciler (hourly sweeper) ----
+    private static final String PREFIX_RECON = "atlas_es_outbox_reconciler_";
+    private static final AtomicLong    reconcilerLastRunEpochSeconds = new AtomicLong(0);
+    private static final AtomicInteger reconcilerHealthy             = new AtomicInteger(0);
+
     private static volatile boolean initialized = false;
     private static final Object initLock = new Object();
 
@@ -63,6 +68,13 @@ public final class AssetSyncOutboxMetrics {
     private static final ConcurrentMap<String, Counter> leaseAcquireAttemptsByResult = new ConcurrentHashMap<>();
     private static final ConcurrentMap<String, Counter> writeErrorsByReason          = new ConcurrentHashMap<>();
     private static final ConcurrentMap<String, Counter> relayFailuresByReason        = new ConcurrentHashMap<>();
+
+    private static Counter reconcilerRuns;
+    private static Counter reconcilerAlreadyInEs;
+    private static Counter reconcilerReindexed;
+    private static Counter reconcilerStillMissing;
+    private static Counter reconcilerTickErrors;
+    private static final ConcurrentMap<String, Counter> reconcilerScannedByStatus = new ConcurrentHashMap<>();
 
     private AssetSyncOutboxMetrics() {}
 
@@ -131,6 +143,30 @@ public final class AssetSyncOutboxMetrics {
                         .register(r);
                 leaseHandovers = Counter.builder("atlas_es_outbox_lease_handovers_total")
                         .description("Lease ownership transitions on this pod (acquired or lost)")
+                        .register(r);
+
+                // Reconciler (hourly sweeper)
+                reconcilerRuns = Counter.builder(PREFIX_RECON + "runs_total")
+                        .description("Reconciler tick count on this pod (only increments when this pod is leader)")
+                        .register(r);
+                reconcilerAlreadyInEs = Counter.builder(PREFIX_RECON + "already_in_es_total")
+                        .description("Outbox rows dropped because ES already had the entity (false FAILED cleared)")
+                        .register(r);
+                reconcilerReindexed = Counter.builder(PREFIX_RECON + "reindexed_total")
+                        .description("Outbox rows cleared after RepairIndex.restoreByIds succeeded")
+                        .register(r);
+                reconcilerStillMissing = Counter.builder(PREFIX_RECON + "still_missing_total")
+                        .description("Outbox rows left in place because reconciler replay also failed (will retry next run)")
+                        .register(r);
+                Gauge.builder(PREFIX_RECON + "last_run_timestamp_seconds",
+                                reconcilerLastRunEpochSeconds, AtomicLong::get)
+                        .description("Unix timestamp of the last reconciler tick — alert if this goes stale")
+                        .register(r);
+                Gauge.builder(PREFIX_RECON + "healthy", reconcilerHealthy, AtomicInteger::get)
+                        .description("1 if the reconciler scheduler started successfully on this pod and hasn't been stopped; 0 if init failed or shutdown. Combine with last_run_timestamp staleness for full liveness.")
+                        .register(r);
+                reconcilerTickErrors = Counter.builder(PREFIX_RECON + "tick_errors_total")
+                        .description("Reconciler ticks that fired but failed entirely (exception escaped runOnce). Non-zero = investigate logs.")
                         .register(r);
 
                 initialized = true;
@@ -229,5 +265,41 @@ public final class AssetSyncOutboxMetrics {
                     Counter.builder("atlas_es_outbox_lease_acquire_attempts_total")
                             .tag("result", k).register(getMeterRegistry())).increment();
         } catch (Exception e) { /* ignore */ }
+    }
+
+    // ---- Reconciler surface ----
+    public static void recordReconcilerRun() {
+        ensureInit();
+        if (reconcilerRuns != null) reconcilerRuns.increment();
+        reconcilerLastRunEpochSeconds.set(java.time.Instant.now().getEpochSecond());
+    }
+    public static void recordReconcilerScanned(String status, int count) {
+        ensureInit();
+        if (!initialized || count <= 0) return;
+        try {
+            reconcilerScannedByStatus.computeIfAbsent(status, k ->
+                    Counter.builder(PREFIX_RECON + "scanned_total")
+                            .tag("status", k).register(getMeterRegistry())).increment(count);
+        } catch (Exception e) { /* ignore */ }
+    }
+    public static void recordReconcilerAlreadyInEs(int count) {
+        ensureInit();
+        if (reconcilerAlreadyInEs != null && count > 0) reconcilerAlreadyInEs.increment(count);
+    }
+    public static void recordReconcilerReindexed(int count) {
+        ensureInit();
+        if (reconcilerReindexed != null && count > 0) reconcilerReindexed.increment(count);
+    }
+    public static void recordReconcilerStillMissing(int count) {
+        ensureInit();
+        if (reconcilerStillMissing != null && count > 0) reconcilerStillMissing.increment(count);
+    }
+    public static void recordReconcilerTickError() {
+        ensureInit();
+        if (reconcilerTickErrors != null) reconcilerTickErrors.increment();
+    }
+    /** Set by the reconciler itself on start() success / failure / stop(). */
+    public static void setReconcilerHealthy(boolean healthy) {
+        reconcilerHealthy.set(healthy ? 1 : 0);
     }
 }

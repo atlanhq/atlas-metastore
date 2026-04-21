@@ -264,7 +264,11 @@ public class ESConnector implements Closeable {
     static long computeBackoffMs(int retryCount) {
         long initial = AtlasConfiguration.ES_RETRY_DELAY_MS.getLong();
         long max     = AtlasConfiguration.ES_RETRY_MAX_DELAY_MS.getLong();
-        long base    = initial * (long) Math.pow(2, Math.max(0, retryCount - 1));
+        // Cap the exponent at 30 — 2^30 is ~1B, more than enough to saturate
+        // the configured max delay. Without this, high max-retries configs
+        // (or an off-by-one caller) could overflow long via Math.pow.
+        int exp = Math.min(30, Math.max(0, retryCount - 1));
+        long base    = initial * (long) Math.pow(2, exp);
         long capped  = Math.min(Math.max(initial, base), max);
 
         if (!AtlasConfiguration.ES_RETRY_JITTER_ENABLED.getBoolean()) {
@@ -318,6 +322,7 @@ public class ESConnector implements Closeable {
                 }
             }
         } catch (Exception e) {
+            ESConnectorMetrics.recordFailure("parse_error");
             LOG.warn("writeTagProperties: failed to parse bulk response: {}. Raw (truncated): {}",
                     e.getMessage(), respBody.substring(0, Math.min(4000, respBody.length())));
         }
