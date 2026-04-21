@@ -41,11 +41,13 @@ public final class AssetSyncOutbox implements Outbox<EntityGuidRef> {
 
     private final PreparedStatement insertPendingStmt;
     private final PreparedStatement deletePendingStmt;
+    private final PreparedStatement deleteFailedStmt;
     private final PreparedStatement insertFailedStmt;
     private final PreparedStatement claimStmt;
     private final PreparedStatement releaseClaimStmt;
     private final PreparedStatement releaseForRetryStmt;
     private final PreparedStatement selectClaimableStmt;
+    private final PreparedStatement selectByStatusStmt;
     private final PreparedStatement countByStatusStmt;
 
     public AssetSyncOutbox(CqlSession session) {
@@ -61,6 +63,11 @@ public final class AssetSyncOutbox implements Outbox<EntityGuidRef> {
                 "VALUES (?, ?, ?, ?, ?, ?)"
         );
         this.deletePendingStmt = session.prepare(
+                "DELETE FROM " + keyspace + ".asset_sync_outbox " +
+                "WHERE status = ? AND entity_guid = ?"
+        );
+        // Reconciler uses the same DELETE shape, but against the FAILED partition.
+        this.deleteFailedStmt = session.prepare(
                 "DELETE FROM " + keyspace + ".asset_sync_outbox " +
                 "WHERE status = ? AND entity_guid = ?"
         );
@@ -88,6 +95,12 @@ public final class AssetSyncOutbox implements Outbox<EntityGuidRef> {
         this.selectClaimableStmt = session.prepare(
                 "SELECT entity_guid, attempt_count, " +
                 "       created_at, last_attempted_at, next_attempt_at, claimed_by, claimed_until " +
+                "FROM " + keyspace + ".asset_sync_outbox WHERE status = ?"
+        );
+        // Reconciler scan — reads the whole partition; client filters for stuck PENDING.
+        this.selectByStatusStmt = session.prepare(
+                "SELECT entity_guid, attempt_count, " +
+                "       created_at, last_attempted_at, next_attempt_at " +
                 "FROM " + keyspace + ".asset_sync_outbox WHERE status = ?"
         );
         this.countByStatusStmt = session.prepare(
@@ -189,6 +202,71 @@ public final class AssetSyncOutbox implements Outbox<EntityGuidRef> {
     }
 
     public int getMaxAttempts() { return maxAttempts; }
+
+    /**
+     * Read FAILED entries for the reconciler. Single-partition scan, capped at {@code limit}.
+     * Relay never touches FAILED rows so there's no contention with the reconciler here.
+     */
+    public List<OutboxEntry<EntityGuidRef>> scanFailed(int limit) {
+        ResultSet rs = session.execute(selectByStatusStmt.bind(STATUS_FAILED).setPageSize(limit));
+        List<OutboxEntry<EntityGuidRef>> out = new ArrayList<>(limit);
+        for (Row row : rs) {
+            if (out.size() >= limit) break;
+            String guid = row.getString("entity_guid");
+            out.add(new OutboxEntry<>(
+                    new OutboxEntryId(guid, ""),
+                    new EntityGuidRef(guid),
+                    row.getInt("attempt_count"),
+                    row.getInstant("created_at"),
+                    row.getInstant("last_attempted_at")));
+        }
+        return out;
+    }
+
+    /**
+     * Read PENDING entries that look orphaned: either never attempted and older than
+     * {@code stuckFor}, or last attempted and not retried within {@code stuckFor}.
+     * The relay normally drains PENDING in seconds; anything this old indicates a
+     * missed leader election window or a relay that died mid-batch. Scans the
+     * PENDING partition and filters client-side (Cassandra can't filter on non-PK
+     * columns without ALLOW FILTERING).
+     */
+    public List<OutboxEntry<EntityGuidRef>> scanStuckPending(Duration stuckFor, int limit) {
+        Instant cutoff = Instant.now().minus(stuckFor);
+        ResultSet rs = session.execute(selectByStatusStmt.bind(STATUS_PENDING).setPageSize(limit * 2));
+        List<OutboxEntry<EntityGuidRef>> out = new ArrayList<>(limit);
+        for (Row row : rs) {
+            if (out.size() >= limit) break;
+            Instant lastAttemptedAt = row.getInstant("last_attempted_at");
+            Instant createdAt       = row.getInstant("created_at");
+            Instant nextAttemptAt   = row.getInstant("next_attempt_at");
+
+            // Stuck = hasn't been attempted recently AND isn't sitting in a legitimate
+            // backoff window. next_attempt_at in the future means relay is planning to
+            // retry it; reconciler should not steal those.
+            Instant reference = lastAttemptedAt != null ? lastAttemptedAt : createdAt;
+            if (reference == null || reference.isAfter(cutoff)) continue;
+            if (nextAttemptAt != null && nextAttemptAt.isAfter(Instant.now())) continue;
+
+            String guid = row.getString("entity_guid");
+            out.add(new OutboxEntry<>(
+                    new OutboxEntryId(guid, ""),
+                    new EntityGuidRef(guid),
+                    row.getInt("attempt_count"),
+                    createdAt,
+                    lastAttemptedAt));
+        }
+        return out;
+    }
+
+    /**
+     * Delete a row from the FAILED partition. Used by the reconciler after it
+     * confirms the entity is now in ES (false FAILED) or re-indexes it successfully.
+     * markDone / releaseForRetry only touch the PENDING partition.
+     */
+    public void deleteFailed(OutboxEntryId id) {
+        session.execute(deleteFailedStmt.bind(STATUS_FAILED, id.getPartA()));
+    }
 
     long computeBackoffMs(int attemptCount) {
         long base = backoffBaseMs * (long) Math.pow(2, Math.max(0, attemptCount - 1));

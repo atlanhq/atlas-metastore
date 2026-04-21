@@ -33,7 +33,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class AssetSyncOutboxProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(AssetSyncOutboxProcessor.class);
 
-    private static final String LEASE_NAME = "asset-sync-relay";
+    public static final String LEASE_NAME = "asset-sync-relay";
     private static final int    EMPTY_POLLS_BEFORE_IDLE = 3;
 
     private static final long STORAGE_GAUGE_REFRESH_INTERVAL_MS = 30_000L;
