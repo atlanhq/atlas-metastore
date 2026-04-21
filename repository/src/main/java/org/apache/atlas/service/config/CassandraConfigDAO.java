@@ -47,6 +47,12 @@ import java.util.Map;
 public class CassandraConfigDAO implements AutoCloseable {
     private static final Logger LOG = LoggerFactory.getLogger(CassandraConfigDAO.class);
 
+    // Column name constants
+    private static final String COL_CONFIG_KEY   = "config_key";
+    private static final String COL_CONFIG_VALUE = "config_value";
+    private static final String COL_UPDATED_BY   = "updated_by";
+    private static final String COL_LAST_UPDATED = "last_updated";
+
     // Retry configuration
     private static final int MAX_RETRIES = 3;
     private static final Duration INITIAL_BACKOFF = Duration.ofMillis(100);
@@ -264,10 +270,10 @@ public class CassandraConfigDAO implements AutoCloseable {
             ResultSet rs = executeWithRetry(bound);
 
             for (Row row : rs) {
-                String key = row.getString("config_key");
-                String value = row.getString("config_value");
-                String updatedBy = row.getString("updated_by");
-                Instant lastUpdated = row.getInstant("last_updated");
+                String key = row.getString(COL_CONFIG_KEY);
+                String value = row.getString(COL_CONFIG_VALUE);
+                String updatedBy = row.getString(COL_UPDATED_BY);
+                Instant lastUpdated = row.getInstant(COL_LAST_UPDATED);
 
                 configs.put(key, new DynamicConfigCacheStore.ConfigEntry(value, updatedBy, lastUpdated));
             }
@@ -315,10 +321,10 @@ public class CassandraConfigDAO implements AutoCloseable {
             ResultSet rs = executeWithRetry(bound);
 
             for (Row row : rs) {
-                String key = row.getString("config_key");
-                String value = row.getString("config_value");
-                String updatedBy = row.getString("updated_by");
-                Instant lastUpdated = row.getInstant("last_updated");
+                String key = row.getString(COL_CONFIG_KEY);
+                String value = row.getString(COL_CONFIG_VALUE);
+                String updatedBy = row.getString(COL_UPDATED_BY);
+                Instant lastUpdated = row.getInstant(COL_LAST_UPDATED);
 
                 configs.put(key, new DynamicConfigCacheStore.ConfigEntry(value, updatedBy, lastUpdated));
             }
@@ -349,9 +355,9 @@ public class CassandraConfigDAO implements AutoCloseable {
                 return null;
             }
 
-            String value = row.getString("config_value");
-            String updatedBy = row.getString("updated_by");
-            Instant lastUpdated = row.getInstant("last_updated");
+            String value = row.getString(COL_CONFIG_VALUE);
+            String updatedBy = row.getString(COL_UPDATED_BY);
+            Instant lastUpdated = row.getInstant(COL_LAST_UPDATED);
 
             return new DynamicConfigCacheStore.ConfigEntry(value, updatedBy, lastUpdated);
 
