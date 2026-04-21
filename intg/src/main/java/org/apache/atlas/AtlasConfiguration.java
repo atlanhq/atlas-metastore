@@ -217,7 +217,13 @@ public enum AtlasConfiguration {
     // Async-ingestion (ZG WAL) topic config — applied at startup via AdminClient create/alter.
     // Defaults: 90-day retention for DR replay, 5 MB per message for large bulk payloads.
     ASYNC_INGESTION_TOPIC_RETENTION_MS("atlas.async.ingestion.topic.retention.ms", 7776000000L),
-    ASYNC_INGESTION_TOPIC_MAX_MESSAGE_BYTES("atlas.async.ingestion.topic.max.message.bytes", 5242880);
+    ASYNC_INGESTION_TOPIC_MAX_MESSAGE_BYTES("atlas.async.ingestion.topic.max.message.bytes", 5242880),
+
+    // Shadow mode (MS-1017): pod-local flag. When true, the pod still writes to the graph
+    // but suppresses all outward side effects — ATLAS_ENTITIES CDC, entity_audits, search
+    // logs, Keycloak role/user/group mutations. Set in the ZG STS ConfigMap during dual-stack
+    // cutover; the JG STS stays false so it remains the source of truth.
+    SHADOW_MODE_ENABLED("atlas.shadow.mode.enabled", false);
 
     private static final Configuration APPLICATION_PROPERTIES;
 
