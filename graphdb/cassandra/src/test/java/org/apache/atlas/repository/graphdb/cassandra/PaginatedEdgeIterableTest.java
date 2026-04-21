@@ -46,7 +46,7 @@ public class PaginatedEdgeIterableTest {
     @Test
     public void testEmptyResultSet() {
         ResultSet rs = mockResultSet(Collections.emptyList());
-        PaginatedEdgeIterable iterable = new PaginatedEdgeIterable(rs, "v1", true, graph);
+        PaginatedEdgeIterable iterable = new PaginatedEdgeIterable(() -> rs, "v1", true, graph);
 
         Iterator<AtlasEdge<CassandraVertex, CassandraEdge>> iter = iterable.iterator();
         assertFalse(iter.hasNext());
@@ -59,7 +59,7 @@ public class PaginatedEdgeIterableTest {
         Row row = mockRow("e1", "label1", "v2", "{}", "ACTIVE");
         ResultSet rs = mockResultSet(List.of(row));
 
-        PaginatedEdgeIterable iterable = new PaginatedEdgeIterable(rs, "v1", true, graph);
+        PaginatedEdgeIterable iterable = new PaginatedEdgeIterable(() -> rs, "v1", true, graph);
         Iterator<AtlasEdge<CassandraVertex, CassandraEdge>> iter = iterable.iterator();
 
         assertTrue(iter.hasNext());
@@ -79,7 +79,7 @@ public class PaginatedEdgeIterableTest {
         Row row = mockRow("e2", "label2", "v3", "{}", "ACTIVE");
         ResultSet rs = mockResultSet(List.of(row));
 
-        PaginatedEdgeIterable iterable = new PaginatedEdgeIterable(rs, "v1", false, graph);
+        PaginatedEdgeIterable iterable = new PaginatedEdgeIterable(() -> rs, "v1", false, graph);
         Iterator<AtlasEdge<CassandraVertex, CassandraEdge>> iter = iterable.iterator();
 
         assertTrue(iter.hasNext());
@@ -101,7 +101,7 @@ public class PaginatedEdgeIterableTest {
         );
         ResultSet rs = mockResultSet(rows);
 
-        PaginatedEdgeIterable iterable = new PaginatedEdgeIterable(rs, "v1", true, graph);
+        PaginatedEdgeIterable iterable = new PaginatedEdgeIterable(() -> rs, "v1", true, graph);
 
         List<String> edgeIds = new ArrayList<>();
         for (AtlasEdge<CassandraVertex, CassandraEdge> edge : iterable) {
@@ -121,7 +121,7 @@ public class PaginatedEdgeIterableTest {
         Row row = mockRow("e1", "label1", "v2", "{}", "DELETED");
         ResultSet rs = mockResultSet(List.of(row));
 
-        PaginatedEdgeIterable iterable = new PaginatedEdgeIterable(rs, "v1", true, graph);
+        PaginatedEdgeIterable iterable = new PaginatedEdgeIterable(() -> rs, "v1", true, graph);
         CassandraEdge edge = (CassandraEdge) iterable.iterator().next();
 
         assertEquals(edge.getProperty("__state", String.class), "DELETED");
@@ -132,21 +132,30 @@ public class PaginatedEdgeIterableTest {
         Row row = mockRow("e1", "label1", "v2", "{}", null);
         ResultSet rs = mockResultSet(List.of(row));
 
-        PaginatedEdgeIterable iterable = new PaginatedEdgeIterable(rs, "v1", true, graph);
+        PaginatedEdgeIterable iterable = new PaginatedEdgeIterable(() -> rs, "v1", true, graph);
         CassandraEdge edge = (CassandraEdge) iterable.iterator().next();
 
         assertEquals(edge.getProperty("__state", String.class), "ACTIVE");
     }
 
-    // ======================== Single-Use Enforcement ========================
+    // ======================== Re-Iterability ========================
 
-    @Test(expectedExceptions = IllegalStateException.class)
-    public void testSecondIteratorCallThrows() {
-        ResultSet rs = mockResultSet(Collections.emptyList());
-        PaginatedEdgeIterable iterable = new PaginatedEdgeIterable(rs, "v1", true, graph);
+    @Test
+    public void testMultipleIteratorCallsAllowed() {
+        Row row = mockRow("e1", "label1", "v2", "{}", "ACTIVE");
+        // Supplier returns a fresh ResultSet each time
+        PaginatedEdgeIterable iterable = new PaginatedEdgeIterable(
+                () -> mockResultSet(List.of(row)), "v1", true, graph);
 
-        iterable.iterator(); // first call — OK
-        iterable.iterator(); // second call — should throw
+        // first iteration
+        Iterator<AtlasEdge<CassandraVertex, CassandraEdge>> iter1 = iterable.iterator();
+        assertTrue(iter1.hasNext());
+        assertEquals(((CassandraEdge) iter1.next()).getIdString(), "e1");
+
+        // second iteration — should work, not throw
+        Iterator<AtlasEdge<CassandraVertex, CassandraEdge>> iter2 = iterable.iterator();
+        assertTrue(iter2.hasNext());
+        assertEquals(((CassandraEdge) iter2.next()).getIdString(), "e1");
     }
 
     // ======================== Properties Parsing ========================
@@ -156,7 +165,7 @@ public class PaginatedEdgeIterableTest {
         Row row = mockRow("e1", "label1", "v2", "{\"__typeName\":\"myRelType\",\"foo\":\"bar\"}", "ACTIVE");
         ResultSet rs = mockResultSet(List.of(row));
 
-        PaginatedEdgeIterable iterable = new PaginatedEdgeIterable(rs, "v1", true, graph);
+        PaginatedEdgeIterable iterable = new PaginatedEdgeIterable(() -> rs, "v1", true, graph);
         CassandraEdge edge = (CassandraEdge) iterable.iterator().next();
 
         assertEquals(edge.getProperty("__typeName", String.class), "myRelType");
@@ -168,7 +177,7 @@ public class PaginatedEdgeIterableTest {
         Row row = mockRow("e1", "label1", "v2", null, "ACTIVE");
         ResultSet rs = mockResultSet(List.of(row));
 
-        PaginatedEdgeIterable iterable = new PaginatedEdgeIterable(rs, "v1", true, graph);
+        PaginatedEdgeIterable iterable = new PaginatedEdgeIterable(() -> rs, "v1", true, graph);
         CassandraEdge edge = (CassandraEdge) iterable.iterator().next();
 
         assertNotNull(edge);
