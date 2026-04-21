@@ -22,10 +22,20 @@ import java.util.Map;
  * No cache layer, no background refresh, no runtime updates.
  * A restart is required to pick up changes seeded via the admin endpoint.
  *
- * Fail-fast behavior:
- * - Cassandra reachable, row found      -> use value from Cassandra
- * - Cassandra reachable, no row         -> fallback to atlas-application.properties
- * - Cassandra UNREACHABLE (after retry) -> KILL PROCESS (System.exit)
+ * <h3>Initialization order</h3>
+ * <pre>
+ * 1. DynamicConfigStore @PostConstruct  → CassandraConfigDAO.initialize()
+ * 2. StaticConfigStore  @PostConstruct  → reads Cassandra partition "atlas_static"
+ * 3. AtlasGraphProvider.get()           → calls AtlasRepositoryConfiguration.getGraphDatabaseImpl()
+ *                                         which reads StaticConfigStore.getGraphBackend()
+ * </pre>
+ *
+ * <h3>Resolution strategy (per key)</h3>
+ * <ol>
+ *   <li>Cassandra reachable, row found      → use value from Cassandra</li>
+ *   <li>Cassandra reachable, no row         → fallback to atlas-application.properties</li>
+ *   <li>Cassandra UNREACHABLE (after retry) → KILL PROCESS (System.exit)</li>
+ * </ol>
  *
  * Depends on DynamicConfigStore to ensure CassandraConfigDAO is initialized first.
  */
