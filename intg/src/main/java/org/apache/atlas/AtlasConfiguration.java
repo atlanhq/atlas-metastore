@@ -219,7 +219,12 @@ public enum AtlasConfiguration {
 
     // When getEdges(direction, labels) is called with more labels than this threshold,
     // switch from N per-label CQL queries to a single partition scan + client-side filter.
-    CASSANDRA_EDGE_LABEL_BATCH_THRESHOLD("atlas.cassandra.edge.label.batch.threshold", 5);
+    CASSANDRA_EDGE_LABEL_BATCH_THRESHOLD("atlas.cassandra.edge.label.batch.threshold", 5),
+
+    // Async-ingestion (ZG WAL) topic config — applied at startup via AdminClient create/alter.
+    // Defaults: 90-day retention for DR replay, 5 MB per message for large bulk payloads.
+    ASYNC_INGESTION_TOPIC_RETENTION_MS("atlas.async.ingestion.topic.retention.ms", 7776000000L),
+    ASYNC_INGESTION_TOPIC_MAX_MESSAGE_BYTES("atlas.async.ingestion.topic.max.message.bytes", 5242880);
 
     private static final Configuration APPLICATION_PROPERTIES;
 
