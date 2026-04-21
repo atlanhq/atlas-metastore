@@ -17,6 +17,7 @@
  */
 package org.apache.atlas.notification;
 
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.annotation.EnableConditional;
@@ -266,17 +267,23 @@ public class EntityNotificationListenerV2 implements EntityChangeListenerV2 {
     }
 
     private void sendNotifications(OperationType operationType, List<EntityNotificationV2> messages, boolean forceInline) throws AtlasBaseException {
-        if (!messages.isEmpty()) {
-            try {
-                if (forceInline) {
-                    inlineNotificationSender.send(operationType, messages);
-                }
-                else {
-                    notificationSender.send(operationType, messages);
-                }
-            } catch (NotificationException e) {
-                throw new AtlasBaseException(AtlasErrorCode.ENTITY_NOTIFICATION_FAILED, e, operationType.name());
+        if (messages.isEmpty()) {
+            return;
+        }
+        // MS-1017: shadow mode suppresses all ATLAS_ENTITIES CDC publishes.
+        if (AtlasConfiguration.SHADOW_MODE_ENABLED.getBoolean()) {
+            LOG.debug("Shadow mode: suppressed CDC publish");
+            return;
+        }
+        try {
+            if (forceInline) {
+                inlineNotificationSender.send(operationType, messages);
             }
+            else {
+                notificationSender.send(operationType, messages);
+            }
+        } catch (NotificationException e) {
+            throw new AtlasBaseException(AtlasErrorCode.ENTITY_NOTIFICATION_FAILED, e, operationType.name());
         }
     }
 
