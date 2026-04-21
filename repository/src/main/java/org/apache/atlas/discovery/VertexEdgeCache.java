@@ -22,6 +22,8 @@ public class VertexEdgeCache {
         if (cache.containsKey(key)) {
             return cache.get(key);
         } else {
+            // TODO(supervertex): newArrayList() materializes ALL edges into memory for the cache.
+            //  For vertices with 1M+ edges this will OOM. Consider lazy caching or bounded eviction.
             List<AtlasEdge> edges = newArrayList(vertex.getEdges(direction, edgeLabel));
             cache.put(key, edges);
             return edges;

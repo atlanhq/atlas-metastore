@@ -1819,6 +1819,8 @@ public final class GraphHelper {
         AtlasRelationshipEdgeDirection edgeDirection = attribute.getRelationshipEdgeDirection();
         Iterator<AtlasEdge>            edgesForLabel = getEdgesForLabel(vertex, edgeLabel, edgeDirection);
 
+        // TODO(supervertex): IteratorUtils.toList() materializes ALL edges into memory.
+        //  For vertices with 1M+ map-value edges this will OOM. Replace with lazy streaming.
         return (List<AtlasEdge>) IteratorUtils.toList(edgesForLabel);
     }
 
@@ -1850,6 +1852,8 @@ public final class GraphHelper {
         AtlasRelationshipEdgeDirection edgeDirection = attribute.getRelationshipEdgeDirection();
         Iterator<AtlasEdge>            edgesForLabel = getActiveEdges(vertex, edgeLabel, AtlasEdgeDirection.valueOf(edgeDirection.name()));
 
+        // TODO(supervertex): IteratorUtils.toList() materializes ALL active collection edges into memory.
+        //  For vertices with 1M+ collection edges this will OOM. Replace with lazy streaming.
         ret = IteratorUtils.toList(edgesForLabel);
 
         sortCollectionElements(attribute, ret);
@@ -1863,6 +1867,8 @@ public final class GraphHelper {
         AtlasRelationshipEdgeDirection edgeDirection = attribute.getRelationshipEdgeDirection();
         Iterator<AtlasEdge>            edgesForLabel = getEdgesForLabel(vertex, edgeLabel, edgeDirection);
 
+        // TODO(supervertex): IteratorUtils.toList() materializes ALL collection edges into memory.
+        //  For vertices with 1M+ collection edges this will OOM. Replace with lazy streaming.
         ret = IteratorUtils.toList(edgesForLabel);
 
         sortCollectionElements(attribute, ret);
@@ -2345,17 +2351,19 @@ public final class GraphHelper {
     }
 
     private Set<AbstractMap.SimpleEntry<String,String>> retrieveEdgeLabelsAndTypeNameViaAtlasApi(AtlasVertex vertex) {
-        Set<AbstractMap.SimpleEntry<String,String>> ret = new HashSet<>();
-        Iterable<AtlasEdge> edges = vertex.getEdges(AtlasEdgeDirection.BOTH);
+        if (!(graph instanceof CassandraGraph)) {
+            throw new IllegalStateException("retrieveEdgeLabelsAndTypeNameViaAtlasApi called with non-Cassandra graph: " + graph.getClass().getName());
+        }
+        // Use label-skip-scan optimization: ~N tiny CQL queries (one per distinct label)
+        // instead of scanning all edges (which can be millions for super vertices).
+        CassandraGraph cassandraGraph = (CassandraGraph) graph;
+        Map<String, String> labelToTypeName = cassandraGraph.getDistinctEdgeLabelsWithTypeName(
+                (String) vertex.getId(), AtlasEdgeDirection.BOTH);
 
-        for (AtlasEdge edge : edges) {
-            String state = edge.getProperty(STATE_PROPERTY_KEY, String.class);
-            if (!ACTIVE_STATE_VALUE.equals(state)) {
-                continue;
-            }
-
-            String label = edge.getLabel();
-            String typeName = edge.getProperty(TYPE_NAME_PROPERTY_KEY, String.class);
+        Set<AbstractMap.SimpleEntry<String,String>> ret = new HashSet<>(labelToTypeName.size());
+        for (Map.Entry<String, String> entry : labelToTypeName.entrySet()) {
+            String label    = entry.getKey();
+            String typeName = entry.getValue();
             if (label != null && !label.isEmpty()) {
                 ret.add(new AbstractMap.SimpleEntry<>(label, typeName != null ? typeName : ""));
             }
