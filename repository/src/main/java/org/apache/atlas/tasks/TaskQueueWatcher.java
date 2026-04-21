@@ -314,8 +314,8 @@ public class TaskQueueWatcher implements Runnable {
         }
 
         public List<AtlasTask> getTasks() {
-            run();
-            return tasks;
+            //run();
+            return new ArrayList<>();
         }
 
         public void clearTasks() {
