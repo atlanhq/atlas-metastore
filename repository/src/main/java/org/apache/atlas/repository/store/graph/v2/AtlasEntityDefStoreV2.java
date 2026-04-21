@@ -271,7 +271,7 @@ public class AtlasEntityDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasEntityDe
 
         AtlasVertex ret = typeDefStore.findTypeVertexByNameAndCategory(name, TypeCategory.CLASS);
 
-        if (AtlasGraphUtilsV2.typeHasInstanceVertex(name)) {
+        if (AtlasTypeDefESUtils.typeHasInstanceVertex(name)) {
             throw new AtlasBaseException(AtlasErrorCode.TYPE_HAS_REFERENCES, name);
         }
 
@@ -307,7 +307,7 @@ public class AtlasEntityDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasEntityDe
 
         String typeName = AtlasGraphUtilsV2.getEncodedProperty(ret, Constants.TYPENAME_PROPERTY_KEY, String.class);
 
-        if (AtlasGraphUtilsV2.typeHasInstanceVertex(typeName)) {
+        if (AtlasTypeDefESUtils.typeHasInstanceVertex(typeName)) {
             throw new AtlasBaseException(AtlasErrorCode.TYPE_HAS_REFERENCES, typeName);
         }
 

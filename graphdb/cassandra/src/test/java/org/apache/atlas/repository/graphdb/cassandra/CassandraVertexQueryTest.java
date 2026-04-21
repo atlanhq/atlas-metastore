@@ -65,6 +65,8 @@ public class CassandraVertexQueryTest {
     public void testEdgesWithMultipleLabels() {
         CassandraEdge e1 = new CassandraEdge("e1", "v1", "v2", "knows", mockGraph);
         CassandraEdge e2 = new CassandraEdge("e2", "v1", "v3", "likes", mockGraph);
+        // Batch threshold must be high enough so 2 labels takes the per-label path
+        when(mockGraph.getEdgeLabelBatchThreshold()).thenReturn(10);
         when(mockGraph.getEdgesForVertex("v1", AtlasEdgeDirection.BOTH, "knows"))
                 .thenReturn(Collections.singletonList(e1));
         when(mockGraph.getEdgesForVertex("v1", AtlasEdgeDirection.BOTH, "likes"))
@@ -205,10 +207,9 @@ public class CassandraVertexQueryTest {
 
     @Test
     public void testCount() {
-        CassandraEdge e1 = new CassandraEdge("e1", "v1", "v2", "knows", mockGraph);
-        CassandraEdge e2 = new CassandraEdge("e2", "v1", "v3", "knows", mockGraph);
-        when(mockGraph.getEdgesForVertex("v1", AtlasEdgeDirection.OUT, (String) null))
-                .thenReturn(Arrays.asList(e1, e2));
+        // count() now uses CQL COUNT(*) fast-path via vertex.getEdgesCount()
+        when(mockGraph.countEdgesForVertex("v1", AtlasEdgeDirection.OUT, null)).thenReturn(2L);
+        when(mockGraph.countBufferedEdgeAdjustment("v1", AtlasEdgeDirection.OUT, null)).thenReturn(0L);
 
         CassandraVertexQuery query = new CassandraVertexQuery(mockGraph, sourceVertex);
         assertEquals(query.direction(AtlasEdgeDirection.OUT).count(), 2);

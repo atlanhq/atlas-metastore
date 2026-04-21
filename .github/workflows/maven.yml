@@ -37,9 +37,11 @@ on:
       - ms-864-keycloak-jwks-internal-url
       - ms-911-add-observability
       - ms-610-ranges-policy-cache
+      - zgraph_pagination
       - ms-901-hidelineage
       - ms-894-override-classification
       - static_config_store
+      - ms-896-typedef-deletion
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'

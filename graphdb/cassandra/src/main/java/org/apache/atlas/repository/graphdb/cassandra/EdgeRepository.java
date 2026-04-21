@@ -2,6 +2,7 @@ package org.apache.atlas.repository.graphdb.cassandra;
 
 import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.cql.*;
+import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.type.AtlasType;
 import org.slf4j.Logger;
@@ -115,21 +116,22 @@ public class EdgeRepository {
             "SELECT COUNT(*) FROM edges_in WHERE in_vertex_id = ? AND edge_label = ?"
         );
 
-        // LIMIT 1 variants for existence checks (avoids reading entire partition)
+        // LIMIT 1 variants for existence checks (avoids reading entire partition).
+        // Matches JanusGraph behavior: returns true if ANY edge exists, regardless of state.
         hasEdgesOutByLabelStmt = session.prepare(
-            "SELECT edge_id, state FROM edges_out WHERE out_vertex_id = ? AND edge_label = ? LIMIT 1"
+            "SELECT edge_id FROM edges_out WHERE out_vertex_id = ? AND edge_label = ? LIMIT 1"
         );
 
         hasEdgesInByLabelStmt = session.prepare(
-            "SELECT edge_id, state FROM edges_in WHERE in_vertex_id = ? AND edge_label = ? LIMIT 1"
+            "SELECT edge_id FROM edges_in WHERE in_vertex_id = ? AND edge_label = ? LIMIT 1"
         );
 
         hasEdgesOutStmt = session.prepare(
-            "SELECT edge_id, state FROM edges_out WHERE out_vertex_id = ? LIMIT 1"
+            "SELECT edge_id FROM edges_out WHERE out_vertex_id = ? LIMIT 1"
         );
 
         hasEdgesInStmt = session.prepare(
-            "SELECT edge_id, state FROM edges_in WHERE in_vertex_id = ? LIMIT 1"
+            "SELECT edge_id FROM edges_in WHERE in_vertex_id = ? LIMIT 1"
         );
 
         // Update edge properties/state in all three tables (uses INSERT which upserts in Cassandra)
@@ -272,16 +274,15 @@ public class EdgeRepository {
 
     /**
      * Check if a vertex has at least one edge, using CQL LIMIT 1.
-     * Only selects edge_id and state (no properties deserialization).
+     * Only selects edge_id (no properties deserialization).
      *
-     * Skips edges with state=DELETED. If the first row is DELETED, falls back
-     * to a full edge fetch to check for non-deleted edges. This is rare in practice
-     * since hard-deleted edges are removed from the table.
+     * Matches JanusGraph behavior: returns true if ANY edge row exists,
+     * regardless of state (including soft-deleted edges with state=DELETED).
      *
      * @param vertexId  the vertex to check
      * @param direction OUT, IN, or BOTH
      * @param edgeLabel optional label filter (null = all labels)
-     * @return true if at least one non-deleted edge exists in Cassandra (does NOT check uncommitted buffer)
+     * @return true if at least one edge exists in Cassandra (does NOT check uncommitted buffer)
      */
     public boolean hasEdges(String vertexId, AtlasEdgeDirection direction, String edgeLabel) {
         if (direction == AtlasEdgeDirection.OUT || direction == AtlasEdgeDirection.BOTH) {
@@ -308,20 +309,8 @@ public class EdgeRepository {
             rs = session.execute((isOut ? hasEdgesOutStmt : hasEdgesInStmt)
                     .bind(vertexId));
         }
-        Row row = rs.one();
-        if (row == null) {
-            return false;
-        }
-        String state = row.getString("state");
-        if (!"DELETED".equals(state)) {
-            return true;
-        }
-        // Rare edge case: LIMIT 1 returned a DELETED row. In practice, DELETED edges
-        // are hard-removed from the table at commit time, so this should almost never happen.
-        // Log a warning and return false — the edge effectively doesn't exist if it's deleted.
-        LOG.warn("hasEdgesInDirection: LIMIT 1 row for vertex {} label {} is DELETED — treating as no edges",
-                vertexId, edgeLabel);
-        return false;
+        // Matches JanusGraph: edges().hasNext() — any edge exists, regardless of state
+        return rs.one() != null;
     }
 
     /**
@@ -391,6 +380,244 @@ public class EdgeRepository {
             LOG.debug("deleteEdgesFromTable: deleted {} edges from {} for vertex {}",
                     totalDeleted, tableName, vertexId);
         }
+    }
+
+    /**
+     * Lazy paginated edge fetch. Returns a {@link PaginatedEdgeIterable} backed by
+     * the Cassandra driver's transparent paging — only {@code pageSize} rows are
+     * held in memory at any time.
+     *
+     * <p>For BOTH direction, returns a {@link ChainedEdgeIterable} that lazily
+     * chains the OUT and IN result sets.
+     *
+     * @param pageSize Cassandra driver page size (rows per page fetch)
+     * @return lazy single-use Iterable
+     */
+    @SuppressWarnings("unchecked")
+    public Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> getEdgesForVertexPaged(
+            String vertexId, AtlasEdgeDirection direction, String edgeLabel,
+            CassandraGraph graph, int pageSize) {
+
+        if (direction == AtlasEdgeDirection.BOTH) {
+            // Chain OUT + IN lazily — IN query is deferred until OUT is exhausted
+            Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> outIterable =
+                getEdgesForVertexPaged(vertexId, AtlasEdgeDirection.OUT, edgeLabel, graph, pageSize);
+            Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> inIterable =
+                getEdgesForVertexPaged(vertexId, AtlasEdgeDirection.IN, edgeLabel, graph, pageSize);
+
+            return () -> new Iterator<AtlasEdge<CassandraVertex, CassandraEdge>>() {
+                private final Iterator<AtlasEdge<CassandraVertex, CassandraEdge>> outIter = outIterable.iterator();
+                private Iterator<AtlasEdge<CassandraVertex, CassandraEdge>> inIter = null;
+
+                @Override
+                public boolean hasNext() {
+                    if (outIter.hasNext()) {
+                        return true;
+                    }
+                    return inIterator().hasNext();
+                }
+
+                @Override
+                public AtlasEdge<CassandraVertex, CassandraEdge> next() {
+                    if (outIter.hasNext()) {
+                        return outIter.next();
+                    }
+                    return inIterator().next();
+                }
+
+                private Iterator<AtlasEdge<CassandraVertex, CassandraEdge>> inIterator() {
+                    if (inIter == null) {
+                        inIter = inIterable.iterator();
+                    }
+                    return inIter;
+                }
+            };
+        }
+
+        boolean isOut = (direction == AtlasEdgeDirection.OUT);
+        String tableName    = isOut ? "edges_out" : "edges_in";
+        String partitionCol = isOut ? "out_vertex_id" : "in_vertex_id";
+        String otherCol     = isOut ? "in_vertex_id" : "out_vertex_id";
+
+        String cql;
+        SimpleStatement stmt;
+        if (edgeLabel != null) {
+            cql = "SELECT edge_id, edge_label, " + otherCol + ", properties, state " +
+                  "FROM " + tableName + " WHERE " + partitionCol + " = ? AND edge_label = ?";
+            stmt = SimpleStatement.builder(cql)
+                    .setPageSize(pageSize)
+                    .addPositionalValue(vertexId)
+                    .addPositionalValue(edgeLabel)
+                    .build();
+        } else {
+            cql = "SELECT edge_id, edge_label, " + otherCol + ", properties, state " +
+                  "FROM " + tableName + " WHERE " + partitionCol + " = ?";
+            stmt = SimpleStatement.builder(cql)
+                    .setPageSize(pageSize)
+                    .addPositionalValue(vertexId)
+                    .build();
+        }
+
+        return new PaginatedEdgeIterable(() -> session.execute(stmt), vertexId, isOut, graph);
+    }
+
+    /**
+     * Lazy paginated edge fetch with client-side label filtering.
+     * Fires a <b>single full-partition scan</b> (no {@code edge_label} in WHERE clause)
+     * and filters by label set inside {@link PaginatedEdgeIterable}, skipping
+     * non-matching rows before JSON property parsing.
+     *
+     * <p>Use this instead of N per-label queries when the number of requested labels
+     * exceeds the batch threshold (default 5). For 50 labels, this is 1 CQL query
+     * (or 2 for BOTH) instead of 50 sequential round-trips.
+     *
+     * @param labelFilter set of labels to include (must not be null or empty)
+     * @param pageSize    Cassandra driver page size (rows per page fetch)
+     * @return lazy single-use Iterable
+     */
+    @SuppressWarnings("unchecked")
+    public Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> getEdgesForVertexPagedWithFilter(
+            String vertexId, AtlasEdgeDirection direction, Set<String> labelFilter,
+            CassandraGraph graph, int pageSize) {
+
+        if (direction == AtlasEdgeDirection.BOTH) {
+            Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> outIterable =
+                getEdgesForVertexPagedWithFilter(vertexId, AtlasEdgeDirection.OUT, labelFilter, graph, pageSize);
+            Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> inIterable =
+                getEdgesForVertexPagedWithFilter(vertexId, AtlasEdgeDirection.IN, labelFilter, graph, pageSize);
+
+            return () -> new Iterator<AtlasEdge<CassandraVertex, CassandraEdge>>() {
+                private final Iterator<AtlasEdge<CassandraVertex, CassandraEdge>> outIter = outIterable.iterator();
+                private Iterator<AtlasEdge<CassandraVertex, CassandraEdge>> inIter = null;
+
+                @Override
+                public boolean hasNext() {
+                    if (outIter.hasNext()) {
+                        return true;
+                    }
+                    return inIterator().hasNext();
+                }
+
+                @Override
+                public AtlasEdge<CassandraVertex, CassandraEdge> next() {
+                    if (outIter.hasNext()) {
+                        return outIter.next();
+                    }
+                    return inIterator().next();
+                }
+
+                private Iterator<AtlasEdge<CassandraVertex, CassandraEdge>> inIterator() {
+                    if (inIter == null) {
+                        inIter = inIterable.iterator();
+                    }
+                    return inIter;
+                }
+            };
+        }
+
+        boolean isOut = (direction == AtlasEdgeDirection.OUT);
+        String tableName    = isOut ? "edges_out" : "edges_in";
+        String partitionCol = isOut ? "out_vertex_id" : "in_vertex_id";
+        String otherCol     = isOut ? "in_vertex_id" : "out_vertex_id";
+
+        // Full partition scan — no edge_label in WHERE clause
+        String cql = "SELECT edge_id, edge_label, " + otherCol + ", properties, state " +
+                     "FROM " + tableName + " WHERE " + partitionCol + " = ?";
+        SimpleStatement stmt = SimpleStatement.builder(cql)
+                .setPageSize(pageSize)
+                .addPositionalValue(vertexId)
+                .build();
+
+        return new PaginatedEdgeIterable(() -> session.execute(stmt), vertexId, isOut, graph, labelFilter);
+    }
+
+    /**
+     * Discover distinct edge labels along with the typeName from the first edge of each label.
+     * Combines label discovery with typeName extraction in a single skip-scan pass.
+     *
+     * @return map of edge_label → typeName (from the first edge's properties)
+     */
+    public Map<String, String> getDistinctEdgeLabelsWithTypeName(String vertexId, AtlasEdgeDirection direction) {
+        Map<String, String> labelToTypeName = new LinkedHashMap<>();
+
+        if (direction == AtlasEdgeDirection.OUT || direction == AtlasEdgeDirection.BOTH) {
+            collectDistinctLabelsWithTypeName(vertexId, "edges_out", "out_vertex_id", labelToTypeName);
+        }
+        if (direction == AtlasEdgeDirection.IN || direction == AtlasEdgeDirection.BOTH) {
+            collectDistinctLabelsWithTypeName(vertexId, "edges_in", "in_vertex_id", labelToTypeName);
+        }
+
+        return labelToTypeName;
+    }
+
+    private static final int DELETED_EDGE_SCAN_LIMIT = 1000;
+    private static final int MAX_DISTINCT_LABELS     = 10_000;
+
+    private void collectDistinctLabelsWithTypeName(String vertexId, String tableName, String partitionCol,
+                                                    Map<String, String> labelToTypeName) {
+        String cql = "SELECT edge_label, properties, state FROM " + tableName +
+                     " WHERE " + partitionCol + " = ? AND edge_label > ? LIMIT 1";
+
+        String currentLabel = "";
+        int iterations = 0;
+        while (true) {
+            if (++iterations > MAX_DISTINCT_LABELS) {
+                LOG.warn("collectDistinctLabelsWithTypeName: exceeded {} iterations for vertex {} in {}, stopping",
+                         MAX_DISTINCT_LABELS, vertexId, tableName);
+                break;
+            }
+
+            SimpleStatement stmt = SimpleStatement.newInstance(cql, vertexId, currentLabel);
+            ResultSet rs = session.execute(stmt);
+            Row row = rs.one();
+            if (row == null) {
+                break;
+            }
+            currentLabel = row.getString("edge_label");
+            String state = row.getString("state");
+
+            if (!"DELETED".equals(state)) {
+                extractAndPutTypeName(row, currentLabel, labelToTypeName);
+            } else {
+                // First edge for this label is DELETED — scan for an ACTIVE edge
+                // to retrieve the typeName. Bounded to DELETED_EDGE_SCAN_LIMIT rows
+                // to avoid scanning millions of soft-deleted edges.
+                findActiveEdgeForLabel(vertexId, tableName, partitionCol, currentLabel, labelToTypeName);
+            }
+        }
+    }
+
+    private void findActiveEdgeForLabel(String vertexId, String tableName, String partitionCol,
+                                         String label, Map<String, String> labelToTypeName) {
+        String scanCql = "SELECT properties, state FROM " + tableName +
+                         " WHERE " + partitionCol + " = ? AND edge_label = ?";
+        SimpleStatement scanStmt = SimpleStatement.builder(scanCql)
+                .setPageSize(100)
+                .addPositionalValue(vertexId)
+                .addPositionalValue(label)
+                .build();
+
+        ResultSet scanRs = session.execute(scanStmt);
+        int scanned = 0;
+        for (Row scanRow : scanRs) {
+            if (++scanned > DELETED_EDGE_SCAN_LIMIT) {
+                LOG.warn("findActiveEdgeForLabel: scanned {} rows for vertex {} label {} without finding ACTIVE edge, giving up",
+                         DELETED_EDGE_SCAN_LIMIT, vertexId, label);
+                break;
+            }
+            if (!"DELETED".equals(scanRow.getString("state"))) {
+                extractAndPutTypeName(scanRow, label, labelToTypeName);
+                return;
+            }
+        }
+    }
+
+    private void extractAndPutTypeName(Row row, String label, Map<String, String> labelToTypeName) {
+        String propsJson = row.getString("properties");
+        Map<String, Object> props = parseProperties(propsJson);
+        Object typeNameObj = props.get("__typeName");
+        String typeName = typeNameObj != null ? String.valueOf(typeNameObj) : "";
+        labelToTypeName.putIfAbsent(label, typeName);
     }
 
     @SuppressWarnings("unchecked")
@@ -802,13 +1029,6 @@ public class EdgeRepository {
         batch.addStatement(deleteEdgeByIdStmt.bind(edge.getIdString()));
 
         session.execute(batch.build());
-    }
-
-    public void deleteEdgesForVertex(String vertexId, CassandraGraph graph) {
-        List<CassandraEdge> allEdges = getEdgesForVertex(vertexId, AtlasEdgeDirection.BOTH, null, graph);
-        if (!allEdges.isEmpty()) {
-            batchDeleteEdges(allEdges);
-        }
     }
 
     /**

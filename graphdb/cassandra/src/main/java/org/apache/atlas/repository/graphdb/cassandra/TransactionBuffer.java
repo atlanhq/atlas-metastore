@@ -128,6 +128,38 @@ public class TransactionBuffer {
         return new ArrayList<>(resultMap.values());
     }
 
+    /**
+     * Returns only truly NEW (uncommitted) edges matching the criteria.
+     * Unlike {@link #getEdgesForVertex}, this excludes dirty edges — edges that already
+     * exist in Cassandra but were modified in this transaction. This is needed for
+     * count adjustments where CQL COUNT(*) already includes persisted (dirty) edges.
+     */
+    public List<CassandraEdge> getNewEdgesOnlyForVertex(String vertexId, AtlasEdgeDirection direction, String edgeLabel) {
+        List<CassandraEdge> result = new ArrayList<>();
+
+        for (CassandraEdge edge : newEdges.values()) {
+            if (removedEdges.containsKey(edge.getIdString())) {
+                continue;
+            }
+
+            if (edgeLabel != null && !edgeLabel.equals(edge.getLabel())) {
+                continue;
+            }
+
+            boolean matches = switch (direction) {
+                case OUT -> edge.getOutVertexId().equals(vertexId);
+                case IN -> edge.getInVertexId().equals(vertexId);
+                case BOTH -> edge.getOutVertexId().equals(vertexId) || edge.getInVertexId().equals(vertexId);
+            };
+
+            if (matches) {
+                result.add(edge);
+            }
+        }
+
+        return result;
+    }
+
     public void clear() {
         newVertices.clear();
         dirtyVertices.clear();

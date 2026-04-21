@@ -5,12 +5,20 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Timer;
 import org.apache.atlas.ApplicationProperties;
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.service.metrics.MetricUtils;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.configuration.ConfigurationConverter;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.AlterConfigOp;
+import org.apache.kafka.clients.admin.ConfigEntry;
+import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.config.ConfigResource;
+import org.apache.kafka.common.config.TopicConfig;
+import org.apache.kafka.common.errors.TopicExistsException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -18,9 +26,13 @@ import org.springframework.stereotype.Service;
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
 
 /**
  * Kafka producer for async ingestion events.
@@ -43,6 +55,11 @@ public class AsyncIngestionProducer {
     private static final String CONFIG_TOPIC = "atlas.async.ingestion.topic";
     private static final String DEFAULT_TOPIC = "ATLAS_ASYNC_ENTITIES";
 
+    // WAL topic config (MS-1035). Defaults in AtlasConfiguration:
+    //   retention.ms = 90 days (disaster-recovery replay window)
+    //   max.message.bytes = 5 MB (covers large bulk entity payloads; broker default is 1 MB)
+    // Overridable per-tenant via atlas-application.properties.
+
     private volatile KafkaProducer<String, String> producer;
     private String topic;
 
@@ -60,6 +77,8 @@ public class AsyncIngestionProducer {
             LOG.warn("Failed to read async ingestion config, using defaults", e);
             this.topic = DEFAULT_TOPIC;
         }
+
+        ensureTopicConfigured();
 
         try {
             io.micrometer.core.instrument.MeterRegistry registry = MetricUtils.getMeterRegistry();
@@ -149,6 +168,80 @@ public class AsyncIngestionProducer {
             } catch (Exception e) {
                 LOG.warn("AsyncIngestionProducer: error closing Kafka producer", e);
             }
+        }
+    }
+
+    /**
+     * Best-effort: make sure the WAL topic exists and has the retention + max.message.bytes
+     * values required by the ZG WAL (MS-1035). Create with those configs when missing;
+     * alter them when the topic already exists. Any failure here is logged and swallowed
+     * so the metastore still starts — the producer will fall back to broker defaults.
+     */
+    private void ensureTopicConfigured() {
+        Properties adminProps = buildAdminClientProps();
+        if (adminProps == null) {
+            return;
+        }
+
+        String retentionMs = String.valueOf(AtlasConfiguration.ASYNC_INGESTION_TOPIC_RETENTION_MS.getLong());
+        String maxMessageBytes = String.valueOf(AtlasConfiguration.ASYNC_INGESTION_TOPIC_MAX_MESSAGE_BYTES.getInt());
+
+        Map<String, String> desiredConfigs = new HashMap<>();
+        desiredConfigs.put(TopicConfig.RETENTION_MS_CONFIG, retentionMs);
+        desiredConfigs.put(TopicConfig.MAX_MESSAGE_BYTES_CONFIG, maxMessageBytes);
+
+        try (AdminClient admin = AdminClient.create(adminProps)) {
+            NewTopic newTopic = new NewTopic(topic, java.util.Optional.empty(), java.util.Optional.empty())
+                    .configs(desiredConfigs);
+            try {
+                admin.createTopics(Collections.singletonList(newTopic)).all().get();
+                LOG.info("AsyncIngestionProducer: created WAL topic {} with retention.ms={} max.message.bytes={}",
+                        topic, retentionMs, maxMessageBytes);
+                return;
+            } catch (ExecutionException ee) {
+                if (!(ee.getCause() instanceof TopicExistsException)) {
+                    LOG.warn("AsyncIngestionProducer: createTopics({}) failed; will attempt alterConfigs", topic, ee);
+                }
+            }
+
+            alterTopicConfigs(admin, desiredConfigs);
+        } catch (Exception e) {
+            LOG.warn("AsyncIngestionProducer: ensureTopicConfigured({}) failed (non-fatal)", topic, e);
+        }
+    }
+
+    private void alterTopicConfigs(AdminClient admin, Map<String, String> desiredConfigs) {
+        try {
+            ConfigResource resource = new ConfigResource(ConfigResource.Type.TOPIC, topic);
+            List<AlterConfigOp> ops = new java.util.ArrayList<>(desiredConfigs.size());
+            for (Map.Entry<String, String> e : desiredConfigs.entrySet()) {
+                ops.add(new AlterConfigOp(new ConfigEntry(e.getKey(), e.getValue()), AlterConfigOp.OpType.SET));
+            }
+            admin.incrementalAlterConfigs(Collections.singletonMap(resource, ops)).all().get();
+            LOG.info("AsyncIngestionProducer: aligned WAL topic {} config retention.ms={} max.message.bytes={}",
+                    topic,
+                    desiredConfigs.get(TopicConfig.RETENTION_MS_CONFIG),
+                    desiredConfigs.get(TopicConfig.MAX_MESSAGE_BYTES_CONFIG));
+        } catch (Exception e) {
+            LOG.warn("AsyncIngestionProducer: alterConfigs({}) failed (non-fatal)", topic, e);
+        }
+    }
+
+    private Properties buildAdminClientProps() {
+        try {
+            Configuration appConfig = ApplicationProperties.get();
+            Configuration kafkaConf = ApplicationProperties.getSubsetConfiguration(appConfig, PROPERTY_PREFIX);
+            Properties props = ConfigurationConverter.getProperties(kafkaConf);
+            // Strip producer-only settings that AdminClient rejects or doesn't need.
+            props.remove(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG);
+            props.remove(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG);
+            props.remove(ProducerConfig.ACKS_CONFIG);
+            props.remove(ProducerConfig.LINGER_MS_CONFIG);
+            props.remove(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG);
+            return props;
+        } catch (Exception e) {
+            LOG.warn("AsyncIngestionProducer: failed to build AdminClient props (non-fatal)", e);
+            return null;
         }
     }
 
