@@ -38,6 +38,7 @@ public final class AssetSyncOutboxService {
     private final RepairIndex repairIndex;
 
     private AssetSyncOutboxProcessor processor;
+    private AssetSyncReconciler      reconciler;
     private PostCommitEsVerifier verifier;
     private boolean started = false;
 
@@ -56,7 +57,7 @@ public final class AssetSyncOutboxService {
             CqlSession session = acquireSession();
             AssetSyncSchema.bootstrap(session);
 
-            Outbox<EntityGuidRef>          outbox       = new AssetSyncOutbox(session);
+            AssetSyncOutbox                outbox       = new AssetSyncOutbox(session);
             OutboxConsumer<EntityGuidRef>  consumer     = new AssetSyncReindexConsumer(repairIndex);
             AssetSyncLeaseManager          leaseManager = new AssetSyncLeaseManager(session);
 
@@ -69,6 +70,26 @@ public final class AssetSyncOutboxService {
             PostCommitEsVerifier.install(verifier);
 
             processor.start();
+
+            // Reconciler: hourly sweep of FAILED + orphaned-PENDING rows. Gated by
+            // the relay's lease so only one pod per tenant sweeps. Own scheduler so
+            // a slow reconcile doesn't stall the relay tick. Strictly optional —
+            // its failure must never take down the relay or the verifier, so it
+            // lives in its own try/catch below the main bootstrap.
+            if (AtlasConfiguration.ASSET_SYNC_RECONCILER_ENABLED.getBoolean()) {
+                try {
+                    reconciler = new AssetSyncReconciler(outbox, repairIndex, leaseManager,
+                            AssetSyncOutboxProcessor.LEASE_NAME);
+                    reconciler.start(); // boot-safe: catches its own errors and sets reconciler_healthy=0
+                } catch (Throwable t) {
+                    LOG.error("AssetSyncOutboxService: reconciler init failed — relay + verify still active, " +
+                            "FAILED rows will accumulate until the reconciler is restarted", t);
+                    AssetSyncOutboxMetrics.setReconcilerHealthy(false);
+                }
+            } else {
+                LOG.info("AssetSyncOutboxService: reconciler disabled via atlas.asset.sync.reconciler.enabled=false");
+            }
+
             started = true;
             LOG.info("AssetSyncOutboxService: started — post-commit verify + outbox + relay are live");
         } catch (Exception e) {
@@ -91,6 +112,7 @@ public final class AssetSyncOutboxService {
         try {
             PostCommitEsVerifier.install(null);
             if (verifier != null) verifier.shutdown();
+            if (reconciler != null) reconciler.stop();
             if (processor != null) processor.stop();
             LOG.info("AssetSyncOutboxService: shutdown complete");
         } catch (Exception e) {

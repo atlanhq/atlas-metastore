@@ -216,6 +216,15 @@ public enum AtlasConfiguration {
     ASSET_SYNC_VERIFY_BATCH_SIZE("atlas.asset.sync.verify.batch.size", 200),
     ASSET_SYNC_VERIFY_THREAD_POOL_SIZE("atlas.asset.sync.verify.thread.pool.size", 2),
 
+    // Reconciler: hourly sweeper that catches outbox entries the relay can't self-heal.
+    // Scans FAILED and orphaned-PENDING rows, verifies ES presence, and re-fires
+    // RepairIndex.restoreByIds for those still missing. Lease-gated on the relay lease.
+    ASSET_SYNC_RECONCILER_ENABLED("atlas.asset.sync.reconciler.enabled", true),
+    ASSET_SYNC_RECONCILER_INTERVAL_SECONDS("atlas.asset.sync.reconciler.interval.seconds", 3600),
+    ASSET_SYNC_RECONCILER_JITTER_SECONDS("atlas.asset.sync.reconciler.jitter.seconds", 300),
+    ASSET_SYNC_RECONCILER_BATCH_SIZE("atlas.asset.sync.reconciler.batch.size", 500),
+    ASSET_SYNC_RECONCILER_STUCK_PENDING_THRESHOLD_SECONDS("atlas.asset.sync.reconciler.stuck.pending.threshold.seconds", 1800),
+
     // Entity audit: async retry with backoff, then publish to Kafka DLQ if still failing (main request never fails)
     ENTITY_AUDIT_DLQ_ENABLED("atlas.entity.audit.dlq.enabled", true),
     ENTITY_AUDIT_DLQ_QUEUE_CAPACITY("atlas.entity.audit.dlq.queue.capacity", 10000),
