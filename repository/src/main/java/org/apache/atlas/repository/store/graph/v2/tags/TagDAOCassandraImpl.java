@@ -62,7 +62,7 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
     private static final int BATCH_SIZE_LIMIT = 200;
     private static final int BATCH_SIZE_LIMIT_FOR_DELETION = 10000;
     private static final Duration CONNECTION_TIMEOUT = Duration.ofSeconds(5);
-    //private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(120);
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(10); //since read_request_timeout_in_ms: 5000
     private static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(30);
     private static final Duration HEALTH_CHECK_REQUEST_TIMEOUT = Duration.ofSeconds(3);
     private static final Duration HEALTH_CHECK_CONNECT_TIMEOUT = Duration.ofSeconds(2);
@@ -145,7 +145,7 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
                 ownsSession = false;
             } else {
                 DriverConfigLoader configLoader = DriverConfigLoader.programmaticBuilder()
-                        //.withDuration(DefaultDriverOption.REQUEST_TIMEOUT, REQUEST_TIMEOUT)
+                        .withDuration(DefaultDriverOption.REQUEST_TIMEOUT, REQUEST_TIMEOUT)
                         .withDuration(DefaultDriverOption.CONNECTION_INIT_QUERY_TIMEOUT, CONNECTION_TIMEOUT)
                         .withDuration(DefaultDriverOption.CONNECTION_CONNECT_TIMEOUT, CONNECTION_TIMEOUT)
                         .withDuration(DefaultDriverOption.CONTROL_CONNECTION_TIMEOUT, CONNECTION_TIMEOUT)
