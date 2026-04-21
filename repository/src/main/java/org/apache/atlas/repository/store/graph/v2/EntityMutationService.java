@@ -427,7 +427,14 @@ public class EntityMutationService {
      */
     private void publishAsyncIngestionEvent(boolean isGraphTransactionFailed, String eventType,
                                             Map<String, Object> operationMetadata, Object payload) {
-        if (!isGraphTransactionFailed && DynamicConfigStore.isAsyncIngestionEnabled()) {
+        // Skip publishing when we're already replaying a WAL event on the consumer side.
+        // Without this guard, every entityMutationService.createOrUpdate/delete call made from
+        // AsyncIngestionConsumerService would emit a fresh WAL event, which the same consumer
+        // then reads and replays — an infinite self-amplifying loop that buries the DLQ in
+        // echoes. The consumer sets RequestContext.isImportInProgress(true) before every replay.
+        if (!isGraphTransactionFailed
+                && !RequestContext.get().isImportInProgress()
+                && DynamicConfigStore.isAsyncIngestionEnabled()) {
             try {
                 asyncIngestionProducer.publishEvent(eventType, operationMetadata, payload,
                         RequestMetadata.fromCurrentRequest());
