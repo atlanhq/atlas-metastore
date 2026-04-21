@@ -19,6 +19,7 @@ package org.apache.atlas.repository.audit;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasConfiguration;
@@ -52,6 +53,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
+import org.elasticsearch.client.ResponseException;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestClientBuilder;
 import org.slf4j.Logger;
@@ -112,7 +114,11 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
     private static final String bulkMetadata;
     private static final Set<String> ALLOWED_LINKED_ATTRIBUTES = new HashSet<>(Arrays.asList(DOMAIN_GUIDS, CATALOG_DATASET_GUID_ATTR));
     private static final String ENTITY_AUDITS_INDEX;
+    private static final String WRITE_ALIAS;
     private static final String NIOFS_MIGRATION_MARKER_ID = "entity_audits_niofs_migrated";
+    public  static final String ILM_POLICY_NAME    = "entity_audits_policy";
+    public  static final String INDEX_TEMPLATE_NAME = "entity_audits_template";
+    private static final String INDEX_PATTERN;
     private static final int DLQ_POLL_TIMEOUT_SECONDS = 5;
 
     /**
@@ -143,8 +149,10 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
         }
         INDEX_NAME = auditIndex;
         ENTITY_AUDITS_INDEX = auditIndex;
+        WRITE_ALIAS = auditIndex + "_write";
+        INDEX_PATTERN = auditIndex + "-*";
         bulkMetadata = String.format("{ \"index\" : { \"_index\" : \"%s\" } }%n", INDEX_NAME);
-        LOG.info("ES audit index name: '{}'", INDEX_NAME);
+        LOG.info("ES audit index name: '{}', write alias: '{}'", INDEX_NAME, WRITE_ALIAS);
     }
 
     /*
@@ -158,6 +166,19 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
     /** Holder for failed audit events enqueued to async DLQ for retry. */
     private static record EntityAuditDLQEntry(List<EntityAuditEventV2> events, int retryCount) {}
+
+    /**
+     * Immutable snapshot of write-path configuration. A single volatile reference swap
+     * guarantees that request threads always see a consistent (writeIndex, writeBulkMetadata, aliasMode)
+     * triple — no torn reads across three separate volatile fields.
+     */
+    private record WriteConfig(String writeIndex, String writeBulkMetadata, boolean aliasMode) {}
+
+    /** Pair returned from {@link #redetectAliasAndRebuild} so local {@code cfg} matches the built {@link Request}. */
+    private record WriteAliasRedetectResult(WriteConfig config, Request request) {}
+    private static final WriteConfig DEFAULT_WRITE_CONFIG = new WriteConfig(INDEX_NAME, bulkMetadata, false);
+
+    private volatile WriteConfig writeConfig = DEFAULT_WRITE_CONFIG;
 
     /**
      * Record audit DLQ failure metric to the existing Micrometer/Prometheus registry (scraped by Victoria Metrics).
@@ -271,6 +292,10 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
     /**
      * Performs the actual ES bulk write for audit events. Throws on failure; callers are expected to
      * catch and handle gracefully so the main request does not fail (see putEventsV2).
+     *
+     * Self-healing: if a write fails with a 4xx client error (e.g. alias mis-routing after ILM
+     * migration), the method re-probes ES for the write alias once. If the write config changed,
+     * it rebuilds the request and retries — no Atlas restart required.
      */
     private void putEventsV2Internal(List<EntityAuditEventV2> events) throws AtlasBaseException {
         if (CollectionUtils.isEmpty(events)) {
@@ -280,7 +305,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
         Map<String, String> requestContextHeaders = RequestContext.get().getRequestContextHeaders();
         String entityPayloadTemplate = getQueryTemplate(requestContextHeaders);
 
-        StringBuilder bulkRequestBody = new StringBuilder();
+        List<String> eventPayloads = new ArrayList<>();
         for (EntityAuditEventV2 event : events) {
             String created = String.format("%s", event.getTimestamp());
             String auditDetailPrefix = EntityAuditListenerV2.getV2AuditPrefix(event.getAction());
@@ -308,7 +333,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                         event.getEntityId(), typeName);
             }
 
-            String bulkItem = MessageFormat.format(entityPayloadTemplate,
+            eventPayloads.add(MessageFormat.format(entityPayloadTemplate,
                     event.getEntityId(),
                     event.getAction(),
                     details,
@@ -317,22 +342,18 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                     event.getEntityQualifiedName(),
                     typeName,
                     created,
-                    "" + updateTimestamp);
-
-            bulkRequestBody.append(bulkMetadata);
-            bulkRequestBody.append(bulkItem);
-            bulkRequestBody.append("\n");
+                    "" + updateTimestamp));
         }
-        if (bulkRequestBody.length() == 0) {
+        if (eventPayloads.isEmpty()) {
             return;
         }
-        String endpoint = INDEX_NAME + "/_bulk";
-        HttpEntity entity = new NStringEntity(bulkRequestBody.toString(), ContentType.APPLICATION_JSON);
-        Request request = new Request("POST", endpoint);
-        request.setEntity(entity);
+
+        WriteConfig cfg = this.writeConfig;
+        Request request = buildBulkAuditRequest(cfg, eventPayloads);
 
         int maxRetries = AtlasConfiguration.ES_MAX_RETRIES.getInt();
         long initialRetryDelay = AtlasConfiguration.ES_RETRY_DELAY_MS.getLong();
+        boolean aliasRedetected = false;
 
         for (int retryCount = 0; retryCount < maxRetries; retryCount++) {
             Response response = null;
@@ -346,6 +367,22 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                     Map<String, Object> responseMap = AtlasType.fromJson(responseString, Map.class);
 
                     if ((boolean) responseMap.get("errors")) {
+                        // Bulk often returns HTTP 200 with per-item failures (e.g. no write index on a
+                        // multi-target alias after ILM). Re-probe the write alias once before failing —
+                        // otherwise we never hit the 4xx/IOException paths and alias mode stays stale.
+                        // ES may mark the overall bulk as "errors" even if some actions succeeded; for
+                        // entity audit we still treat any failed item as a failed batch and recover/retry.
+                        if (!aliasRedetected) {
+                            Optional<WriteAliasRedetectResult> rebuilt = redetectAliasAndRebuild(cfg, eventPayloads,
+                                    "bulk errors=true (HTTP 200)");
+                            if (rebuilt.isPresent()) {
+                                WriteAliasRedetectResult r = rebuilt.get();
+                                request = r.request();
+                                cfg = r.config();
+                                aliasRedetected = true;
+                                continue;
+                            }
+                        }
                         LOG.error("Elasticsearch returned errors for bulk audit event request. Full response: {}", responseString);
                         List<String> errors = new ArrayList<>();
                         List<Map<String, Object>> resultItems = (List<Map<String, Object>>) responseMap.get("items");
@@ -364,6 +401,18 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
                 String responseBody = EntityUtils.toString(response.getEntity());
 
+                if (!aliasRedetected && statusCode >= 400 && statusCode < 500) {
+                    Optional<WriteAliasRedetectResult> rebuilt = redetectAliasAndRebuild(cfg, eventPayloads, "HTTP " + statusCode);
+                    if (rebuilt.isPresent()) {
+                        WriteAliasRedetectResult r = rebuilt.get();
+                        request = r.request();
+                        cfg = r.config();
+                        aliasRedetected = true;
+                        continue;
+                    }
+                    aliasRedetected = true;
+                }
+
                 if ((statusCode >= 500 && statusCode < 600) || statusCode==429) {
                     LOG.warn("Failed to push entity audits to ES due to server error ({}). Retrying... ({}/{}) Response: {}",
                             statusCode, retryCount + 1, maxRetries, responseBody);
@@ -371,7 +420,42 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                     throw new AtlasBaseException("Unable to push entity audits to ES. Status code: " + statusCode + ", Response: " + responseBody);
                 }
 
+            } catch (ResponseException e) {
+                // RestClient may throw for error statuses (depending on API/version); treat like HTTP branch above.
+                if (!aliasRedetected) {
+                    int status = e.getResponse().getStatusLine().getStatusCode();
+                    Optional<WriteAliasRedetectResult> rebuilt = redetectAliasAndRebuild(cfg, eventPayloads,
+                            "ResponseException HTTP " + status);
+                    if (rebuilt.isPresent()) {
+                        WriteAliasRedetectResult r = rebuilt.get();
+                        request = r.request();
+                        cfg = r.config();
+                        aliasRedetected = true;
+                        continue;
+                    }
+                    aliasRedetected = true;
+                }
+                int status = e.getResponse().getStatusLine().getStatusCode();
+                String errBody = e.getMessage();
+                if ((status >= 500 && status < 600) || status == 429) {
+                    LOG.warn("Failed to push entity audits to ES due to server error ({}). Retrying... ({}/{}) Response: {}",
+                            status, retryCount + 1, maxRetries, errBody);
+                } else {
+                    throw new AtlasBaseException("Unable to push entity audits to ES. Status code: " + status + ", Response: " + errBody, e);
+                }
             } catch (IOException e) {
+                // Transport-level failures (connection reset, timeout, etc.); alias HEAD may still succeed after ILM change.
+                if (!aliasRedetected) {
+                    Optional<WriteAliasRedetectResult> rebuilt = redetectAliasAndRebuild(cfg, eventPayloads,
+                            "IOException: " + e.getMessage());
+                    aliasRedetected = true;
+                    if (rebuilt.isPresent()) {
+                        WriteAliasRedetectResult r = rebuilt.get();
+                        request = r.request();
+                        cfg = r.config();
+                        continue;
+                    }
+                }
                 LOG.warn("Failed to push entity audits to ES due to IOException. Retrying... ({}/{})", retryCount + 1, maxRetries, e);
             }
 
@@ -388,6 +472,40 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
         LOG.error("Failed to push entity audits to ES after {} retries", maxRetries);
         throw new AtlasBaseException("Unable to push entity audits to ES after " + maxRetries + " retries");
+    }
+
+    /**
+     * Re-probes ES for the write alias after a write failure. If the config changed (e.g. ILM
+     * migration created the write alias while Atlas was running), returns the new {@link WriteConfig}
+     * snapshot and a {@link Request} built from that same snapshot (avoids re-reading
+     * {@link #writeConfig} and diverging from the bulk body). Empty if the write target is unchanged.
+     */
+    private Optional<WriteAliasRedetectResult> redetectAliasAndRebuild(WriteConfig prevCfg, List<String> eventPayloads, String trigger) {
+        // detectAndConfigureWriteAlias() logs INFO when the write alias appears or is missing (404).
+        // This method adds an explicit line when the *effective* write target did not change after re-probe.
+        detectAndConfigureWriteAlias();
+        WriteConfig newCfg = this.writeConfig;
+        if (!newCfg.writeIndex().equals(prevCfg.writeIndex())) {
+            LOG.info("Write alias config changed after re-detection (trigger='{}', old='{}', new='{}'), rebuilding audit bulk request",
+                    trigger, prevCfg.writeIndex(), newCfg.writeIndex());
+            Request rebuilt = buildBulkAuditRequest(newCfg, eventPayloads);
+            return Optional.of(new WriteAliasRedetectResult(newCfg, rebuilt));
+        }
+        LOG.info("Entity audit write-alias re-probe finished (trigger='{}'): writeIndex still '{}', aliasMode={} — no request rebuild",
+                trigger, prevCfg.writeIndex(), newCfg.aliasMode());
+        return Optional.empty();
+    }
+
+    private Request buildBulkAuditRequest(WriteConfig cfg, List<String> eventPayloads) {
+        StringBuilder body = new StringBuilder();
+        for (String payload : eventPayloads) {
+            body.append(cfg.writeBulkMetadata());
+            body.append(payload);
+            body.append("\n");
+        }
+        Request request = new Request("POST", cfg.writeIndex() + "/_bulk");
+        request.setEntity(new NStringEntity(body.toString(), ContentType.APPLICATION_JSON));
+        return request;
     }
 
     private String getQueryTemplate(Map<String, String> requestContextHeaders) {
@@ -757,6 +875,12 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                 LOG.info("Create ES index for entity audits in ES Based Audit Repo");
                 createAuditIndex();
             }
+            ensureIlmPolicy();
+            ensureIndexTemplate();
+            detectAndConfigureWriteAlias();
+            WriteConfig cfg = this.writeConfig;
+            LOG.info("Entity audit ES config: aliasMode={}, writeIndex='{}', readIndex='{}', writeAlias='{}'",
+                     cfg.aliasMode(), cfg.writeIndex(), INDEX_NAME, WRITE_ALIAS);
             if (shouldUpdateFieldLimitSetting()) {
                 LOG.info("Updating ES total field limit");
                 updateFieldLimit();
@@ -767,10 +891,10 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
             LOG.error("error", e);
             throw new AtlasException(e);
         }
-
     }
 
     private boolean checkIfIndexExists() throws IOException {
+        // HEAD works for both concrete index name and alias — returns 200 for either
         Request request = new Request("HEAD", INDEX_NAME);
         Response response = lowLevelClient.performRequest(request);
         int statusCode = response.getStatusLine().getStatusCode();
@@ -782,14 +906,93 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
         return false;
     }
 
+    /**
+     * Probes ES for the write alias and atomically switches the write config.
+     * If the write alias exists, writes go through it (alias mode).
+     * If not, falls back to direct index mode (current behavior — backward compatible).
+     */
+    private void detectAndConfigureWriteAlias() {
+        try {
+            Request request = new Request("HEAD", "/_alias/" + WRITE_ALIAS);
+            Response response = lowLevelClient.performRequest(request);
+            if (response.getStatusLine().getStatusCode() == 200) {
+                String newBulkMeta = String.format("{ \"index\" : { \"_index\" : \"%s\" } }%n", WRITE_ALIAS);
+                writeConfig = new WriteConfig(WRITE_ALIAS, newBulkMeta, true);
+                LOG.info("Write alias '{}' detected, using alias mode for entity audits", WRITE_ALIAS);
+            } else {
+                writeConfig = DEFAULT_WRITE_CONFIG;
+                LOG.info("Write alias '{}' not available (HTTP {}), using direct index '{}'",
+                         WRITE_ALIAS, response.getStatusLine().getStatusCode(), INDEX_NAME);
+            }
+        } catch (ResponseException e) {
+            writeConfig = DEFAULT_WRITE_CONFIG;
+            LOG.info("Write alias '{}' not found (HTTP {}), using direct index '{}'",
+                     WRITE_ALIAS, e.getResponse().getStatusLine().getStatusCode(), INDEX_NAME);
+        } catch (Exception e) {
+            writeConfig = DEFAULT_WRITE_CONFIG;
+            LOG.warn("Failed to check write alias '{}', using direct index '{}': {}",
+                     WRITE_ALIAS, INDEX_NAME, e.getMessage());
+        }
+    }
+
+    /**
+     * Creates the entity audits index for fresh tenants. Creates a concrete index named
+     * {@code entity_audits-000001} with both read alias ({@code entity_audits}) and write alias
+     * ({@code entity_audits_write}) configured, making fresh tenants ILM-ready from day one.
+     *
+     * Handles concurrent pod creation race (multiple pods seeing "index not found" simultaneously)
+     * by catching the 400 "resource_already_exists_exception" and re-verifying existence.
+     */
     private boolean createAuditIndex() throws IOException {
-        LOG.info("ESBasedAuditRepo - createAuditIndex!");
+        String concreteIndexName = INDEX_NAME + "-000001";
+        LOG.info("ESBasedAuditRepo - createAuditIndex! Creating '{}' with aliases ['{}', '{}']",
+                 concreteIndexName, INDEX_NAME, WRITE_ALIAS);
+
         String esMappingsString = getAuditIndexMappings();
-        HttpEntity entity = new NStringEntity(esMappingsString, ContentType.APPLICATION_JSON);
-        Request request = new Request("PUT", INDEX_NAME);
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode root = mapper.readTree(esMappingsString);
+        ObjectNode rootObj = (ObjectNode) root;
+
+        ObjectNode aliases = mapper.createObjectNode();
+        aliases.set(INDEX_NAME, mapper.createObjectNode());
+        ObjectNode writeAliasNode = mapper.createObjectNode();
+        writeAliasNode.put("is_write_index", true);
+        aliases.set(WRITE_ALIAS, writeAliasNode);
+        rootObj.set("aliases", aliases);
+
+        ObjectNode settings = (ObjectNode) rootObj.get("settings");
+        if (settings == null) {
+            settings = mapper.createObjectNode();
+            rootObj.set("settings", settings);
+        }
+        ObjectNode indexSettings = (ObjectNode) settings.get("index");
+        if (indexSettings == null) {
+            indexSettings = mapper.createObjectNode();
+            settings.set("index", indexSettings);
+        }
+        ObjectNode lifecycle = mapper.createObjectNode();
+        lifecycle.put("name", ILM_POLICY_NAME);
+        lifecycle.put("rollover_alias", WRITE_ALIAS);
+        indexSettings.set("lifecycle", lifecycle);
+        indexSettings.put("number_of_shards", 4);
+        indexSettings.put("number_of_replicas", 1);
+        indexSettings.put("refresh_interval", "30s");
+        HttpEntity entity = new NStringEntity(rootObj.toString(), ContentType.APPLICATION_JSON);
+        Request request = new Request("PUT", concreteIndexName);
         request.setEntity(entity);
-        Response response = lowLevelClient.performRequest(request);
-        return isSuccess(response);
+
+        try {
+            Response response = lowLevelClient.performRequest(request);
+            return isSuccess(response);
+        } catch (ResponseException e) {
+            int status = e.getResponse().getStatusLine().getStatusCode();
+            if (status == 400) {
+                LOG.info("Index '{}' already exists (likely created by another pod concurrently), proceeding",
+                         concreteIndexName);
+                return checkIfIndexExists();
+            }
+            throw e;
+        }
     }
 
     private boolean shouldUpdateFieldLimitSetting() {
@@ -808,9 +1011,18 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
         Request request = new Request("GET", INDEX_NAME + "/_settings");
         Response response = lowLevelClient.performRequest(request);
         ObjectMapper objectMapper = new ObjectMapper();
-        String fieldPath = String.format("/%s/settings/index/mapping/total_fields/limit", INDEX_NAME);
+        JsonNode root = objectMapper.readTree(copyToString(response.getEntity().getContent(), Charset.defaultCharset()));
 
-        return objectMapper.readTree(copyToString(response.getEntity().getContent(), Charset.defaultCharset())).at(fieldPath);
+        // Iterate over concrete index names — works for both alias and direct index.
+        // When INDEX_NAME is an alias, response keys are concrete names (e.g. entity_audits-000001).
+        for (Iterator<String> it = root.fieldNames(); it.hasNext(); ) {
+            String indexName = it.next();
+            JsonNode limit = root.at("/" + indexName + "/settings/index/mapping/total_fields/limit");
+            if (!limit.isMissingNode()) {
+                return limit;
+            }
+        }
+        return null;
     }
 
     private void updateFieldLimit() {
@@ -832,6 +1044,153 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
     }
 
     /**
+     * Creates the ILM policy for entity audits if it does not already exist.
+     * Respects manual operator overrides: if the policy exists (with any settings), it is not overwritten.
+     * The delete phase is only included when {@code atlas.audit.retention.days > 0} (default -1 = disabled).
+     */
+    private void ensureIlmPolicy() {
+        try {
+            Request getPolicy = new Request("GET", "/_ilm/policy/" + ILM_POLICY_NAME);
+            try {
+                Response response = lowLevelClient.performRequest(getPolicy);
+                if (isSuccess(response)) {
+                    LOG.info("ILM policy '{}' already exists", ILM_POLICY_NAME);
+                    return;
+                }
+            } catch (ResponseException e) {
+                if (e.getResponse().getStatusLine().getStatusCode() != 404) {
+                    LOG.warn("Unexpected response checking ILM policy '{}': {}",
+                             ILM_POLICY_NAME, e.getResponse().getStatusLine());
+                    return;
+                }
+            }
+
+            int    retentionDays = AtlasConfiguration.ENTITY_AUDIT_RETENTION_DAYS.getInt();
+            String rolloverSize  = AtlasConfiguration.ENTITY_AUDIT_ILM_ROLLOVER_SIZE.getString();
+
+            String policyBody = buildIlmPolicyJson(retentionDays, rolloverSize);
+
+            Request putPolicy = new Request("PUT", "/_ilm/policy/" + ILM_POLICY_NAME);
+            putPolicy.setEntity(new NStringEntity(policyBody, ContentType.APPLICATION_JSON));
+            Response response = lowLevelClient.performRequest(putPolicy);
+            if (isSuccess(response)) {
+                LOG.info("ILM policy '{}' created (retention={}d, rollover max_size={})",
+                         ILM_POLICY_NAME, retentionDays, rolloverSize);
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to ensure ILM policy '{}', will retry on next startup: {}",
+                     ILM_POLICY_NAME, e.getMessage());
+        }
+    }
+
+    /**
+     * Builds the ILM policy JSON with hot (rollover) and warm (forcemerge) phases.
+     * No shrink action in warm — avoids shard relocation failures on heap-constrained 3-node clusters.
+     * Rollover is size-only ({@code max_size}) — no {@code max_age}, to avoid time-based small-index proliferation.
+     * Delete phase included only when {@code retentionDays > 0}.
+     */
+    private String buildIlmPolicyJson(int retentionDays, String rolloverSize) {
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode root   = mapper.createObjectNode();
+        ObjectNode policy = root.putObject("policy");
+        ObjectNode phases = policy.putObject("phases");
+
+        ObjectNode hot        = phases.putObject("hot");
+        hot.put("min_age", "0ms");
+        ObjectNode hotActions = hot.putObject("actions");
+        ObjectNode rollover   = hotActions.putObject("rollover");
+        rollover.put("max_size", rolloverSize);
+        hotActions.putObject("set_priority").put("priority", 100);
+
+        ObjectNode warm        = phases.putObject("warm");
+        warm.put("min_age", "2d");
+        ObjectNode warmActions = warm.putObject("actions");
+        warmActions.putObject("forcemerge").put("max_num_segments", 1);
+        warmActions.putObject("set_priority").put("priority", 50);
+
+        if (retentionDays > 0) {
+            ObjectNode delete = phases.putObject("delete");
+            delete.put("min_age", retentionDays + "d");
+            delete.putObject("actions").putObject("delete");
+        }
+
+        return root.toString();
+    }
+
+    /**
+     * Creates the index template for {@code entity_audits-*} if it does not already exist.
+     * Uses the legacy {@code _template} API (ES 7.x). Mappings are loaded from
+     * {@code es-audit-mappings.json} (only the mappings node — file-level settings are discarded).
+     */
+    private void ensureIndexTemplate() {
+        try {
+            Request headTemplate = new Request("HEAD", "/_template/" + INDEX_TEMPLATE_NAME);
+            try {
+                Response response = lowLevelClient.performRequest(headTemplate);
+                if (response.getStatusLine().getStatusCode() == 200) {
+                    LOG.info("Index template '{}' already exists", INDEX_TEMPLATE_NAME);
+                    return;
+                }
+            } catch (ResponseException e) {
+                if (e.getResponse().getStatusLine().getStatusCode() != 404) {
+                    LOG.warn("Unexpected response checking index template '{}': {}",
+                             INDEX_TEMPLATE_NAME, e.getResponse().getStatusLine());
+                    return;
+                }
+            }
+
+            String templateBody = buildIndexTemplateJson();
+
+            Request putTemplate = new Request("PUT", "/_template/" + INDEX_TEMPLATE_NAME);
+            putTemplate.setEntity(new NStringEntity(templateBody, ContentType.APPLICATION_JSON));
+            Response response = lowLevelClient.performRequest(putTemplate);
+            if (isSuccess(response)) {
+                LOG.info("Index template '{}' created for pattern '{}'",
+                         INDEX_TEMPLATE_NAME, INDEX_PATTERN);
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to ensure index template '{}', will retry on next startup: {}",
+                     INDEX_TEMPLATE_NAME, e.getMessage());
+        }
+    }
+
+    /**
+     * Builds the index template JSON for {@code entity_audits-*}.
+     * Extracts only the {@code mappings} node from {@code es-audit-mappings.json} to avoid
+     * settings conflicts (the file has refresh_interval=60s, template uses 30s).
+     * Template settings are the single source of truth for shard count, refresh interval, etc.
+     */
+    private String buildIndexTemplateJson() throws IOException {
+        ObjectMapper mapper = new ObjectMapper();
+
+        JsonNode fileRoot    = mapper.readTree(getAuditIndexMappings());
+        JsonNode mappingsNode = fileRoot.get("mappings");
+        if (mappingsNode == null) {
+            throw new IllegalStateException("es-audit-mappings.json missing 'mappings' node");
+        }
+
+        ObjectNode template = mapper.createObjectNode();
+
+        template.putArray("index_patterns").add(INDEX_PATTERN);
+
+        ObjectNode settings      = template.putObject("settings");
+        ObjectNode indexSettings  = settings.putObject("index");
+        indexSettings.put("number_of_shards", 4);
+        indexSettings.put("number_of_replicas", 1);
+        indexSettings.put("refresh_interval", "30s");
+        indexSettings.putObject("store").put("type", "niofs");
+        ObjectNode lifecycle = indexSettings.putObject("lifecycle");
+        lifecycle.put("name", ILM_POLICY_NAME);
+        lifecycle.put("rollover_alias", WRITE_ALIAS);
+
+        template.putObject("aliases").putObject(INDEX_NAME);
+
+        template.set("mappings", mappingsNode);
+
+        return template.toString();
+    }
+
+    /**
      * One-time migration: switches entity_audits from default hybridfs/mmapfs to niofs store type.
      *
      * With hybridfs, ES memory-maps all audit segment files at index open time, consuming virtual
@@ -844,8 +1203,16 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
      * Uses a marker document to ensure the migration runs exactly once across all pods and deployments.
      * On every startup, each pod does a single cheap HEAD request to check for the marker.
      * Requires a brief close/open cycle (~2-3 seconds of audit write unavailability) on first run only.
+     *
+     * SKIPPED in alias mode: fresh/rollover indices inherit niofs from es-audit-mappings.json settings.
+     * Running _close on an alias would close ALL backing indices — catastrophic for multi-index setups.
      */
     private void ensureStoreTypeNiofs() {
+        if (writeConfig.aliasMode()) {
+            LOG.info("Skipping niofs store type migration in alias mode (fresh/rollover indices inherit niofs from template)");
+            return;
+        }
+
         try {
             // Fast path: check if migration was already completed (cheap HEAD request)
             if (isNiofsMigrationDone()) {
@@ -856,7 +1223,17 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
             Request getSettings = new Request("GET", INDEX_NAME + "/_settings");
             Response settingsResponse = lowLevelClient.performRequest(getSettings);
             String responseBody = copyToString(settingsResponse.getEntity().getContent(), defaultCharset());
-            JsonNode storeType = new ObjectMapper().readTree(responseBody).at("/" + INDEX_NAME + "/settings/index/store/type");
+
+            // Iterate response keys for defense-in-depth (works even if INDEX_NAME is an alias)
+            JsonNode root = new ObjectMapper().readTree(responseBody);
+            JsonNode storeType = null;
+            for (Iterator<String> it = root.fieldNames(); it.hasNext(); ) {
+                JsonNode candidate = root.at("/" + it.next() + "/settings/index/store/type");
+                if (candidate != null && !candidate.isMissingNode()) {
+                    storeType = candidate;
+                    break;
+                }
+            }
 
             if (storeType != null && "niofs".equals(storeType.asText())) {
                 // Already niofs (e.g. set manually) — just write the marker so we skip next time
@@ -918,11 +1295,14 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
     private void writeNiofsMigrationMarker() {
         try {
-            Request request = new Request("PUT", INDEX_NAME + "/_doc/" + NIOFS_MIGRATION_MARKER_ID);
+            // Use writeConfig.writeIndex() so the marker doc goes through the writable target
+            // (defense-in-depth: in alias mode the ensureStoreTypeNiofs guard skips before reaching here)
+            String target = writeConfig.writeIndex();
+            Request request = new Request("PUT", target + "/_doc/" + NIOFS_MIGRATION_MARKER_ID);
             String body = "{\"migration\":\"niofs\",\"timestamp\":" + System.currentTimeMillis() + "}";
             request.setEntity(new NStringEntity(body, ContentType.APPLICATION_JSON));
             lowLevelClient.performRequest(request);
-            LOG.info("entity_audits niofs migration marker written");
+            LOG.info("entity_audits niofs migration marker written via '{}'", target);
         } catch (Exception e) {
             LOG.warn("Failed to write niofs migration marker, migration will re-check on next startup", e);
         }
@@ -1013,6 +1393,16 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
             LOG.error("ESBasedAuditRepo - error while closing es lowlevel client", e);
             throw new AtlasException(e);
         }
+    }
+
+    /** Returns the resolved write target (alias name or direct index name). */
+    public String getWriteIndex() {
+        return writeConfig.writeIndex();
+    }
+
+    /** Returns true if the write alias was detected and writes go through it. */
+    public boolean isAliasMode() {
+        return writeConfig.aliasMode();
     }
 
     private void setLowLevelClient() throws AtlasException {
