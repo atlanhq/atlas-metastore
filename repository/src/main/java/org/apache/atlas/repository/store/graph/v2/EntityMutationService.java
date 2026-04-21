@@ -5,6 +5,7 @@ import com.google.common.collect.Sets;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.CassandraTagOperation;
+import org.apache.atlas.model.ESDeferredOperation;
 import org.apache.atlas.model.instance.AtlasClassification;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntityHeaders;
@@ -395,13 +396,27 @@ public class EntityMutationService {
     }
 
     private void executeESPostProcessing(boolean isGraphTransactionFailed) {
-        if (!isGraphTransactionFailed && !RequestContext.get().getESDeferredOperations().isEmpty()) {
-            // This will be skipped for v1 as RequestContext.get().getESDeferredOperations() will be empty
-            try {
-                entityMutationPostProcessor.executeESOperations(RequestContext.get().getESDeferredOperations());
-            } catch (Exception e) {
-                LOG.error("Failed to execute ES operations after graph transaction failure", e);
+        if (!isGraphTransactionFailed) {
+            List<ESDeferredOperation> deferredOps = RequestContext.get().getESDeferredOperations();
+            if (!deferredOps.isEmpty()) {
+                // Snapshot before the call — the failure registry / outbox needs the original
+                // payloads even if the inner call mutates or partially consumes the list.
+                List<ESDeferredOperation> snapshot = new ArrayList<>(deferredOps);
+                try {
+                    entityMutationPostProcessor.executeESOperations(deferredOps);
+                } catch (Exception e) {
+                    // Surface the failure to the registry instead of silently swallowing.
+                    // API caller still receives the same response — MS-1010 outbox will
+                    // durably capture the failed ops for replay (tag-denorm sink wiring TBD).
+                    LOG.error("Failed to execute ES deferred operations — surfacing to ESWriteFailureRegistry for outbox replay", e);
+                    ESConnectorMetrics.recordFailure("post_processing_exception");
+                    ESWriteFailureRegistry.record(new ESWriteFailureRegistry.ESWriteFailure(
+                            snapshot, Collections.emptyList(), e, "post-processing"));
+                }
             }
+            // MS-1010 Option B verifier hook lives in AtlasEntityChangeNotifier.onEntitiesMutated
+            // — that's where the EntityMutationResponse (with createdEntities + updatedEntities
+            // + partiallyUpdatedEntities) is available. RequestContext alone doesn't track creates.
         }
     }
 
