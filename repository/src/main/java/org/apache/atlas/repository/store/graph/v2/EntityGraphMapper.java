@@ -398,6 +398,14 @@ public class EntityGraphMapper {
                 diffEntity.setUpdatedBy(RequestContext.get().getUser());
                 diffEntity.setUpdateTime(new Date(RequestContext.get().getRequestTime()));
                 diffEntity.setAttribute(STATE_PROPERTY_KEY, ACTIVE.name());
+
+                // MS-1044: Enrich diffEntity with SINGLE-cardinality relationship attributes
+                // (parent references like Column→Table) so downstream consumers can identify
+                // the structural context of restored entities. After restoreEntities(), edges
+                // are already ACTIVE. Only SINGLE cardinality — parent refs are one edge each,
+                // cheap. Skip SET/LIST — child collections are expensive and not needed here.
+                addRestoredEntityRelationshipsToDiffEntity(diffEntity, restoredEntity.getGuid(), context);
+
                 reqContext.cacheDifferentialEntity(diffEntity);
 
                 resp.addEntity(UPDATE, restoredEntity);
@@ -1233,6 +1241,85 @@ public class EntityGraphMapper {
 
     private static boolean hasExplicitValue(AtlasStruct struct, String attrName) {
         return struct != null && struct.hasAttribute(attrName) && struct.getAttribute(attrName) != null;
+    }
+
+    /**
+     * MS-1044: For restored entities, read SINGLE-cardinality relationship attributes from the
+     * graph and add them to the diffEntity. This ensures downstream consumers of ENTITY_UPDATE
+     * notifications can identify parent references (e.g., Column→Table) for recreated entities.
+     *
+     * Only reads SINGLE cardinality relationships — these are parent/structural references
+     * (one edge each, O(1) per attribute). SET/LIST cardinality (child collections) are
+     * skipped to avoid expensive unbounded edge reads.
+     *
+     * Non-fatal: failures on individual attributes are logged at DEBUG and skipped.
+     */
+    private void addRestoredEntityRelationshipsToDiffEntity(AtlasEntity diffEntity, String guid,
+                                                            EntityMutationContext context) {
+        AtlasVertex     vertex     = context.getVertex(guid);
+        AtlasEntityType entityType = context.getType(guid);
+
+        if (vertex == null || entityType == null) {
+            return;
+        }
+
+        for (Map.Entry<String, Map<String, AtlasAttribute>> entry :
+                entityType.getRelationshipAttributes().entrySet()) {
+
+            String                        attrName   = entry.getKey();
+            Map<String, AtlasAttribute>   relTypeMap = entry.getValue();
+
+            if (relTypeMap == null || relTypeMap.isEmpty()) {
+                continue;
+            }
+
+            AtlasAttribute attribute = relTypeMap.values().iterator().next();
+
+            if (attribute.getAttributeDef().getCardinality() != Cardinality.SINGLE) {
+                continue;
+            }
+
+            try {
+                AtlasEdge edge = graphHelper.getEdgeForLabel(vertex,
+                        attribute.getRelationshipEdgeLabel(),
+                        attribute.getRelationshipEdgeDirection());
+
+                if (edge == null || AtlasGraphUtilsV2.getState(edge) != AtlasEntity.Status.ACTIVE) {
+                    continue;
+                }
+
+                AtlasVertex relatedVertex;
+                AtlasRelationshipEdgeDirection direction = attribute.getRelationshipEdgeDirection();
+
+                if (direction == AtlasRelationshipEdgeDirection.OUT) {
+                    relatedVertex = edge.getInVertex();
+                } else if (direction == AtlasRelationshipEdgeDirection.IN) {
+                    relatedVertex = edge.getOutVertex();
+                } else {
+                    // BOTH — pick the other end
+                    relatedVertex = edge.getInVertex().equals(vertex) ? edge.getOutVertex() : edge.getInVertex();
+                }
+
+                String relGuid     = GraphHelper.getGuid(relatedVertex);
+                String relTypeName = AtlasGraphUtilsV2.getTypeName(relatedVertex);
+
+                if (relGuid != null && relTypeName != null) {
+                    AtlasObjectId objectId = new AtlasObjectId(relGuid, relTypeName);
+
+                    String relQN = relatedVertex.getProperty(QUALIFIED_NAME, String.class);
+                    if (relQN != null) {
+                        objectId.setUniqueAttributes(Collections.singletonMap(QUALIFIED_NAME, relQN));
+                    }
+
+                    diffEntity.setRelationshipAttribute(attrName, objectId);
+                }
+            } catch (Exception e) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("MS-1044: Failed to read relationship attribute {} for restored entity {}: {}",
+                            attrName, guid, e.getMessage());
+                }
+            }
+        }
     }
 
     private void mapRelationshipAttributes(AtlasEntity entity, AtlasEntityType entityType, AtlasVertex vertex, EntityOperation op,
