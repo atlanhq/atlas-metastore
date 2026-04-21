@@ -168,15 +168,24 @@ public class MergedEdgeIterableTest {
         assertEquals(ids.get(2), "e2"); // persisted (not duplicate, not removed)
     }
 
-    // ======================== Single-Use Enforcement ========================
+    // ======================== Re-Iterability ========================
 
-    @Test(expectedExceptions = IllegalStateException.class)
-    public void testSecondIteratorCallThrows() {
-        MergedEdgeIterable merged = new MergedEdgeIterable(
-            Collections.emptyList(), wrapEdges(Collections.emptyList()), buffer);
+    @Test
+    public void testMultipleIteratorCallsAllowed() {
+        List<CassandraEdge> buffered = List.of(edge("e1", "v1", "v2", "knows"));
+        Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> persisted = wrapEdges(Collections.emptyList());
 
-        merged.iterator(); // first call — OK
-        merged.iterator(); // second call — throws
+        MergedEdgeIterable merged = new MergedEdgeIterable(buffered, persisted, buffer);
+
+        // first iteration
+        List<String> ids1 = collectEdgeIds(merged);
+        assertEquals(ids1.size(), 1);
+        assertEquals(ids1.get(0), "e1");
+
+        // second iteration — should work, not throw
+        List<String> ids2 = collectEdgeIds(merged);
+        assertEquals(ids2.size(), 1);
+        assertEquals(ids2.get(0), "e1");
     }
 
     // ======================== Helpers ========================
