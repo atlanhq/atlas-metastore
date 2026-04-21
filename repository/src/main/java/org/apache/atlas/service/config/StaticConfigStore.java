@@ -1,7 +1,9 @@
 package org.apache.atlas.service.config;
 
+import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.service.config.DynamicConfigCacheStore.ConfigEntry;
+import org.apache.commons.configuration.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.DependsOn;
@@ -22,8 +24,8 @@ import java.util.Map;
  *
  * Fail-fast behavior:
  * - Cassandra reachable, row found      -> use value from Cassandra
- * - Cassandra reachable, no row         -> use StaticConfigKey default (valid)
- * - Cassandra UNREACHABLE (after retry) -> BLOCK STARTUP (throw exception)
+ * - Cassandra reachable, no row         -> fallback to atlas-application.properties
+ * - Cassandra UNREACHABLE (after retry) -> KILL PROCESS (System.exit)
  *
  * Depends on DynamicConfigStore to ensure CassandraConfigDAO is initialized first.
  */
@@ -49,8 +51,8 @@ public class StaticConfigStore {
     @PostConstruct
     public void initialize() {
         if (!config.isEnabled()) {
-            LOG.info("Static config store is disabled (atlas.static.config.store.enabled=false). Using defaults.");
-            configs = buildDefaultMap();
+            LOG.info("Static config store is disabled (atlas.static.config.store.enabled=false). Falling back to application properties.");
+            configs = buildFallbackMap();
             ready = true;
             return;
         }
@@ -61,11 +63,14 @@ public class StaticConfigStore {
         try {
             // Read all configs for the static partition from Cassandra.
             // CassandraConfigDAO retry logic handles transient failures (3 retries with backoff).
-            // If still fails after retries -> AtlasBaseException is thrown -> startup BLOCKED.
+            // If still fails after retries -> AtlasBaseException is thrown -> process KILLED.
             CassandraConfigDAO dao = CassandraConfigDAO.getInstance();
             Map<String, ConfigEntry> cassandraConfigs = dao.getAllConfigsForApp(config.getAppName());
 
-            // Build config map: for each StaticConfigKey, use Cassandra value or default
+            // Load application properties for fallback when Cassandra has no entry
+            Configuration appProps = ApplicationProperties.get();
+
+            // Build config map: for each StaticConfigKey, use Cassandra value or fall back to application properties
             Map<String, String> configMap = new HashMap<>();
             StringBuilder logBuilder = new StringBuilder();
             logBuilder.append("Static config values loaded at startup:\n");
@@ -80,8 +85,9 @@ public class StaticConfigStore {
                     value = entry.getValue();
                     source = "cassandra";
                 } else {
-                    value = staticKey.getDefaultValue();
-                    source = "default";
+                    // Fallback to atlas-application.properties
+                    value = appProps.getString(key, null);
+                    source = value != null ? "application.properties" : "not-set";
                 }
 
                 if (value != null) {
@@ -100,20 +106,30 @@ public class StaticConfigStore {
             LOG.info(logBuilder.toString());
 
         } catch (Exception e) {
-            // FAIL-FAST: Cassandra unreachable -> block startup
-            LOG.error("FATAL: StaticConfigStore failed to read from Cassandra. Atlas startup BLOCKED.", e);
-            throw new RuntimeException("StaticConfigStore initialization failed - Cassandra unreachable", e);
+            // FAIL-FAST: Cassandra unreachable -> kill the process
+            LOG.error("FATAL: StaticConfigStore failed to read from Cassandra. KILLING PROCESS.", e);
+            exitProcess(1);
         }
     }
 
-    private Map<String, String> buildDefaultMap() {
-        Map<String, String> defaults = new HashMap<>();
-        for (StaticConfigKey staticKey : StaticConfigKey.values()) {
-            if (staticKey.getDefaultValue() != null) {
-                defaults.put(staticKey.getKey(), staticKey.getDefaultValue());
+    /**
+     * Build fallback map from atlas-application.properties.
+     * Used when static config store is disabled.
+     */
+    private Map<String, String> buildFallbackMap() {
+        Map<String, String> fallback = new HashMap<>();
+        try {
+            Configuration appProps = ApplicationProperties.get();
+            for (StaticConfigKey staticKey : StaticConfigKey.values()) {
+                String value = appProps.getString(staticKey.getKey(), null);
+                if (value != null) {
+                    fallback.put(staticKey.getKey(), value);
+                }
             }
+        } catch (Exception e) {
+            LOG.warn("Failed to load application properties for fallback, static configs will be empty", e);
         }
-        return Collections.unmodifiableMap(defaults);
+        return Collections.unmodifiableMap(fallback);
     }
 
     // ================== Static API ==================
@@ -126,7 +142,7 @@ public class StaticConfigStore {
     public static String getConfig(String key) {
         StaticConfigStore store = INSTANCE;
         if (store == null || !store.ready) {
-            return getDefaultValue(key);
+            return getPropertyFallback(key);
         }
         return store.configs.get(key);
     }
@@ -200,11 +216,22 @@ public class StaticConfigStore {
                 key, value, updatedBy);
     }
 
+    /**
+     * Kill the process. Extracted into a method so tests can override it.
+     */
+    void exitProcess(int status) {
+        System.exit(status);
+    }
+
     // ================== Internal helpers ==================
 
-    private static String getDefaultValue(String key) {
-        StaticConfigKey configKey = StaticConfigKey.fromKey(key);
-        return configKey != null ? configKey.getDefaultValue() : null;
+    private static String getPropertyFallback(String key) {
+        try {
+            return ApplicationProperties.get().getString(key, null);
+        } catch (Exception e) {
+            LOG.warn("Failed to read application property for key: {}", key, e);
+            return null;
+        }
     }
 
     // For testing

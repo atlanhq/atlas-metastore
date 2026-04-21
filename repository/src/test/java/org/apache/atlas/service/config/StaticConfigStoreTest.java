@@ -19,8 +19,8 @@ import static org.mockito.Mockito.*;
  *
  * Covers:
  * - Happy path: Cassandra returns "cassandra" -> isCassandraGraphBackend() == true
- * - Empty row -> default: DAO returns empty map -> defaults to "janus"
- * - Cassandra unreachable -> fail-fast: DAO throws -> initialize() re-throws -> startup blocked
+ * - Empty row -> fallback to application.properties
+ * - Cassandra unreachable -> fail-fast: System.exit called
  * - Immutability: Attempt to modify returned map -> UnsupportedOperationException
  * - Static API methods return correct values
  */
@@ -37,6 +37,11 @@ class StaticConfigStoreTest {
             config.setProperty("atlas.graph.index.search.hostname", "localhost:9200");
             config.setProperty("atlas.static.config.store.enabled", "true");
             config.setProperty("atlas.config.store.cassandra.enabled", "true");
+            // Application properties fallback values
+            config.setProperty("atlas.graphdb.backend", "janus");
+            config.setProperty("atlas.graph.id.strategy", "legacy");
+            config.setProperty("atlas.graph.claim.enabled", "false");
+            // atlas.graph.index.search.es.prefix intentionally NOT set (tests null fallback)
             ApplicationProperties.set(config);
         } catch (Exception e) {
             throw new RuntimeException("Failed to initialize test configuration", e);
@@ -95,10 +100,10 @@ class StaticConfigStoreTest {
         assertEquals("janus", StaticConfigStore.getGraphBackend());
     }
 
-    // =================== Empty Row -> Default ===================
+    // =================== Empty Row -> Fallback to Application Properties ===================
 
     @Test
-    void testEmptyRow_defaultsToJanus() throws AtlasBaseException {
+    void testEmptyRow_fallsBackToApplicationProperties() throws AtlasBaseException {
         // Cassandra reachable but no rows for atlas_static partition
         when(mockDAO.getAllConfigsForApp("atlas_static")).thenReturn(new HashMap<>());
 
@@ -106,13 +111,14 @@ class StaticConfigStoreTest {
         store.initialize();
 
         assertTrue(StaticConfigStore.isReady());
+        // Falls back to atlas-application.properties where atlas.graphdb.backend=janus
         assertFalse(StaticConfigStore.isCassandraGraphBackend());
         assertEquals("janus", StaticConfigStore.getGraphBackend());
     }
 
     @Test
-    void testPartialRows_missingKeysUseDefaults() throws AtlasBaseException {
-        // Only GRAPH_BACKEND is set, others should use defaults
+    void testPartialRows_missingKeysFallBackToApplicationProperties() throws AtlasBaseException {
+        // Only GRAPH_BACKEND is set in Cassandra, others should fallback to application.properties
         Map<String, ConfigEntry> cassandraData = new HashMap<>();
         cassandraData.put("atlas.graphdb.backend", entry("cassandra"));
 
@@ -124,31 +130,32 @@ class StaticConfigStoreTest {
         // GRAPH_BACKEND from Cassandra
         assertEquals("cassandra", StaticConfigStore.getConfig("atlas.graphdb.backend"));
 
-        // GRAPH_ID_STRATEGY from default
+        // GRAPH_ID_STRATEGY from application.properties (atlas.graph.id.strategy=legacy)
         assertEquals("legacy", StaticConfigStore.getConfig("atlas.graph.id.strategy"));
 
-        // GRAPH_CLAIM_ENABLED from default
+        // GRAPH_CLAIM_ENABLED from application.properties (atlas.graph.claim.enabled=false)
         assertEquals("false", StaticConfigStore.getConfig("atlas.graph.claim.enabled"));
         assertFalse(StaticConfigStore.getConfigAsBoolean("atlas.graph.claim.enabled"));
 
-        // GRAPH_ES_INDEX_PREFIX has null default, so should be null
+        // GRAPH_ES_INDEX_PREFIX not in application.properties either -> null
         assertNull(StaticConfigStore.getConfig("atlas.graph.index.search.es.prefix"));
     }
 
-    // =================== Fail-Fast ===================
+    // =================== Fail-Fast: Kill Process ===================
 
     @Test
-    void testCassandraUnreachable_blockStartup() throws AtlasBaseException {
+    void testCassandraUnreachable_callsExitProcess() throws AtlasBaseException {
         // DAO throws (Cassandra unreachable after retries)
         when(mockDAO.getAllConfigsForApp("atlas_static"))
                 .thenThrow(new AtlasBaseException("Cassandra unreachable after 3 retries"));
 
-        StaticConfigStore store = createStore(true);
+        // Use spy to intercept exitProcess() and prevent actual System.exit
+        StaticConfigStore store = spy(createStore(true));
+        doNothing().when(store).exitProcess(anyInt());
 
-        RuntimeException thrown = assertThrows(RuntimeException.class, store::initialize,
-                "Should throw RuntimeException to block startup when Cassandra is unreachable");
+        store.initialize();
 
-        assertTrue(thrown.getMessage().contains("StaticConfigStore initialization failed"));
+        verify(store).exitProcess(1);
         assertFalse(StaticConfigStore.isReady());
     }
 
@@ -174,11 +181,12 @@ class StaticConfigStoreTest {
     // =================== Disabled Store ===================
 
     @Test
-    void testDisabledStore_usesDefaults() {
+    void testDisabledStore_fallsBackToApplicationProperties() {
         StaticConfigStore store = createStore(false);
         store.initialize();
 
         assertTrue(StaticConfigStore.isReady());
+        // Falls back to atlas-application.properties
         assertEquals("janus", StaticConfigStore.getGraphBackend());
         assertFalse(StaticConfigStore.isCassandraGraphBackend());
         assertEquals("legacy", StaticConfigStore.getConfig("atlas.graph.id.strategy"));
@@ -233,7 +241,7 @@ class StaticConfigStoreTest {
         StaticConfigStore store = createStore(true);
         store.initialize();
 
-        // In-memory value is "janus" (default)
+        // In-memory value is "janus" (from application.properties fallback)
         assertEquals("janus", StaticConfigStore.getGraphBackend());
 
         // Seed "cassandra" to Cassandra
@@ -246,7 +254,7 @@ class StaticConfigStoreTest {
     // =================== All Configs with Cassandra Override ===================
 
     @Test
-    void testAllConfigsFromCassandra_overrideDefaults() throws AtlasBaseException {
+    void testAllConfigsFromCassandra_overrideApplicationProperties() throws AtlasBaseException {
         Map<String, ConfigEntry> cassandraData = new HashMap<>();
         cassandraData.put("atlas.graphdb.backend", entry("cassandra"));
         cassandraData.put("atlas.graph.id.strategy", entry("nanoid"));
