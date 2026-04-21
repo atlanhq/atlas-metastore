@@ -81,20 +81,42 @@ public class CassandraConfigDAO implements AutoCloseable {
     private final PreparedStatement healthCheckStmt;
 
     /**
-     * Initialize the singleton instance with configuration.
+     * Initialize the singleton instance with DynamicConfigStore configuration.
      * Must be called before getInstance().
      *
-     * @param config the configuration
+     * @param config the dynamic config store configuration
      * @throws AtlasBaseException if initialization fails
      */
-    public static synchronized void initialize(CassandraConnectionConfig config) throws AtlasBaseException {
+    public static synchronized void initialize(DynamicConfigStoreConfig config) throws AtlasBaseException {
+        doInitialize(config.getKeyspace(), config.getTable(), config.getAppName(),
+                config.getHostname(), config.getCassandraPort(), config.getDatacenter(),
+                config.getReplicationFactor(), config.getConsistencyLevel());
+    }
+
+    /**
+     * Initialize the singleton instance with StaticConfigStore configuration.
+     * Safe to call even if already initialized by DynamicConfigStore — subsequent calls are no-ops.
+     *
+     * @param config the static config store configuration
+     * @throws AtlasBaseException if initialization fails
+     */
+    public static synchronized void initialize(StaticConfigStoreConfig config) throws AtlasBaseException {
+        doInitialize(config.getKeyspace(), config.getTable(), config.getAppName(),
+                config.getHostname(), config.getCassandraPort(), config.getDatacenter(),
+                config.getReplicationFactor(), config.getConsistencyLevel());
+    }
+
+    private static void doInitialize(String keyspace, String table, String appName,
+                                     String hostname, int port, String datacenter,
+                                     int replicationFactor, String consistencyLevel) throws AtlasBaseException {
         if (initialized) {
             LOG.debug("CassandraConfigDAO already initialized");
             return;
         }
 
         try {
-            INSTANCE = new CassandraConfigDAO(config);
+            INSTANCE = new CassandraConfigDAO(keyspace, table, appName, hostname, port,
+                    datacenter, replicationFactor, consistencyLevel);
             initialized = true;
             initializationException = null;
             LOG.info("CassandraConfigDAO singleton initialized successfully");
@@ -128,15 +150,17 @@ public class CassandraConfigDAO implements AutoCloseable {
         return initialized;
     }
 
-    private CassandraConfigDAO(CassandraConnectionConfig config) throws AtlasBaseException {
-        this.keyspace = config.getKeyspace();
-        this.table = config.getTable();
-        this.appName = config.getAppName();
-        this.consistencyLevel = parseConsistencyLevel(config.getConsistencyLevel());
+    private CassandraConfigDAO(String keyspace, String table, String appName,
+                               String hostname, int port, String datacenter,
+                               int replicationFactor, String consistencyLevel) throws AtlasBaseException {
+        this.keyspace = keyspace;
+        this.table = table;
+        this.appName = appName;
+        this.consistencyLevel = parseConsistencyLevel(consistencyLevel);
 
         try {
             LOG.info("Initializing CassandraConfigDAO - hostname: {}, keyspace: {}, table: {}, consistencyLevel: {}",
-                    config.getHostname(), keyspace, table, consistencyLevel);
+                    hostname, keyspace, table, this.consistencyLevel);
 
             // Try to reuse the shared Cassandra session from the graph provider to avoid creating
             // a separate connection pool (saves ~0.2s startup and reduces resource usage).
@@ -146,8 +170,7 @@ public class CassandraConfigDAO implements AutoCloseable {
                 String backend = ApplicationProperties.get().getString(
                         ApplicationProperties.GRAPHDB_BACKEND_CONF, ApplicationProperties.DEFAULT_GRAPHDB_BACKEND);
                 if (ApplicationProperties.GRAPHDB_BACKEND_CASSANDRA.equalsIgnoreCase(backend)) {
-                    sharedSession = CassandraSessionProvider.getSharedSession(
-                            config.getHostname(), config.getCassandraPort(), config.getDatacenter());
+                    sharedSession = CassandraSessionProvider.getSharedSession(hostname, port, datacenter);
                     LOG.info("CassandraConfigDAO: Reusing shared Cassandra session from CassandraSessionProvider");
                 }
             } catch (Exception e) {
@@ -168,15 +191,15 @@ public class CassandraConfigDAO implements AutoCloseable {
                         .build();
 
                 session = CqlSession.builder()
-                        .addContactPoint(new InetSocketAddress(config.getHostname(), config.getCassandraPort()))
+                        .addContactPoint(new InetSocketAddress(hostname, port))
                         .withConfigLoader(configLoader)
-                        .withLocalDatacenter(config.getDatacenter())
+                        .withLocalDatacenter(datacenter)
                         .build();
                 ownsSession = true;
             }
 
             // Initialize schema
-            initializeSchema(config.getReplicationFactor());
+            initializeSchema(replicationFactor);
 
             // Prepare statements
             selectAllStmt = prepare(String.format(

@@ -54,7 +54,8 @@ class StaticConfigStoreTest {
 
         mockedCassandraDAO = mockStatic(CassandraConfigDAO.class);
         mockedCassandraDAO.when(CassandraConfigDAO::getInstance).thenReturn(mockDAO);
-        mockedCassandraDAO.when(() -> CassandraConfigDAO.initialize(any())).thenAnswer(inv -> null);
+        mockedCassandraDAO.when(() -> CassandraConfigDAO.initialize(any(StaticConfigStoreConfig.class))).thenAnswer(inv -> null);
+        mockedCassandraDAO.when(() -> CassandraConfigDAO.initialize(any(DynamicConfigStoreConfig.class))).thenAnswer(inv -> null);
         mockedCassandraDAO.when(CassandraConfigDAO::isInitialized).thenReturn(true);
     }
 

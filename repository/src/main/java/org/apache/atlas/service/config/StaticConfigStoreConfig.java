@@ -18,7 +18,7 @@ import org.springframework.stereotype.Component;
  * (hostname, port, keyspace, table, datacenter, consistency level).
  */
 @Component
-public class StaticConfigStoreConfig implements CassandraConnectionConfig {
+public class StaticConfigStoreConfig {
     private static final Logger LOG = LoggerFactory.getLogger(StaticConfigStoreConfig.class);
 
     // Static config store specific properties

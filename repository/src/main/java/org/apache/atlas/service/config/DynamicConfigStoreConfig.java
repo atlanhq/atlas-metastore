@@ -25,7 +25,7 @@ import org.springframework.stereotype.Component;
  * 2. Set enabled=true, activated=true: Switches reads to use Cassandra instead of Redis
  */
 @Component
-public class DynamicConfigStoreConfig implements CassandraConnectionConfig {
+public class DynamicConfigStoreConfig {
     private static final Logger LOG = LoggerFactory.getLogger(DynamicConfigStoreConfig.class);
 
     // Property keys
