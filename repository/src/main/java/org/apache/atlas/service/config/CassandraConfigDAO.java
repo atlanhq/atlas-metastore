@@ -87,7 +87,7 @@ public class CassandraConfigDAO implements AutoCloseable {
      * @param config the configuration
      * @throws AtlasBaseException if initialization fails
      */
-    public static synchronized void initialize(DynamicConfigStoreConfig config) throws AtlasBaseException {
+    public static synchronized void initialize(CassandraConnectionConfig config) throws AtlasBaseException {
         if (initialized) {
             LOG.debug("CassandraConfigDAO already initialized");
             return;
@@ -128,7 +128,7 @@ public class CassandraConfigDAO implements AutoCloseable {
         return initialized;
     }
 
-    private CassandraConfigDAO(DynamicConfigStoreConfig config) throws AtlasBaseException {
+    private CassandraConfigDAO(CassandraConnectionConfig config) throws AtlasBaseException {
         this.keyspace = config.getKeyspace();
         this.table = config.getTable();
         this.appName = config.getAppName();

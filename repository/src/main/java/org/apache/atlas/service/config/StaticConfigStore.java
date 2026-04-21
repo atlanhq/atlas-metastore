@@ -6,7 +6,6 @@ import org.apache.atlas.service.config.DynamicConfigCacheStore.ConfigEntry;
 import org.apache.commons.configuration.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
@@ -22,13 +21,10 @@ import java.util.Map;
  * No cache layer, no background refresh, no runtime updates.
  * A restart is required to pick up changes seeded via the admin endpoint.
  *
- * <h3>Initialization order</h3>
- * <pre>
- * 1. DynamicConfigStore @PostConstruct  → CassandraConfigDAO.initialize()
- * 2. StaticConfigStore  @PostConstruct  → reads Cassandra partition "atlas_static"
- * 3. AtlasGraphProvider.get()           → calls AtlasRepositoryConfiguration.getGraphDatabaseImpl()
- *                                         which reads StaticConfigStore.getGraphBackend()
- * </pre>
+ * <h3>Initialization</h3>
+ * Self-contained — initializes CassandraConfigDAO itself if not already initialized
+ * (safe to call from both DynamicConfigStore and StaticConfigStore; the first caller wins,
+ * subsequent calls are no-ops).
  *
  * <h3>Resolution strategy (per key)</h3>
  * <ol>
@@ -36,11 +32,8 @@ import java.util.Map;
  *   <li>Cassandra reachable, no row         → fallback to atlas-application.properties</li>
  *   <li>Cassandra UNREACHABLE (after retry) → KILL PROCESS (System.exit)</li>
  * </ol>
- *
- * Depends on DynamicConfigStore to ensure CassandraConfigDAO is initialized first.
  */
 @Component("staticConfigStore")
-@DependsOn("dynamicConfigStore")
 public class StaticConfigStore {
     private static final Logger LOG = LoggerFactory.getLogger(StaticConfigStore.class);
 
@@ -71,6 +64,9 @@ public class StaticConfigStore {
         long startTime = System.currentTimeMillis();
 
         try {
+            // Ensure CassandraConfigDAO is initialized (no-op if already done by DynamicConfigStore).
+            CassandraConfigDAO.initialize(config);
+
             // Read all configs for the static partition from Cassandra.
             // CassandraConfigDAO retry logic handles transient failures (3 retries with backoff).
             // If still fails after retries -> AtlasBaseException is thrown -> process KILLED.
