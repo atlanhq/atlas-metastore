@@ -974,7 +974,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
         lifecycle.put("name", ILM_POLICY_NAME);
         lifecycle.put("rollover_alias", WRITE_ALIAS);
         indexSettings.set("lifecycle", lifecycle);
-        indexSettings.put("number_of_shards", 4);
+        indexSettings.put("number_of_shards", 1);
         indexSettings.put("number_of_replicas", 1);
         indexSettings.put("refresh_interval", "30s");
         HttpEntity entity = new NStringEntity(rootObj.toString(), ContentType.APPLICATION_JSON);
@@ -1175,7 +1175,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
         ObjectNode settings      = template.putObject("settings");
         ObjectNode indexSettings  = settings.putObject("index");
-        indexSettings.put("number_of_shards", 4);
+        indexSettings.put("number_of_shards", 1);
         indexSettings.put("number_of_replicas", 1);
         indexSettings.put("refresh_interval", "30s");
         indexSettings.putObject("store").put("type", "niofs");
