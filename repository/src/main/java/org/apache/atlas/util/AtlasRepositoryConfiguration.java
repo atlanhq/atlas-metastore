@@ -24,6 +24,7 @@ import org.apache.atlas.repository.audit.EntityAuditRepository;
 import org.apache.atlas.repository.graphdb.GraphDatabase;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerV1;
 import org.apache.atlas.repository.store.graph.v1.SoftDeleteHandlerV1;
+import org.apache.atlas.service.config.StaticConfigStore;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
@@ -153,9 +154,24 @@ public class AtlasRepositoryConfiguration {
     public static Class<? extends GraphDatabase> getGraphDatabaseImpl() {
         try {
             final Class<? extends GraphDatabase> ret;
-            Configuration                        config            = ApplicationProperties.get();
-            String                               graphDatabaseImpl = config.getString(ApplicationProperties.GRAPHDB_BACKEND_CONF);
 
+            // 1. Read from StaticConfigStore (loaded once at startup from Cassandra)
+            String graphDatabaseImpl = null;
+            if (StaticConfigStore.isReady()) {
+                graphDatabaseImpl = StaticConfigStore.getGraphBackend();
+                if (StringUtils.isNotBlank(graphDatabaseImpl)) {
+                    LOG.info("Graph backend resolved from StaticConfigStore: {}", graphDatabaseImpl);
+                }
+            }
+
+            // 2. Fallback to ApplicationProperties (if StaticConfigStore disabled/not ready/no value)
+            if (StringUtils.isBlank(graphDatabaseImpl)) {
+                Configuration config = ApplicationProperties.get();
+                graphDatabaseImpl = config.getString(ApplicationProperties.GRAPHDB_BACKEND_CONF);
+                LOG.info("Graph backend resolved from ApplicationProperties: {}", graphDatabaseImpl);
+            }
+
+            // 3. Resolve implementation class
             if (StringUtils.equals(graphDatabaseImpl, ApplicationProperties.GRAPHDB_BACKEND_CASSANDRA)) {
                 ret = ApplicationProperties.getClass(CASSANDRA_GRAPH_DATABASE_IMPLEMENTATION_CLASS, GraphDatabase.class);
             } else if (StringUtils.equals(graphDatabaseImpl, ApplicationProperties.GRAPHDB_BACKEND_JANUS)) {

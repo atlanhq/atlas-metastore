@@ -250,6 +250,60 @@ public class CassandraConfigDAO implements AutoCloseable {
     }
 
     /**
+     * Get all configs for a specific app_name partition.
+     * Used by StaticConfigStore to read from a different partition (e.g., "atlas_static").
+     *
+     * @param appName the partition key (app_name)
+     * @return map of config key to config entry
+     * @throws AtlasBaseException if query fails
+     */
+    public Map<String, DynamicConfigCacheStore.ConfigEntry> getAllConfigsForApp(String appName) throws AtlasBaseException {
+        Map<String, DynamicConfigCacheStore.ConfigEntry> configs = new HashMap<>();
+        try {
+            BoundStatement bound = selectAllStmt.bind(appName);
+            ResultSet rs = executeWithRetry(bound);
+
+            for (Row row : rs) {
+                String key = row.getString("config_key");
+                String value = row.getString("config_value");
+                String updatedBy = row.getString("updated_by");
+                Instant lastUpdated = row.getInstant("last_updated");
+
+                configs.put(key, new DynamicConfigCacheStore.ConfigEntry(value, updatedBy, lastUpdated));
+            }
+
+            LOG.debug("Retrieved {} configs from Cassandra for app_name: {}", configs.size(), appName);
+            return configs;
+
+        } catch (Exception e) {
+            LOG.error("Error fetching all configs for app_name: {}", appName, e);
+            throw new AtlasBaseException("Error fetching all configs for app_name: " + appName, e);
+        }
+    }
+
+    /**
+     * Upsert a config value for a specific app_name partition.
+     * Used by StaticConfigStore admin endpoint to seed values into the "atlas_static" partition.
+     *
+     * @param appName the partition key (app_name)
+     * @param key the config key
+     * @param value the config value
+     * @param updatedBy who is making the update
+     * @throws AtlasBaseException if update fails
+     */
+    public void putConfigForApp(String appName, String key, String value, String updatedBy) throws AtlasBaseException {
+        try {
+            BoundStatement bound = upsertStmt.bind(appName, key, value, updatedBy, Instant.now());
+            executeWithRetry(bound);
+            LOG.info("Config updated for app_name: {} - key: {}, value: {}, updatedBy: {}", appName, key, value, updatedBy);
+
+        } catch (Exception e) {
+            LOG.error("Error updating config for app_name: {} - key: {}, value: {}", appName, key, value, e);
+            throw new AtlasBaseException("Error updating config for app_name: " + appName + ", key: " + key, e);
+        }
+    }
+
+    /**
      * Get all configs for the application.
      * @return map of config key to config entry
      * @throws AtlasBaseException if query fails
