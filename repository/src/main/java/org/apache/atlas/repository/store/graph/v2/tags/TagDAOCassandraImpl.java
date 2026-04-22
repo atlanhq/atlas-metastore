@@ -64,6 +64,8 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
     private static final Duration CONNECTION_TIMEOUT = Duration.ofSeconds(5);
     //private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(120);
     private static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(30);
+    private static final Duration HEALTH_CHECK_REQUEST_TIMEOUT = Duration.ofSeconds(3);
+    private static final Duration HEALTH_CHECK_CONNECT_TIMEOUT = Duration.ofSeconds(2);
     public static final String DEFAULT_HOST = "localhost";
     public static final String DATACENTER = "datacenter1";
 
@@ -93,6 +95,7 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
 
     private final CqlSession cassSession;
     private final boolean ownsSession; // false if using shared session from CassandraSessionProvider
+    private final CqlSession healthCheckSession; // dedicated session with tight timeouts, isolated from the request path
 
     // Prepared Statements for 'tags_by_id' table
     private final PreparedStatement findAllTagsForAssetStmt;
@@ -159,6 +162,24 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
                 ownsSession = true;
             }
 
+            // Dedicated health-check session: isolated from the request path so that
+            // pool exhaustion on the main session does not produce false health failures,
+            // and short timeouts ensure the health endpoint fails fast when Cassandra is down.
+            DriverConfigLoader healthCheckConfigLoader = DriverConfigLoader.programmaticBuilder()
+                    .withDuration(DefaultDriverOption.REQUEST_TIMEOUT, HEALTH_CHECK_REQUEST_TIMEOUT)
+                    .withDuration(DefaultDriverOption.CONNECTION_INIT_QUERY_TIMEOUT, HEALTH_CHECK_CONNECT_TIMEOUT)
+                    .withDuration(DefaultDriverOption.CONNECTION_CONNECT_TIMEOUT, HEALTH_CHECK_CONNECT_TIMEOUT)
+                    .withDuration(DefaultDriverOption.CONTROL_CONNECTION_TIMEOUT, HEALTH_CHECK_CONNECT_TIMEOUT)
+                    .withInt(DefaultDriverOption.CONNECTION_POOL_LOCAL_SIZE, 1)
+                    .withInt(DefaultDriverOption.CONNECTION_POOL_REMOTE_SIZE, 1)
+                    .build();
+            healthCheckSession = CqlSession.builder()
+                    .addContactPoint(new InetSocketAddress(hostname, CASSANDRA_PORT))
+                    .withConfigLoader(healthCheckConfigLoader)
+                    .withLocalDatacenter(DATACENTER)
+                    .build();
+            LOG.info("TagDAO: Dedicated health-check Cassandra session created");
+
             initializeSchema(replicationConfig);
 
             // === Statements for 'tags_by_id' table ===
@@ -208,8 +229,15 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
             findTagNamesForAssetStmt = prepare(String.format(
                     "SELECT tag_type_name, is_propagated, is_deleted FROM %s.%s WHERE bucket = ? AND id = ?", KEYSPACE, EFFECTIVE_TAGS_TABLE_NAME));
 
-            // === Health check statement ===
-            healthCheckStmt = prepare("SELECT release_version FROM system.local");
+            // === Health check statement (prepared on the dedicated health-check session) ===
+            healthCheckStmt = healthCheckSession.prepare(
+                    SimpleStatement.builder("SELECT release_version FROM system.local")
+                            .setConsistencyLevel(DefaultConsistencyLevel.LOCAL_ONE)
+                            .build());
+
+            // Configurable async read batch size for tag denorm flush
+            this.asyncReadBatchSize = ApplicationProperties.get().getInt(ASYNC_READ_BATCH_SIZE_PROPERTY, DEFAULT_ASYNC_READ_BATCH_SIZE);
+            LOG.info("TagDAO initialized with asyncReadBatchSize={}", asyncReadBatchSize);
 
         } catch (Exception e) {
             LOG.error("Failed to initialize TagDAO", e);
@@ -470,6 +498,94 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }
+    }
+
+    private static final int DEFAULT_ASYNC_READ_BATCH_SIZE = 30;
+    private static final String ASYNC_READ_BATCH_SIZE_PROPERTY = "atlas.tag.denorm.async.read.batch.size";
+    private final int asyncReadBatchSize;
+
+    @Override
+    public Map<String, List<Tag>> getAllTagsByVertexIds(Collection<String> vertexIds) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getAllTagsByVertexIds");
+        try {
+            if (vertexIds == null || vertexIds.isEmpty()) {
+                return Collections.emptyMap();
+            }
+
+            Map<String, List<Tag>> result = new HashMap<>();
+            List<String> failedVertexIds = new ArrayList<>();
+            List<String> vertexIdList = new ArrayList<>(vertexIds);
+
+            // Phase 1: Fast async reads in sub-batches
+            for (int i = 0; i < vertexIdList.size(); i += asyncReadBatchSize) {
+                List<String> batch = vertexIdList.subList(i, Math.min(i + asyncReadBatchSize, vertexIdList.size()));
+
+                Map<String, CompletionStage<AsyncResultSet>> futures = new LinkedHashMap<>();
+                for (String vertexId : batch) {
+                    int bucket = calculateBucket(vertexId);
+                    BoundStatement bound = findAllTagDetailsForAssetStmt.bind(bucket, vertexId);
+                    futures.put(vertexId, cassSession.executeAsync(bound));
+                }
+
+                for (Map.Entry<String, CompletionStage<AsyncResultSet>> entry : futures.entrySet()) {
+                    String vertexId = entry.getKey();
+                    try {
+                        AsyncResultSet asyncRs = entry.getValue().toCompletableFuture().join();
+                        List<Tag> tags = asyncResultSetToTags(vertexId, asyncRs);
+                        result.put(vertexId, tags);
+                    } catch (Exception e) {
+                        LOG.warn("Async read failed for vertexId={}, will retry synchronously", vertexId, e);
+                        failedVertexIds.add(vertexId);
+                    }
+                }
+            }
+
+            // Phase 2: Retry failed reads synchronously (uses executeWithRetry — has backoff)
+            for (String vertexId : failedVertexIds) {
+                try {
+                    List<Tag> tags = getAllTagsByVertexId(vertexId);
+                    result.put(vertexId, tags);
+                    LOG.info("Sync retry succeeded for vertexId={}", vertexId);
+                } catch (Exception e) {
+                    LOG.warn("Sync retry also failed for vertexId={}, skipping (caller will DLQ)", vertexId, e);
+                }
+            }
+
+            return result;
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
+        }
+    }
+
+    private static List<Tag> asyncResultSetToTags(String vertexId, AsyncResultSet asyncRs) {
+        List<Tag> tags = new ArrayList<>();
+        AsyncResultSet currentPage = asyncRs;
+        while (currentPage != null) {
+            for (Row row : currentPage.currentPage()) {
+                if (row.getBoolean("is_deleted")) {
+                    continue;
+                }
+                Tag tag = new Tag();
+                tag.setVertexId(vertexId);
+                tag.setTagTypeName(row.getString("tag_type_name"));
+                tag.setPropagated(row.getBoolean("is_propagated"));
+                tag.setSourceVertexId(row.getString("source_id"));
+                try {
+                    tag.setTagMetaJson(objectMapper.readValue(row.getString("tag_meta_json"), new TypeReference<>() {
+                    }));
+                } catch (JsonProcessingException e) {
+                    LOG.error("Error parsing tag_meta_json in getAllTagsByVertexIds for vertexId: {}", vertexId, e);
+                    continue;
+                }
+                tags.add(tag);
+            }
+            if (currentPage.hasMorePages()) {
+                currentPage = currentPage.fetchNextPage().toCompletableFuture().join();
+            } else {
+                currentPage = null;
+            }
+        }
+        return tags;
     }
 
     @Override
@@ -917,8 +1033,8 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
         try {
             Instant start = Instant.now();
             
-            // Execute a lightweight query against system.local
-            ResultSet rs = cassSession.execute(healthCheckStmt.bind());
+            // Execute a lightweight query against system.local via the dedicated health-check session
+            ResultSet rs = healthCheckSession.execute(healthCheckStmt.bind());
             
             // Verify we get at least one row back
             boolean hasResults = rs.iterator().hasNext();
@@ -947,9 +1063,13 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
 
     @Override
     public void close() {
-        // Only close the session if we own it (not shared from CassandraSessionProvider)
+        // Only close the main session if we own it (not shared from CassandraSessionProvider)
         if (ownsSession && cassSession != null && !cassSession.isClosed()) {
             cassSession.close();
+        }
+        // Health-check session is always owned by this instance
+        if (healthCheckSession != null && !healthCheckSession.isClosed()) {
+            healthCheckSession.close();
         }
     }
 }
