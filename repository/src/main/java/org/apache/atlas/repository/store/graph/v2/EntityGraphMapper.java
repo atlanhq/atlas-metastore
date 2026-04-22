@@ -66,6 +66,7 @@ import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
 import org.apache.atlas.repository.store.graph.v2.tasks.ClassificationTask;
 import org.apache.atlas.repository.store.graph.v2.utils.TagAttributeMapper;
+import org.apache.atlas.repository.tagoutbox.TagOutboxSink;
 import org.apache.atlas.repository.util.TagDeNormAttributesUtil;
 import org.apache.atlas.service.config.ConfigKey;
 import org.apache.atlas.service.config.DynamicConfigStore;
@@ -6237,7 +6238,7 @@ public class EntityGraphMapper {
             }
             if (CollectionUtils.isNotEmpty(cassandraFailedVertexIds)) {
                 LOG.warn("Cassandra read failed for {} vertices, enqueueing to tag outbox", cassandraFailedVertexIds.size());
-                org.apache.atlas.repository.tagoutbox.TagOutboxSink.enqueue(
+                TagOutboxSink.enqueue(
                         toGuids(cassandraFailedVertexIds, snapshotMap));
                 RequestContext.get().addTagDenormEsFailureCount(cassandraFailedVertexIds.size());
                 incrementCounter(tagDenormEsFlushFailure, cassandraFailedVertexIds.size());
@@ -6268,7 +6269,7 @@ public class EntityGraphMapper {
                 // Enqueue partially failed GUIDs into the tag-outbox. The relay replays
                 // via entityStore.repairClassificationMappingsV2 + executeESOperations,
                 // mirroring TagDenormDLQReplayService's replay path exactly.
-                org.apache.atlas.repository.tagoutbox.TagOutboxSink.enqueue(
+                TagOutboxSink.enqueue(
                         toGuids(result.getFailedVertexIds(), snapshotMap));
                 emitEsFlushFailureMetric("es_write_partial_failure", "enqueued", null, result.getFailedVertexIds().size());
                 updateTaskEsStatus(AtlasTask.EsStatus.PARTIAL_FAILURE,
@@ -6286,7 +6287,7 @@ public class EntityGraphMapper {
                     snapshotMap.size(), e.getClass().getSimpleName(), e);
             boolean enqueueSucceeded = false;
             try {
-                org.apache.atlas.repository.tagoutbox.TagOutboxSink.enqueue(
+                TagOutboxSink.enqueue(
                         toGuids(snapshotMap.keySet(), snapshotMap));
                 enqueueSucceeded = true;
             } catch (Exception outboxError) {
@@ -6312,10 +6313,9 @@ public class EntityGraphMapper {
      * filtered out — the outbox is keyed on entity_guid and can't repair
      * vertices whose GUID is unknown.
      */
-    private static java.util.Set<String> toGuids(java.util.Collection<String> vertexIds,
-                                                  Map<String, String> vertexIdToGuid) {
-        if (vertexIds == null || vertexIds.isEmpty()) return java.util.Collections.emptySet();
-        java.util.Set<String> guids = new java.util.LinkedHashSet<>(vertexIds.size());
+    private static Set<String> toGuids(Collection<String> vertexIds, Map<String, String> vertexIdToGuid) {
+        if (vertexIds == null || vertexIds.isEmpty()) return Collections.emptySet();
+        Set<String> guids = new LinkedHashSet<>(vertexIds.size());
         for (String vid : vertexIds) {
             String guid = vertexIdToGuid.get(vid);
             if (guid != null && !guid.isEmpty()) guids.add(guid);

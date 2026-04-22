@@ -58,7 +58,6 @@ public final class TagOutbox implements Outbox<EntityGuidRef> {
     private final PreparedStatement selectByStatusStmt;
     private final PreparedStatement countByStatusStmt;
 
-
     public TagOutbox(CqlSession session, TagOutboxConfig config) {
         this.session = Objects.requireNonNull(session, "session");
         this.config  = Objects.requireNonNull(config, "config");
