@@ -6219,7 +6219,7 @@ public class EntityGraphMapper {
             return ESConnector.TagDenormESWriteResult.allSuccess(0);
         }
 
-        // Snapshot the map before clearing (needed for DLQ GUID mapping on failure)
+        // Snapshot the map before clearing (needed for vertex→GUID lookup on failure paths).
         Map<String, String> snapshotMap = new HashMap<>(vertexIdToGuidMap);
 
         try {
@@ -6227,7 +6227,8 @@ public class EntityGraphMapper {
             // Returns only successfully read vertices; failed reads are omitted from the map
             Map<String, List<Tag>> allTagsByVertex = tagDAO.getAllTagsByVertexIds(snapshotMap.keySet());
 
-            // DLQ vertices whose Cassandra read failed (missing from result map)
+            // Vertices whose Cassandra read failed (missing from result map) get enqueued
+            // into the tag-outbox for background repair via TagOutboxConsumer.
             List<String> cassandraFailedVertexIds = new ArrayList<>();
             for (String vertexId : snapshotMap.keySet()) {
                 if (!allTagsByVertex.containsKey(vertexId)) {
@@ -6235,13 +6236,14 @@ public class EntityGraphMapper {
                 }
             }
             if (CollectionUtils.isNotEmpty(cassandraFailedVertexIds)) {
-                LOG.warn("Cassandra read failed for {} vertices, sending to DLQ", cassandraFailedVertexIds.size());
-                tagDenormDLQProducer.emitFailedVertices(cassandraFailedVertexIds, snapshotMap);
+                LOG.warn("Cassandra read failed for {} vertices, enqueueing to tag outbox", cassandraFailedVertexIds.size());
+                org.apache.atlas.repository.tagoutbox.TagOutboxSink.enqueue(
+                        toGuids(cassandraFailedVertexIds, snapshotMap));
                 RequestContext.get().addTagDenormEsFailureCount(cassandraFailedVertexIds.size());
                 incrementCounter(tagDenormEsFlushFailure, cassandraFailedVertexIds.size());
-                emitEsFlushFailureMetric("cassandra_read_failed", "emitted", null, cassandraFailedVertexIds.size());
+                emitEsFlushFailureMetric("cassandra_read_failed", "enqueued", null, cassandraFailedVertexIds.size());
                 updateTaskEsStatus(AtlasTask.EsStatus.PARTIAL_FAILURE,
-                        "Events added to DLQ: Cassandra read failed for " + cassandraFailedVertexIds.size() + " vertices");
+                        "Enqueued to tag outbox: Cassandra read failed for " + cassandraFailedVertexIds.size() + " vertices");
             }
 
             // Compute denorm only for successfully read vertices
@@ -6263,41 +6265,62 @@ public class EntityGraphMapper {
             if (result.hasFailures()) {
                 RequestContext.get().addTagDenormEsFailureCount(result.getFailedVertexIds().size());
                 incrementCounter(tagDenormEsFlushFailure, result.getFailedVertexIds().size());
-                // Emit partially failed vertex IDs + GUIDs to DLQ for later repair
-                tagDenormDLQProducer.emitFailedVertices(result.getFailedVertexIds(), snapshotMap);
-                emitEsFlushFailureMetric("es_write_partial_failure", "emitted", null, result.getFailedVertexIds().size());
+                // Enqueue partially failed GUIDs into the tag-outbox. The relay replays
+                // via entityStore.repairClassificationMappingsV2 + executeESOperations,
+                // mirroring TagDenormDLQReplayService's replay path exactly.
+                org.apache.atlas.repository.tagoutbox.TagOutboxSink.enqueue(
+                        toGuids(result.getFailedVertexIds(), snapshotMap));
+                emitEsFlushFailureMetric("es_write_partial_failure", "enqueued", null, result.getFailedVertexIds().size());
                 updateTaskEsStatus(AtlasTask.EsStatus.PARTIAL_FAILURE,
-                        "Events added to DLQ: ES write failed for " + result.getFailedVertexIds().size() + " vertices");
+                        "Enqueued to tag outbox: ES write failed for " + result.getFailedVertexIds().size() + " vertices");
             } else {
                 updateTaskEsStatus(AtlasTask.EsStatus.COMPLETE, null);
             }
 
             return result;
         } catch (Exception e) {
-            // Total failure — no ES write succeeded in this flush.
-            // Cassandra read failure: no ES write attempted, all vertices need repair.
-            // Denorm computation failure: no ES write attempted, all vertices need repair.
-            // DLQ repair is idempotent, so emitting all vertices is safe even if some reads succeeded.
-            LOG.error("flushTagDenormToES failed for {} vertices ({}), emitting all to DLQ",
+            // Total failure — no ES write succeeded in this flush. Enqueue every vertex
+            // for background repair via the tag outbox. Replay is idempotent, so
+            // enqueueing all vertices is safe even if some reads succeeded above.
+            LOG.error("flushTagDenormToES failed for {} vertices ({}), enqueueing all to tag outbox",
                     snapshotMap.size(), e.getClass().getSimpleName(), e);
-            boolean dlqEmitSucceeded = false;
+            boolean enqueueSucceeded = false;
             try {
-                tagDenormDLQProducer.emitFailedVertices(new ArrayList<>(snapshotMap.keySet()), snapshotMap);
-                dlqEmitSucceeded = true;
-            } catch (Exception dlqError) {
-                LOG.error("Failed to emit to DLQ as well. Vertices needing repair: {}", snapshotMap.keySet(), dlqError);
+                org.apache.atlas.repository.tagoutbox.TagOutboxSink.enqueue(
+                        toGuids(snapshotMap.keySet(), snapshotMap));
+                enqueueSucceeded = true;
+            } catch (Exception outboxError) {
+                LOG.error("Failed to enqueue to tag outbox as well. Vertices needing repair: {}",
+                        snapshotMap.keySet(), outboxError);
             }
             RequestContext.get().addTagDenormEsFailureCount(snapshotMap.size());
             incrementCounter(tagDenormEsFlushFailure, snapshotMap.size());
-            emitEsFlushFailureMetric("total_failure", dlqEmitSucceeded ? "emitted" : "lost",
+            emitEsFlushFailureMetric("total_failure", enqueueSucceeded ? "enqueued" : "lost",
                     e.getClass().getSimpleName(), snapshotMap.size());
             updateTaskEsStatus(AtlasTask.EsStatus.FAILED,
-                    (dlqEmitSucceeded ? "Events added to DLQ: " : "DLQ emit also failed: ") + e.getMessage());
+                    (enqueueSucceeded ? "Enqueued to tag outbox: " : "Tag outbox enqueue also failed: ") + e.getMessage());
             return ESConnector.TagDenormESWriteResult.allFailed(snapshotMap.keySet());
         } finally {
-            // Always clear the buffer, even on exception (idempotent — DLQ handles recovery)
+            // Always clear the buffer, even on exception (idempotent — outbox handles recovery)
             RequestContext.get().clearVerticesNeedingTagDenorm();
         }
+    }
+
+    /**
+     * Resolve a collection of vertex IDs to their GUIDs using the
+     * vertexId→GUID snapshot captured at flush start. Null/empty GUIDs are
+     * filtered out — the outbox is keyed on entity_guid and can't repair
+     * vertices whose GUID is unknown.
+     */
+    private static java.util.Set<String> toGuids(java.util.Collection<String> vertexIds,
+                                                  Map<String, String> vertexIdToGuid) {
+        if (vertexIds == null || vertexIds.isEmpty()) return java.util.Collections.emptySet();
+        java.util.Set<String> guids = new java.util.LinkedHashSet<>(vertexIds.size());
+        for (String vid : vertexIds) {
+            String guid = vertexIdToGuid.get(vid);
+            if (guid != null && !guid.isEmpty()) guids.add(guid);
+        }
+        return guids;
     }
 
     /**
