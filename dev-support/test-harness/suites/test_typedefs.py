@@ -29,6 +29,7 @@ class TypeDefSuite:
         self.entity_type_name = unique_type_name("TestEntityType")
         self.bm_display_name = unique_type_name("TestBM")
         self.bm_server_name = None  # Set after creation
+        self.bm_bool_server_name = None  # Set after creation (MS-1101 test)
 
     # ---- GET existing types ----
 
@@ -316,6 +317,95 @@ class TypeDefSuite:
         resp2 = client.get(f"/types/typedef/guid/{type_guid}")
         assert_status(resp2, 200)
         assert_field_equals(resp2, "name", self.enum_name)
+
+    # ---- Boolean options tolerance (MS-1101) ----
+
+    @test("create_bm_with_boolean_options", tags=["typedef", "crud", "ms-1101"], order=26)
+    def test_create_bm_with_boolean_options(self, client, ctx):
+        """Verify that non-string primitives (booleans, numbers) in attribute-def
+        options are accepted and coerced to strings.  Before the MS-1101 fix the
+        server returned 400 Bad Request because Jackson could not deserialize
+        JSON booleans into Map<String, String>.
+        """
+        self.bm_bool_display_name = unique_type_name("TestBMBool")
+        payload = {
+            "businessMetadataDefs": [{
+                "displayName": self.bm_bool_display_name,
+                "description": "BM with boolean options (MS-1101)",
+                "options": {},
+                "attributeDefs": [{
+                    "name": "",
+                    "displayName": "richTextField",
+                    "typeName": "string",
+                    "isOptional": True,
+                    "cardinality": "SINGLE",
+                    "isUnique": False,
+                    "isIndexable": True,
+                    "options": {
+                        "applicableEntityTypes": "[\"Asset\"]",
+                        "showAsFeatured": True,
+                        "showInOverview": False,
+                        "multiValueSelect": False,
+                        "isRichText": True,
+                        "allowSearch": False,
+                        "allowFiltering": True,
+                        "maxStrLength": "100000000",
+                        "isEnum": False,
+                    },
+                }],
+            }]
+        }
+        ok, resp = create_typedef_verified(client, payload)
+        if not ok and resp.status_code in (500, 502, 503):
+            raise SkipTestError(
+                f"BM typedef with boolean options POST returned {resp.status_code} — "
+                f"server-side gateway timeout"
+            )
+        assert ok, (
+            f"BM typedef with boolean options creation failed: POST returned "
+            f"{resp.status_code} — this was the MS-1101 bug (booleans in options)"
+        )
+
+        # Extract server-generated name for cleanup
+        internal_name, _ = extract_bm_names_from_response(resp, self.bm_bool_display_name)
+        if internal_name:
+            self.bm_bool_server_name = internal_name
+            ctx.set("test_bm_bool_name", internal_name)
+        elif resp.status_code == 409:
+            discovered = _discover_bm_by_display_name(client, self.bm_bool_display_name)
+            if discovered:
+                self.bm_bool_server_name = discovered["internal_name"]
+                ctx.set("test_bm_bool_name", self.bm_bool_server_name)
+
+        if resp.status_code == 200:
+            body = resp.json()
+            bm_defs = body.get("businessMetadataDefs", [])
+            assert len(bm_defs) > 0, "Expected businessMetadataDefs in response"
+            # Verify options were stored as strings
+            attr_defs = bm_defs[0].get("attributeDefs", [])
+            assert len(attr_defs) > 0, "Expected at least one attributeDef"
+            opts = attr_defs[0].get("options", {})
+            assert opts.get("isRichText") == "true", (
+                f"Expected isRichText='true' (string), got '{opts.get('isRichText')}'"
+            )
+            assert opts.get("showAsFeatured") == "true", (
+                f"Expected showAsFeatured='true' (string), got '{opts.get('showAsFeatured')}'"
+            )
+            assert opts.get("allowFiltering") == "true", (
+                f"Expected allowFiltering='true' (string), got '{opts.get('allowFiltering')}'"
+            )
+            assert opts.get("isEnum") == "false", (
+                f"Expected isEnum='false' (string), got '{opts.get('isEnum')}'"
+            )
+
+    @test("delete_bm_bool_def", tags=["typedef", "crud", "ms-1101"], order=95,
+          depends_on=["create_bm_with_boolean_options"])
+    def test_delete_bm_bool_def(self, client, ctx):
+        delete_name = getattr(self, "bm_bool_server_name", None) or ctx.get("test_bm_bool_name")
+        if not delete_name:
+            raise SkipTestError("BM bool server name not available")
+        resp = client.delete(f"/types/typedef/name/{delete_name}")
+        assert_status_in(resp, [200, 204, 404])
 
     # ---- DELETE types (cleanup) ----
 
