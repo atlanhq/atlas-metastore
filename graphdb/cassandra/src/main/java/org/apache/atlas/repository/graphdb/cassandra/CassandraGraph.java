@@ -1,7 +1,7 @@
 package org.apache.atlas.repository.graphdb.cassandra;
 
-// CassandraGraph: direct Cassandra + ES graph backend implementation
 import com.datastax.oss.driver.api.core.CqlSession;
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.ESAliasRequestBuilder;
@@ -31,6 +31,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
+// CassandraGraph: direct Cassandra + ES graph backend for Atlas
 public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge> {
 
     private static final Logger LOG = LoggerFactory.getLogger(CassandraGraph.class);
@@ -39,6 +40,9 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     private static final Set<String> VERIFIED_ES_INDEXES = ConcurrentHashMap.newKeySet();
 
     static final Set<String> EXCLUDE_ES_INDEXES_PREFIXING = new HashSet<>(Arrays.asList("search_logs"));
+
+    private static final int EDGE_PAGE_SIZE = AtlasConfiguration.CASSANDRA_EDGE_PAGE_SIZE.getInt();
+    private static final int EDGE_LABEL_BATCH_THRESHOLD = AtlasConfiguration.CASSANDRA_EDGE_LABEL_BATCH_THRESHOLD.getInt();
 
     /**
      * Max vertices per LOGGED batch in commit(). Prevents exceeding Cassandra's
@@ -538,22 +542,62 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> getEdgesForVertex(String vertexId,
                                                                             AtlasEdgeDirection direction,
                                                                             String edgeLabel) {
-        // Check buffer for new edges first
+        // Snapshot buffered edges (small — typically 0-100)
         List<CassandraEdge> bufferedEdges = txBuffer.get().getEdgesForVertex(vertexId, direction, edgeLabel);
-        List<CassandraEdge> persistedEdges = edgeRepository.getEdgesForVertex(vertexId, direction, edgeLabel, this);
 
-        // Merge, avoiding duplicates
-        Map<String, CassandraEdge> merged = new LinkedHashMap<>();
-        for (CassandraEdge e : persistedEdges) {
-            if (!txBuffer.get().isEdgeRemoved(e.getIdString())) {
-                merged.put(e.getIdString(), e);
+        // Lazy paginated fetch from Cassandra — O(pageSize) memory instead of O(totalEdges)
+        Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> persistedEdges =
+                edgeRepository.getEdgesForVertexPaged(vertexId, direction, edgeLabel, this, EDGE_PAGE_SIZE);
+
+        // Lazy merge: yields buffered edges first, then streams persisted edges
+        // while filtering out duplicates (buffered overrides) and removed edges.
+        return (Iterable) new MergedEdgeIterable(bufferedEdges, persistedEdges, txBuffer.get());
+    }
+
+    /**
+     * Returns the configured threshold for switching from per-label CQL queries
+     * to a single partition scan with client-side label filtering.
+     */
+    int getEdgeLabelBatchThreshold() {
+        return EDGE_LABEL_BATCH_THRESHOLD;
+    }
+
+    /**
+     * Fetch edges for a vertex filtered by a set of labels, using a single partition scan
+     * with client-side label filtering instead of N per-label CQL queries.
+     *
+     * <p>Use when the number of requested labels exceeds the batch threshold.
+     * Memory usage is still O(pageSize + bufferSize).
+     *
+     * @param labelFilter set of labels to include
+     */
+    @SuppressWarnings("unchecked")
+    Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> getEdgesForVertexFiltered(
+            String vertexId, AtlasEdgeDirection direction, Set<String> labelFilter) {
+        // Snapshot buffered edges (all labels for this vertex/direction), then filter by label set
+        List<CassandraEdge> allBuffered = txBuffer.get().getEdgesForVertex(vertexId, direction, null);
+        List<CassandraEdge> bufferedEdges = new ArrayList<>();
+        for (CassandraEdge edge : allBuffered) {
+            if (labelFilter.contains(edge.getLabel())) {
+                bufferedEdges.add(edge);
             }
         }
-        for (CassandraEdge e : bufferedEdges) {
-            merged.put(e.getIdString(), e);
-        }
 
-        return (Iterable) new ArrayList<>(merged.values());
+        // Single partition scan with client-side label filter
+        Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> persistedEdges =
+                edgeRepository.getEdgesForVertexPagedWithFilter(
+                        vertexId, direction, labelFilter, this, EDGE_PAGE_SIZE);
+
+        return (Iterable) new MergedEdgeIterable(bufferedEdges, persistedEdges, txBuffer.get());
+    }
+
+    /**
+     * Discover distinct edge labels and their typeNames via label-skip-scan.
+     * Uses ~N tiny CQL queries (one per distinct label) instead of scanning all edges.
+     * Exposed for GraphHelper.retrieveEdgeLabelsAndTypeNameViaAtlasApi() optimization.
+     */
+    public Map<String, String> getDistinctEdgeLabelsWithTypeName(String vertexId, AtlasEdgeDirection direction) {
+        return edgeRepository.getDistinctEdgeLabelsWithTypeName(vertexId, direction);
     }
 
     /**
@@ -574,8 +618,9 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     long countBufferedEdgeAdjustment(String vertexId, AtlasEdgeDirection direction, String edgeLabel) {
         TransactionBuffer buffer = txBuffer.get();
 
-        // Count new buffered edges matching the criteria
-        List<CassandraEdge> bufferedNew = buffer.getEdgesForVertex(vertexId, direction, edgeLabel);
+        // Count only truly NEW buffered edges (not dirty). Dirty edges are already
+        // persisted in Cassandra and included in the CQL COUNT(*) result.
+        List<CassandraEdge> bufferedNew = buffer.getNewEdgesOnlyForVertex(vertexId, direction, edgeLabel);
         long newCount = bufferedNew.size();
 
         // Count removed edges matching the criteria (these are still in Cassandra's COUNT)

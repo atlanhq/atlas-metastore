@@ -1,11 +1,17 @@
 package org.apache.atlas.repository.graphdb.cassandra;
 
 import org.apache.atlas.repository.graphdb.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.stream.StreamSupport;
 
 public class CassandraVertex extends CassandraElement implements AtlasVertex<CassandraVertex, CassandraEdge> {
+
+    private static final Logger LOG = LoggerFactory.getLogger(CassandraVertex.class);
+
+    private static final int GET_IN_EDGES_WARN_THRESHOLD = 10_000;
 
     private String vertexLabel;
 
@@ -41,14 +47,22 @@ public class CassandraVertex extends CassandraElement implements AtlasVertex<Cas
             return getEdges(direction);
         }
 
-        List<AtlasEdge<CassandraVertex, CassandraEdge>> result = new ArrayList<>();
-        for (String label : edgeLabels) {
-            Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> edges = getEdges(direction, label);
-            for (AtlasEdge<CassandraVertex, CassandraEdge> edge : edges) {
-                result.add(edge);
-            }
+        if (edgeLabels.length == 1) {
+            return getEdges(direction, edgeLabels[0]);
         }
-        return result;
+
+        int threshold = graph.getEdgeLabelBatchThreshold();
+        if (edgeLabels.length > threshold) {
+            // Many labels: single partition scan + client-side filter is cheaper
+            // than N sequential CQL queries
+            Set<String> labelSet = new HashSet<>(Arrays.asList(edgeLabels));
+            return graph.getEdgesForVertexFiltered(this.id, direction, labelSet);
+        }
+
+        // Few labels: lazily chain per-label iterables (N per-label CQL queries).
+        // For a super vertex with millions of edges across many labels, this keeps
+        // memory at O(pageSize) instead of O(totalEdges).
+        return new ChainedEdgeIterable(edgeLabels, label -> getEdges(direction, label));
     }
 
     @Override
@@ -57,11 +71,21 @@ public class CassandraVertex extends CassandraElement implements AtlasVertex<Cas
                 ? new HashSet<>(Arrays.asList(edgeLabelsToExclude))
                 : Collections.emptySet();
 
+        // TODO(supervertex): getInEdges() materializes ALL in-edges into a HashSet.
+        //  For vertices with 1M+ in-edges this will OOM. The AtlasVertex interface returns Set<E>,
+        //  so fixing this requires an interface change to return Iterable<E> instead.
         Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> allInEdges = getEdges(AtlasEdgeDirection.IN);
         Set<CassandraEdge> result = new HashSet<>();
+        boolean warned = false;
         for (AtlasEdge<CassandraVertex, CassandraEdge> edge : allInEdges) {
             if (!excludeSet.contains(edge.getLabel())) {
                 result.add((CassandraEdge) edge);
+            }
+
+            if (!warned && result.size() >= GET_IN_EDGES_WARN_THRESHOLD) {
+                LOG.warn("getInEdges: vertex {} has materialized {} in-edges so far — possible super vertex",
+                         id, result.size());
+                warned = true;
             }
         }
         return result;
