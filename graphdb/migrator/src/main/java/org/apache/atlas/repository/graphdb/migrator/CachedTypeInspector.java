@@ -14,8 +14,9 @@ import org.janusgraph.graphdb.types.system.SystemTypeManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * A thread-safe, pre-loaded TypeInspector backed by a HashMap.
@@ -24,8 +25,9 @@ import java.util.Map;
  * All type definitions (PropertyKeys + EdgeLabels) are loaded once at startup
  * into a HashMap, eliminating per-relation Cassandra lookups during scanning.
  *
- * Thread safety: the HashMap is populated once during construction and never
- * modified afterwards. The backing tx stays open to keep type objects alive.
+ * Thread safety: uses ConcurrentHashMap. The bulk of entries are populated during
+ * construction; rare cache misses (JG internal types not returned by mgmt.getRelationTypes())
+ * are resolved via the backing tx and cached on first access.
  * Type metadata (multiplicity, sortKey, dataType, etc.) is force-loaded during
  * construction so all subsequent reads are pure in-memory.
  */
@@ -35,9 +37,10 @@ public class CachedTypeInspector implements TypeInspector, AutoCloseable {
 
     private final Map<Long, RelationType> typeCache;
     private final StandardJanusGraphTx backingTx;
+    private final AtomicLong cacheMissLogged = new AtomicLong(0);
 
     public CachedTypeInspector(StandardJanusGraph janusGraph) {
-        this.typeCache = new HashMap<>();
+        this.typeCache = new ConcurrentHashMap<>();
 
         // Open a read-only tx with a large vertex cache to hold all types.
         // This tx stays open for the lifetime of the migration to keep
@@ -120,7 +123,25 @@ public class CachedTypeInspector implements TypeInspector, AutoCloseable {
         if (IDManager.isSystemRelationTypeId(id)) {
             return (RelationType) SystemTypeManager.getSystemType(id);
         }
-        return typeCache.get(id);
+        RelationType cached = typeCache.get(id);
+        if (cached != null) {
+            return cached;
+        }
+        // Fallback: some JG internal types aren't returned by mgmt.getRelationTypes()
+        // but are referenced in schema vertex entries. Query the backing tx.
+        try {
+            RelationType fromTx = backingTx.getExistingRelationType(id);
+            if (fromTx != null) {
+                typeCache.put(id, fromTx);
+                if (cacheMissLogged.incrementAndGet() <= 10) {
+                    LOG.debug("CachedTypeInspector cache miss resolved via backing tx: id={}, name={}",
+                             id, fromTx.name());
+                }
+            }
+            return fromTx;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     @Override
