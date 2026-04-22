@@ -322,8 +322,16 @@ public class MigratorMain {
                 parallelEsEdgeIndexer.close();
             }
 
-            // Save source baseline for Phase 3 comparison
-            baselineCollector.saveBaseline(stateStore);
+            // Save source baseline for Phase 3 comparison — only if the collector
+            // actually recorded vertices. On a resume run where all ranges are COMPLETED,
+            // the scanner scans 0 vertices, so saving would overwrite the good baseline
+            // from the first run with zeros.
+            if (baselineCollector.getTotalVertices() > 0) {
+                baselineCollector.saveBaseline(stateStore);
+                LOG.info("Source baseline saved (vertices > 0)");
+            } else {
+                LOG.info("Skipping baseline save — no vertices scanned (resume run with all ranges complete?)");
+            }
             SourceBaselineCollector.BaselineSnapshot baseline = baselineCollector.buildSnapshot();
             LOG.info("Source baseline: vertices={}, edges={}, maxEdgeCount={}, types={}",
                      baseline.totalVertices, baseline.totalEdges, baseline.maxEdgeCount,
@@ -410,7 +418,7 @@ public class MigratorMain {
                 LOG.error("  Migration data is written but NOT safe for cutover.");
                 LOG.error("  Review the validation report above and fix issues before re-running.");
                 LOG.error("========================================");
-                System.exit(1);
+                System.exit(2);  // Exit 2 = validation failed (data migration succeeded, don't retry)
             }
 
             mixpanelReport.recordCompletion("success");
@@ -484,7 +492,7 @@ public class MigratorMain {
 
         if (!report.isOverallPassed()) {
             LOG.error("VALIDATION FAILED. Migration is NOT safe for cutover.");
-            System.exit(1);
+            System.exit(2);  // Exit 2 = validation failed (don't retry — investigate or re-run with --fresh)
         }
 
         LOG.info("========================================");

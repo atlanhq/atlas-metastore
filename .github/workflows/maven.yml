@@ -39,6 +39,7 @@ on:
       - ms-610-ranges-policy-cache
       - ms-901-hidelineage
       - ms-894-override-classification
+      - small-tenant-migrate-bug-fix
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
