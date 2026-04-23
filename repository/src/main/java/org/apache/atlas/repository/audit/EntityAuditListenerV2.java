@@ -106,8 +106,18 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
         return AUDIT_REPOSITORY_MAX_SIZE_DEFAULT;
     }
 
+    // MS-1017: shadow mode suppresses all entity_audits writes.
+    private boolean skipForShadowMode() {
+        if (AtlasConfiguration.SHADOW_MODE_ENABLED.getBoolean()) {
+            LOG.debug("Shadow mode: suppressed entity_audits write");
+            return true;
+        }
+        return false;
+    }
+
     @Override
     public void onEntitiesAdded(List<AtlasEntity> entities, boolean isImport) throws AtlasBaseException {
+        if (skipForShadowMode()) return;
         MetricRecorder metric = RequestContext.get().startMetricRecord("onEntitiesAdded");
 
         for (EntityAuditRepository auditRepository: auditRepositories) {
@@ -124,6 +134,7 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
 
     @Override
     public void onEntitiesUpdated(List<AtlasEntity> entities, boolean isImport) throws AtlasBaseException {
+        if (skipForShadowMode()) return;
         RequestContext                      reqContext    = RequestContext.get();
         MetricRecorder                      metric        = reqContext.startMetricRecord("onEntitiesUpdated");
         Collection<AtlasEntity>             updatedEntites;
@@ -178,6 +189,7 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
 
     @Override
     public void onEntitiesDeleted(List<AtlasEntity> entities, boolean isImport) throws AtlasBaseException {
+        if (skipForShadowMode()) return;
         MetricRecorder metric = RequestContext.get().startMetricRecord("onEntitiesDeleted");
 
         for (EntityAuditRepository auditRepository: auditRepositories) {
@@ -195,6 +207,7 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
 
     @Override
     public void onEntitiesPurged(List<AtlasEntity> entities) throws AtlasBaseException {
+        if (skipForShadowMode()) return;
         MetricRecorder metric = RequestContext.get().startMetricRecord("onEntitiesPurged");
 
         for (EntityAuditRepository auditRepository: auditRepositories) {
@@ -211,6 +224,7 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
 
     @Override
     public void onClassificationsAdded(AtlasEntity entity, List<AtlasClassification> classifications) throws AtlasBaseException {
+        if (skipForShadowMode()) return;
         if (CollectionUtils.isNotEmpty(classifications)) {
             MetricRecorder metric = RequestContext.get().startMetricRecord("onClassificationsAdded");
 
@@ -233,6 +247,7 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
 
     @Override
     public void onClassificationsAdded(List<AtlasEntity> entities, List<AtlasClassification> classifications, boolean forceInline) throws AtlasBaseException {
+        if (skipForShadowMode()) return;
         if (CollectionUtils.isNotEmpty(classifications)) {
             MetricRecorder metric = RequestContext.get().startMetricRecord("onClassificationsAddedBulk");
             FixedBufferList<EntityAuditEventV2> events = getAuditEventsList();
@@ -257,6 +272,7 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
 
     @Override
     public void onClassificationPropagationsAdded(List<AtlasEntity> entities, List<AtlasClassification> classifications, boolean forceInline) throws AtlasBaseException {
+        if (skipForShadowMode()) return;
         if (CollectionUtils.isNotEmpty(classifications)) {
             MetricRecorder metric = RequestContext.get().startMetricRecord("onClassificationPropagationsAdded");
             FixedBufferList<EntityAuditEventV2> events = getAuditEventsList();
@@ -277,6 +293,7 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
 
     @Override
     public void onClassificationsUpdated(AtlasEntity entity, List<AtlasClassification> classifications) throws AtlasBaseException {
+        if (skipForShadowMode()) return;
         if (CollectionUtils.isNotEmpty(classifications)) {
             MetricRecorder metric = RequestContext.get().startMetricRecord("onClassificationsUpdated");
 
@@ -320,6 +337,7 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
 
     @Override
     public void onClassificationsDeleted(AtlasEntity entity, List<AtlasClassification> classifications) throws AtlasBaseException {
+        if (skipForShadowMode()) return;
         if (CollectionUtils.isNotEmpty(classifications)) {
             MetricRecorder metric = RequestContext.get().startMetricRecord("onClassificationsDeleted");
 
@@ -355,6 +373,7 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
 
     @Override
     public void onClassificationsDeleted(List<AtlasEntity> entities, List<AtlasClassification> classifications) throws AtlasBaseException {
+        if (skipForShadowMode()) return;
         if (CollectionUtils.isNotEmpty(classifications) && CollectionUtils.isNotEmpty(entities)) {
             MetricRecorder metric = RequestContext.get().startMetricRecord("onClassificationsDeletedBulk");
             FixedBufferList<EntityAuditEventV2> events = getAuditEventsList();
@@ -379,6 +398,7 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
 
     @Override
     public void onTermAdded(AtlasGlossaryTerm term, List<AtlasRelatedObjectId> entities) throws AtlasBaseException {
+        if (skipForShadowMode()) return;
         if (term != null && CollectionUtils.isNotEmpty(entities)) {
             MetricRecorder metric = RequestContext.get().startMetricRecord("onTermAdded");
 
@@ -403,6 +423,7 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
 
     @Override
     public void onTermDeleted(AtlasGlossaryTerm term, List<AtlasRelatedObjectId> entities) throws AtlasBaseException {
+        if (skipForShadowMode()) return;
         if (term != null && CollectionUtils.isNotEmpty(entities)) {
             MetricRecorder metric = RequestContext.get().startMetricRecord("onTermDeleted");
 
@@ -426,6 +447,7 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
 
     @Override
     public void onLabelsAdded(AtlasEntity entity, Set<String> labels) throws AtlasBaseException {
+        if (skipForShadowMode()) return;
         if (CollectionUtils.isNotEmpty(labels)) {
             MetricRecorder metric = RequestContext.get().startMetricRecord("onLabelsAdded");
 
@@ -445,6 +467,7 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
 
     @Override
     public void onLabelsDeleted(AtlasEntity entity, Set<String> labels) throws AtlasBaseException {
+        if (skipForShadowMode()) return;
         if (CollectionUtils.isNotEmpty(labels)) {
             MetricRecorder metric = RequestContext.get().startMetricRecord("onLabelsDeleted");
 
@@ -492,6 +515,7 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
 
     @Override
     public void onBusinessAttributesUpdated(AtlasEntity entity, Map<String, Map<String, Object>> updatedBusinessAttributes) throws AtlasBaseException {
+        if (skipForShadowMode()) return;
         if (MapUtils.isNotEmpty(updatedBusinessAttributes)) {
             MetricRecorder metric = RequestContext.get().startMetricRecord("onBusinessAttributesUpdated");
 

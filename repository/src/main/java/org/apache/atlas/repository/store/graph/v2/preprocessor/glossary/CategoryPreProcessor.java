@@ -116,6 +116,16 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
 
     private void processCreateCategory(AtlasEntity entity, AtlasVertex vertex) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreateCategory");
+
+        if (RequestContext.get().isImportInProgress()) {
+            // During import/async-ingestion, skip ES-dependent operations, existence checks, and authorization
+            if (StringUtils.isEmpty((String) entity.getAttribute(QUALIFIED_NAME))) {
+                entity.setAttribute(QUALIFIED_NAME, createQualifiedName(vertex));
+            }
+            RequestContext.get().endMetricRecord(metricRecorder);
+            return;
+        }
+
         String catName = trimEntityName(entity);
         String parentQname = null;
 

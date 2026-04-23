@@ -419,6 +419,10 @@ public class EntityREST {
                     .setReplaceClassifications(replaceClassifications)
                     .setReplaceBusinessAttributes(replaceBusinessAttributes)
                     .setOverwriteBusinessAttributes(isOverwriteBusinessAttributes)
+                    // Single-entity path still emits a BULK_CREATE_OR_UPDATE WAL event when async
+                    // ingestion is enabled; wrap the entity so the envelope carries a real payload
+                    // instead of null (which crashes the consumer's deserializer).
+                    .setOriginalEntities(new AtlasEntitiesWithExtInfo(entity))
                     .build();
             return entityMutationService.createOrUpdate(new AtlasEntityStream(entity), context);
         } finally {

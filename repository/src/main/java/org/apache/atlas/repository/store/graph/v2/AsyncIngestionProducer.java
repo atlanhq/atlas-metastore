@@ -54,6 +54,10 @@ public class AsyncIngestionProducer {
     private static final String PROPERTY_PREFIX = "atlas.kafka";
     private static final String CONFIG_TOPIC = "atlas.async.ingestion.topic";
     private static final String DEFAULT_TOPIC = "ATLAS_ASYNC_ENTITIES";
+    // All events use the same record key so they hash to a single partition. This gives
+    // global producer-commit ordering on the WAL topic and keeps the consumer's replay
+    // order identical to ZG's commit order.
+    private static final String WAL_PARTITION_KEY = "wal";
 
     // WAL topic config (MS-1035). Defaults in AtlasConfiguration:
     //   retention.ms = 90 days (disaster-recovery replay window)
@@ -131,7 +135,9 @@ public class AsyncIngestionProducer {
                 return null;
             }
 
-            ProducerRecord<String, String> record = new ProducerRecord<>(topic, eventId, json);
+            // Constant key → single partition → globally ordered replay. eventId stays
+            // in the JSON envelope for dedup/tracing; it just isn't used as the Kafka key.
+            ProducerRecord<String, String> record = new ProducerRecord<>(topic, WAL_PARTITION_KEY, json);
 
             Timer.Sample sample = sendLatencyTimer != null ? Timer.start() : null;
 

@@ -58,6 +58,11 @@ public class ESSearchLogger implements SearchLogger, Service {
 
     @Override
     public void log(SearchRequestLogData searchRequestLogData) {
+        // MS-1017: shadow mode suppresses search_logs index writes.
+        if (AtlasConfiguration.SHADOW_MODE_ENABLED.getBoolean()) {
+            LOG.debug("Shadow mode: suppressed search_log write");
+            return;
+        }
         try {
             searchRequestLogData.setCreatedAt(System.currentTimeMillis());
 

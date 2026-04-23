@@ -19,6 +19,7 @@ package org.apache.atlas.repository.store.graph.v2.preprocessor.sql;
 
 
 import org.apache.atlas.AtlasErrorCode;
+import org.apache.atlas.RequestContext;
 import org.apache.atlas.authorizer.AtlasAuthorizationUtils;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasEntity;
@@ -72,6 +73,14 @@ public class QueryPreProcessor implements PreProcessor {
     }
 
     private void processCreateQueryCollection(AtlasStruct entity) throws AtlasBaseException {
+        if (RequestContext.get().isImportInProgress()) {
+            if (StringUtils.isEmpty((String) entity.getAttribute(QUALIFIED_NAME))) {
+                String collectionQualifiedName = (String) entity.getAttribute(COLLECTION_QUALIFIED_NAME);
+                entity.setAttribute(QUALIFIED_NAME, createQualifiedName(collectionQualifiedName));
+            }
+            return;
+        }
+
         String collectionQualifiedName = (String) entity.getAttribute(COLLECTION_QUALIFIED_NAME);
 
         if (StringUtils.isEmpty(collectionQualifiedName)) {
