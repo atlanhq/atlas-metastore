@@ -36,11 +36,6 @@
       "type": "keyword",
       "copy_to": ["all"]
     },
-    "__qualifiedNameHierarchy": {
-      "type": "text",
-      "analyzer": "atlan_path_analyzer",
-      "search_analyzer": "keyword"
-    },
     "nestedColumnOrder": {
       "type": "nested",
       "properties": {
