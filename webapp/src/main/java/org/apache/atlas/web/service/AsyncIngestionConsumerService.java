@@ -21,6 +21,8 @@ import org.apache.atlas.repository.store.graph.v2.EntityMutationService;
 import org.apache.atlas.repository.store.bootstrap.AtlasTypeDefStoreInitializer;
 import org.apache.atlas.service.config.ConfigKey;
 import org.apache.atlas.service.config.DynamicConfigStore;
+import org.apache.atlas.service.config.StaticConfigKey;
+import org.apache.atlas.service.config.StaticConfigStore;
 import org.apache.atlas.service.redis.RedisService;
 import org.apache.atlas.store.AtlasTypeDefStore;
 import org.apache.atlas.type.AtlasEntityType;
@@ -77,9 +79,12 @@ public class AsyncIngestionConsumerService {
     // ── Configuration ────────────────────────────────────────────────────
     private String bootstrapServers;
 
-    @Value("${atlas.async.ingestion.consumer.enabled:false}")
-    private boolean consumerEnabled;
-
+    // Consumer auto-start is gated by the shadow-mode static config. When
+    // mothership flips atlas.shadow.mode.enabled=true (via the static-config
+    // admin API) and restarts the pod, init() starts the consumer automatically
+    // so WAL replay into JG begins. When shadow mode is off, the consumer is
+    // idle and side-effect paths (CDC, audits, Keycloak, search logs) run
+    // normally. Ops can still force-start via POST /async-ingestion/consumer/start.
     @Value("${atlas.async.ingestion.consumer.topic:ATLAS_ASYNC_ENTITIES}")
     private String topic;
 
@@ -214,10 +219,20 @@ public class AsyncIngestionConsumerService {
 
     @PostConstruct
     public void init() {
-        if (!consumerEnabled) {
-            LOG.info("AsyncIngestionConsumer is disabled (atlas.async.ingestion.consumer.enabled=false)");
+        // Single source of truth: shadow mode governs whether the WAL consumer runs.
+        // Using StaticConfigStore.getConfigAsBoolean ensures we pick up the value
+        // that mothership seeded via /api/atlas/v2/static-configs, which was
+        // overlaid onto ApplicationProperties during StaticConfigStore init.
+        boolean shadowEnabled = StaticConfigStore.getConfigAsBoolean(
+                StaticConfigKey.ATLAS_SHADOW_MODE_ENABLED.getKey());
+
+        if (!shadowEnabled) {
+            LOG.info("AsyncIngestionConsumer not started — {}=false. WAL consumer runs only in shadow mode.",
+                    StaticConfigKey.ATLAS_SHADOW_MODE_ENABLED.getKey());
             return;
         }
+
+        LOG.info("Shadow mode is enabled — starting WAL consumer (AsyncIngestionConsumerService)");
         start();
     }
 
