@@ -888,12 +888,13 @@ public class MigrationValidator {
     private void runRequiredPropertiesCheck(String ks, ValidationReport report) {
         LOG.info("Required properties check: full scan of {}.vertices ...", ks);
 
-        long entityCount = 0;
-        long systemCount = 0;
-        long classificationCount = 0;
+        long entityCount = 0;       // true entities: have __guid or qualifiedName
+        long auxiliaryCount = 0;    // typed vertices with neither __guid nor qualifiedName (PopularityInsights, etc.)
+        long systemCount = 0;       // no type_name at all
+        long classificationCount = 0; // have __entityGuid
         long jsonErrors = 0;
 
-        // Per-property violation tracking (REQUIRED)
+        // Per-property violation tracking (REQUIRED) — only for true entities
         Map<String, Long> requiredMissingCounts = new LinkedHashMap<>();
         Map<String, List<String>> requiredMissingSamples = new LinkedHashMap<>();
         for (String prop : REQUIRED_ENTITY_PROPERTIES) {
@@ -901,10 +902,13 @@ public class MigrationValidator {
             requiredMissingSamples.put(prop, new ArrayList<>());
         }
 
-        // Track which types are missing required properties (for diagnostics)
+        // Track auxiliary vertex types (for diagnostic visibility)
+        Map<String, Long> auxiliaryByType = new LinkedHashMap<>();
+
+        // Track which entity types are missing required properties
         Map<String, Long> missingGuidByType = new LinkedHashMap<>();
 
-        // Per-property violation tracking (EXPECTED)
+        // Per-property violation tracking (EXPECTED) — only for true entities
         Map<String, Long> expectedMissingCounts = new LinkedHashMap<>();
         for (String prop : EXPECTED_ENTITY_PROPERTIES) {
             expectedMissingCounts.put(prop, 0L);
@@ -934,7 +938,7 @@ public class MigrationValidator {
 
                 String propsJson = row.getString("properties");
                 if (propsJson == null || propsJson.isEmpty()) {
-                    // No properties at all — count as entity with all required props missing
+                    // No properties at all — genuinely broken, count as entity violation
                     entityCount++;
                     for (String prop : REQUIRED_ENTITY_PROPERTIES) {
                         requiredMissingCounts.merge(prop, 1L, Long::sum);
@@ -957,17 +961,34 @@ public class MigrationValidator {
 
                 // Classification vertices have __entityGuid (the entity they're attached to)
                 // but do NOT have their own __guid or qualifiedName — this is expected.
-                // Skip them from the entity required-properties check.
                 if (hasNonEmpty(props, "__entityGuid")) {
                     classificationCount++;
                     continue;
                 }
 
+                // Determine if this is a true entity or an auxiliary typed vertex.
+                // True entities have at least __guid OR qualifiedName (from Referenceable).
+                // Auxiliary types (PopularityInsights, TagAttachment, etc.) have __typeName
+                // but never had __guid or qualifiedName — they're internal graph vertices,
+                // not first-class Atlas entities. Requiring __guid on them is a false positive.
+                boolean hasGuid = hasNonEmpty(props, "__guid");
+                boolean hasQn = hasNonEmpty(props, "qualifiedName") || hasNonEmpty(props, "Referenceable.qualifiedName");
+
+                if (!hasGuid && !hasQn) {
+                    // Neither __guid nor qualifiedName → auxiliary/internal vertex type
+                    auxiliaryCount++;
+                    auxiliaryByType.merge(typeName, 1L, Long::sum);
+                    continue;
+                }
+
+                // True entity vertex — check all required properties
                 entityCount++;
 
                 if (entityCount % 100_000 == 0) {
-                    LOG.info("  ... required properties check: {} entity vertices scanned ({} classifications skipped)",
-                             String.format("%,d", entityCount), String.format("%,d", classificationCount));
+                    LOG.info("  ... required properties check: {} entities scanned ({} auxiliary, {} classifications skipped)",
+                             String.format("%,d", entityCount),
+                             String.format("%,d", auxiliaryCount),
+                             String.format("%,d", classificationCount));
                 }
 
                 String vertexId = row.getString("vertex_id");
@@ -976,8 +997,9 @@ public class MigrationValidator {
                 for (String prop : REQUIRED_ENTITY_PROPERTIES) {
                     boolean present;
                     if ("qualifiedName".equals(prop)) {
-                        // Accept either qualifiedName or legacy Referenceable.qualifiedName
-                        present = hasNonEmpty(props, "qualifiedName") || hasNonEmpty(props, "Referenceable.qualifiedName");
+                        present = hasQn;
+                    } else if ("__guid".equals(prop)) {
+                        present = hasGuid;
                     } else {
                         present = hasNonEmpty(props, prop);
                     }
@@ -1027,9 +1049,9 @@ public class MigrationValidator {
             return;
         }
 
-        LOG.info("Required properties check complete: {} entity vertices, {} classification vertices, {} system vertices",
-                 String.format("%,d", entityCount), String.format("%,d", classificationCount),
-                 String.format("%,d", systemCount));
+        LOG.info("Required properties check complete: {} entities, {} auxiliary, {} classifications, {} system",
+                 String.format("%,d", entityCount), String.format("%,d", auxiliaryCount),
+                 String.format("%,d", classificationCount), String.format("%,d", systemCount));
 
         // Determine severity
         long totalRequiredViolations = 0;
@@ -1058,8 +1080,8 @@ public class MigrationValidator {
 
         // Build message
         StringBuilder msg = new StringBuilder();
-        msg.append(String.format("entity_vertices=%d, classification_vertices=%d, system_vertices=%d",
-                                 entityCount, classificationCount, systemCount));
+        msg.append(String.format("entity_vertices=%d, auxiliary_vertices=%d, classification_vertices=%d, system_vertices=%d",
+                                 entityCount, auxiliaryCount, classificationCount, systemCount));
         if (totalRequiredViolations > 0) {
             msg.append(" [FAIL: missing required properties — ");
             List<String> parts = new ArrayList<>();
@@ -1069,6 +1091,16 @@ public class MigrationValidator {
                 }
             }
             msg.append(String.join(", ", parts)).append("]");
+        }
+        if (auxiliaryCount > 0) {
+            // Show top auxiliary types for visibility
+            List<String> topAux = new ArrayList<>();
+            auxiliaryByType.entrySet().stream()
+                .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
+                .limit(5)
+                .forEach(e -> topAux.add(e.getKey() + "=" + e.getValue()));
+            msg.append(" [INFO: auxiliary typed vertices without __guid/qualifiedName: ")
+               .append(String.join(", ", topAux)).append("]");
         }
         if (hasDenormMismatch) {
             msg.append(String.format(" [WARN: denormalization mismatch — type_name=%d, state=%d]",
@@ -1080,11 +1112,17 @@ public class MigrationValidator {
             "All entity vertices have required properties (__guid, __typeName, __state, qualifiedName)",
             severity, msg.toString());
         result.addDetail("entity_vertices", entityCount);
+        result.addDetail("auxiliary_vertices", auxiliaryCount);
         result.addDetail("classification_vertices", classificationCount);
         result.addDetail("system_vertices", systemCount);
         result.addDetail("json_errors", jsonErrors);
 
-        // Add type breakdown for vertices missing __guid (helps identify non-entity types)
+        // Add auxiliary type breakdown
+        if (!auxiliaryByType.isEmpty()) {
+            result.addDetail("auxiliary_by_type", auxiliaryByType);
+        }
+
+        // Add type breakdown for entities missing __guid (real violations)
         if (!missingGuidByType.isEmpty()) {
             result.addDetail("missing_guid_by_type", missingGuidByType);
         }

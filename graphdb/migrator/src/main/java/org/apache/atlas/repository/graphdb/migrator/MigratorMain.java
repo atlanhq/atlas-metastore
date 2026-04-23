@@ -159,10 +159,10 @@ public class MigratorMain {
                  config.getTargetCassandraPort(), config.getTargetCassandraKeyspace());
         LOG.info("Target ES: {}://{}:{}/{}", config.getTargetEsProtocol(),
                  config.getTargetEsHostname(), config.getTargetEsPort(), config.getTargetEsIndex());
-        LOG.info("Scanner threads: {}, Writer threads: {}, Batch size: {}",
-                 config.getScannerThreads(), config.getWriterThreads(), config.getWriterBatchSize());
-        LOG.info("Async writes: maxInflight/thread={}, edgesOutOnly={}, maxEdges/batch={}",
-                 config.getMaxInflightPerThread(), config.isEdgesOutOnly(), config.getMaxEdgesPerBatch());
+        LOG.info("Scanner threads: {}, Writer threads: {}",
+                 config.getScannerThreads(), config.getWriterThreads());
+        LOG.info("Async writes: maxInflight/thread={}, edgesOutOnly={}",
+                 config.getMaxInflightPerThread(), config.isEdgesOutOnly());
         LOG.info("Resume: {}", config.isResume());
         LOG.info("ID strategy: {}, claim enabled: {}", config.getIdStrategy(), config.isClaimEnabled());
         LOG.info("Skip flags: esReindex={}, classifications={}, tasks={}, completedTasks={}",
