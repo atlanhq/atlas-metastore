@@ -111,6 +111,12 @@ public class StaticConfigStore {
 
             // Build config map: for each StaticConfigKey, use Cassandra value or fall back to application properties
             configs = buildConfigMap(cassandraConfigs);
+
+            // Overlay Cassandra-backed values onto ApplicationProperties so that downstream
+            // consumers in other modules (e.g., CassandraSessionProvider, CassandraGraphDatabase)
+            // automatically pick them up without needing a direct dependency on StaticConfigStore.
+            overlayOntoApplicationProperties();
+
             ready = true;
 
             long duration = System.currentTimeMillis() - startTime;
@@ -190,6 +196,28 @@ public class StaticConfigStore {
 
         LOG.info(logBuilder.toString());
         return Collections.unmodifiableMap(configMap);
+    }
+
+    /**
+     * Overlay static config values onto ApplicationProperties.
+     * This allows downstream modules (graphdb/cassandra) that read from ApplicationProperties
+     * to automatically get Cassandra-backed values without a direct dependency on StaticConfigStore.
+     * Only values that came from Cassandra (not fallback defaults) are overlaid.
+     */
+    private void overlayOntoApplicationProperties() {
+        try {
+            Configuration appProps = ApplicationProperties.get();
+            for (Map.Entry<String, String> entry : configs.entrySet()) {
+                String existingValue = appProps.getString(entry.getKey(), null);
+                if (existingValue == null || !existingValue.equals(entry.getValue())) {
+                    appProps.setProperty(entry.getKey(), entry.getValue());
+                    LOG.info("ApplicationProperties overlaid: {} = {} (was: {})",
+                            entry.getKey(), entry.getValue(), existingValue);
+                }
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to overlay static configs onto ApplicationProperties", e);
+        }
     }
 
     /**

@@ -18,11 +18,19 @@ public enum StaticConfigKey {
 
     GRAPH_BACKEND("atlas.graphdb.backend", "janus"),
 
+    GRAPH_ES_INDEX_PREFIX("atlas.graph.index.search.es.prefix", null),
+
+    CASSANDRA_GRAPH_HOSTNAME("atlas.cassandra.graph.hostname", "localhost"),
+
+    CASSANDRA_GRAPH_PORT("atlas.cassandra.graph.port", "9042"),
+
+    CASSANDRA_GRAPH_KEYSPACE("atlas.cassandra.graph.keyspace", "atlas_graph"),
+
+    CASSANDRA_GRAPH_DATACENTER("atlas.cassandra.graph.datacenter", "datacenter1"),
+
     GRAPH_ID_STRATEGY("atlas.graph.id.strategy", "legacy"),
 
-    GRAPH_CLAIM_ENABLED("atlas.graph.claim.enabled", "false"),
-
-    GRAPH_ES_INDEX_PREFIX("atlas.graph.index.search.es.prefix", null);
+    GRAPH_CLAIM_ENABLED("atlas.graph.claim.enabled", "false");
 
     private final String key;
     private final String defaultValue;
