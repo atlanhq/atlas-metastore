@@ -17,7 +17,9 @@
  */
 package org.apache.atlas.notification;
 
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
+import org.apache.atlas.GraphTransactionInterceptor;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.annotation.EnableConditional;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -33,6 +35,7 @@ import org.apache.atlas.model.instance.AtlasRelationship;
 import org.apache.atlas.model.instance.AtlasRelationshipHeader;
 import org.apache.atlas.model.notification.EntityNotification.EntityNotificationV2;
 import org.apache.atlas.model.notification.EntityNotification.EntityNotificationV2.OperationType;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.util.AtlasEntityUtils;
 import org.apache.atlas.type.AtlasClassificationType;
 import org.apache.atlas.type.AtlasEntityType;
@@ -48,6 +51,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import javax.annotation.PreDestroy;
 import javax.inject.Inject;
 import java.util.*;
 
@@ -62,20 +66,27 @@ import static org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever.QU
 
 @Component
 @EnableConditional(property = "atlas.enable.entity.notifications", isDefault = true)
-public class EntityNotificationListenerV2 implements EntityChangeListenerV2 {
+    public class EntityNotificationListenerV2 implements EntityChangeListenerV2 {
     private static final Logger LOG = LoggerFactory.getLogger(EntityNotificationListenerV2.class);
 
     private final AtlasTypeRegistry                              typeRegistry;
     private final EntityNotificationSender<EntityNotificationV2> notificationSender;
     private final EntityNotificationSender<EntityNotificationV2> inlineNotificationSender;
+    private final EntityGraphRetriever                           entityRetriever;
+    private final AtlasFullEntityNotificationPublisher           fullEntityNotificationPublisher;
+    private final ThreadLocal<PostCommitFullEntityNotificationHook> postCommitFullEntityNotificationHooks = new ThreadLocal<>();
 
     @Inject
     public EntityNotificationListenerV2(AtlasTypeRegistry typeRegistry,
+                                        EntityGraphRetriever entityRetriever,
                                         NotificationInterface notificationInterface,
                                         Configuration configuration) {
         this.typeRegistry       = typeRegistry;
+        this.entityRetriever    = entityRetriever;
         this.notificationSender = new EntityNotificationSender<>(notificationInterface, configuration);
         this.inlineNotificationSender = new EntityNotificationSender<>(notificationInterface, false);
+        this.fullEntityNotificationPublisher = new AtlasFullEntityNotificationPublisher(configuration,
+                AtlasConfiguration.NOTIFICATION_ENTITIES_FULL_TOPIC_NAME.getString());
     }
 
     @Override
@@ -206,6 +217,7 @@ public class EntityNotificationListenerV2 implements EntityChangeListenerV2 {
         }
 
         sendNotifications(operationType, messages);
+        publishFullEntityNotifications(entities, operationType);
         RequestContext.get().endMetricRecord(metric);
     }
 
@@ -228,6 +240,7 @@ public class EntityNotificationListenerV2 implements EntityChangeListenerV2 {
         }
 
         sendNotifications(operationType, messages, forceInline);
+        publishFullEntityNotifications(entities, operationType);
 
         RequestContext.get().endMetricRecord(metric);
     }
@@ -258,7 +271,100 @@ public class EntityNotificationListenerV2 implements EntityChangeListenerV2 {
                 RequestContext.get().getRequestTime(), requestContextHeaders));
 
         sendNotifications(operationType, messages);
+        publishFullEntityNotifications(Collections.singletonList(entity), operationType);
         RequestContext.get().endMetricRecord(metric);
+    }
+
+    private void publishFullEntityNotifications(List<AtlasEntity> entities, OperationType operationType) throws AtlasBaseException {
+        if (!fullEntityNotificationPublisher.isEnabled()) {
+            return;
+        }
+
+        if (CollectionUtils.isEmpty(entities)) {
+            return;
+        }
+
+        try {
+            getOrCreatePostCommitFullEntityNotificationHook()
+                    .addEntityNotifications(entities, operationType, RequestContext.get().getRequestTime(),
+                            new HashMap<>(RequestContext.get().getRequestContextHeaders()));
+        } catch (RuntimeException e) {
+            throw new AtlasBaseException(AtlasErrorCode.ENTITY_NOTIFICATION_FAILED, e, operationType.name());
+        }
+    }
+
+    private PostCommitFullEntityNotificationHook getOrCreatePostCommitFullEntityNotificationHook() {
+        PostCommitFullEntityNotificationHook notificationHook = postCommitFullEntityNotificationHooks.get();
+
+        if (notificationHook == null) {
+            notificationHook = new PostCommitFullEntityNotificationHook();
+            postCommitFullEntityNotificationHooks.set(notificationHook);
+        }
+
+        return notificationHook;
+    }
+
+    private class PostCommitFullEntityNotificationHook extends GraphTransactionInterceptor.PostTransactionHook {
+        private final List<FullEntityPublishRequest> entityRequests = new ArrayList<>();
+
+        void addEntityNotifications(List<AtlasEntity> entities, OperationType operationType, long eventTime, Map<String, String> headers) {
+            if (CollectionUtils.isEmpty(entities)) {
+                return;
+            }
+
+            for (AtlasEntity entity : entities) {
+                if (entity == null || entity.getGuid() == null) {
+                    continue;
+                }
+
+                entityRequests.add(new FullEntityPublishRequest(entity, operationType, eventTime, headers));
+            }
+        }
+
+        @Override
+        public void onComplete(boolean isSuccess) {
+            postCommitFullEntityNotificationHooks.remove();
+
+            if (!isSuccess) {
+                return;
+            }
+
+            try {
+                for (FullEntityPublishRequest request : entityRequests) {
+                    AtlasEntity entityToPublish = resolvePostCommitEntity(request);
+                    if (entityToPublish == null || entityToPublish.getGuid() == null || isInternalType(entityToPublish.getTypeName())) {
+                        continue;
+                    }
+
+                    fullEntityNotificationPublisher.publishEntity(entityToPublish, request.operationType, request.eventTime, request.headers);
+                }
+
+            } catch (Exception e) {
+                LOG.error("failed to send full entity notifications", e);
+            }
+        }
+    }
+
+    private AtlasEntity resolvePostCommitEntity(FullEntityPublishRequest request) throws AtlasBaseException {
+        if (request.operationType == ENTITY_DELETE) {
+            return request.entity;
+        }
+
+        return entityRetriever.toAtlasEntity(request.entity.getGuid());
+    }
+
+    private static class FullEntityPublishRequest {
+        private final AtlasEntity entity;
+        private final OperationType operationType;
+        private final long eventTime;
+        private final Map<String, String> headers;
+
+        private FullEntityPublishRequest(AtlasEntity entity, OperationType operationType, long eventTime, Map<String, String> headers) {
+            this.entity = new AtlasEntity(entity);
+            this.operationType = operationType;
+            this.eventTime = eventTime;
+            this.headers = headers;
+        }
     }
 
     private void sendNotifications(OperationType operationType, List<EntityNotificationV2> messages) throws AtlasBaseException {
@@ -465,6 +571,11 @@ public class EntityNotificationListenerV2 implements EntityChangeListenerV2 {
     @Override
     public void onClassificationsDeletedV2(AtlasEntity entity, List<AtlasClassification> deletedClassifications, boolean forceInline) throws AtlasBaseException {
         notifyClassificationEvents(Collections.singletonList(entity), CLASSIFICATION_DELETE, deletedClassifications, forceInline);
+    }
+
+    @PreDestroy
+    public void close() {
+        fullEntityNotificationPublisher.close();
     }
 
 }
