@@ -225,6 +225,36 @@ public enum AtlasConfiguration {
     ASSET_SYNC_RECONCILER_BATCH_SIZE("atlas.asset.sync.reconciler.batch.size", 500),
     ASSET_SYNC_RECONCILER_STUCK_PENDING_THRESHOLD_SECONDS("atlas.asset.sync.reconciler.stuck.pending.threshold.seconds", 1800),
 
+    // Tag denorm failure-only outbox — parallel subsystem to MS-1010 asset-sync outbox.
+    // Captures tag ES-sync failures from both propagation paths (via EntityGraphMapper.flushTagDenormToES)
+    // and direct attachment paths (via an ESWriteFailureRegistry sink). Enables eventual consistency
+    // through background replay (TagOutboxProcessor) and reconciliation (TagOutboxReconciler).
+    // Consumer replays via entityStore.repairClassificationMappingsV2 + executeESOperations,
+    // mirroring TagDenormDLQReplayService exactly (no RepairIndex.restoreByIds).
+    // Keyspace + table names are configurable so operators can rename without code changes.
+    TAG_OUTBOX_ENABLED("atlas.tag.outbox.enabled", true),
+    TAG_OUTBOX_RECONCILER_ENABLED("atlas.tag.outbox.reconciler.enabled", true),
+    TAG_OUTBOX_KEYSPACE("atlas.tag.outbox.keyspace", "atlas_tag_outbox"),
+    TAG_OUTBOX_REPLICATION_FACTOR("atlas.tag.outbox.replication.factor", 1),
+    TAG_OUTBOX_TABLE_NAME("atlas.tag.outbox.table.name", "tag_outbox"),
+    TAG_OUTBOX_LEASE_TABLE_NAME("atlas.tag.outbox.lease.table.name", "tag_outbox_lease"),
+    TAG_OUTBOX_TTL_SECONDS("atlas.tag.outbox.ttl.seconds", 86400),                                   // 24h (matches asset-sync)
+    TAG_OUTBOX_MAX_ATTEMPTS("atlas.tag.outbox.max.attempts", 10),
+    TAG_OUTBOX_RELAY_LEASE_TTL_SECONDS("atlas.tag.outbox.relay.lease.ttl.seconds", 30),
+    TAG_OUTBOX_RELAY_LEASE_HEARTBEAT_SECONDS("atlas.tag.outbox.relay.lease.heartbeat.seconds", 10),
+    TAG_OUTBOX_RELAY_IDLE_POLL_SECONDS("atlas.tag.outbox.relay.idle.poll.seconds", 30),
+    TAG_OUTBOX_RELAY_DRAIN_POLL_SECONDS("atlas.tag.outbox.relay.drain.poll.seconds", 2),
+    TAG_OUTBOX_RELAY_IDLE_BATCH_SIZE("atlas.tag.outbox.relay.idle.batch.size", 100),
+    TAG_OUTBOX_RELAY_DRAIN_BATCH_SIZE("atlas.tag.outbox.relay.drain.batch.size", 500),
+    TAG_OUTBOX_RELAY_CLAIM_TTL_SECONDS("atlas.tag.outbox.relay.claim.ttl.seconds", 60),
+    TAG_OUTBOX_RELAY_BACKOFF_BASE_MS("atlas.tag.outbox.relay.backoff.base.ms", 1000),
+    TAG_OUTBOX_RELAY_BACKOFF_MAX_MS("atlas.tag.outbox.relay.backoff.max.ms", 60000),
+    TAG_OUTBOX_RECONCILER_INTERVAL_SECONDS("atlas.tag.outbox.reconciler.interval.seconds", 3600),
+    TAG_OUTBOX_RECONCILER_JITTER_SECONDS("atlas.tag.outbox.reconciler.jitter.seconds", 300),
+    TAG_OUTBOX_RECONCILER_BATCH_SIZE("atlas.tag.outbox.reconciler.batch.size", 500),
+    TAG_OUTBOX_RECONCILER_STUCK_PENDING_THRESHOLD_SECONDS("atlas.tag.outbox.reconciler.stuck.pending.threshold.seconds", 1800),
+    TAG_OUTBOX_CONSUMER_REPAIR_BATCH_SIZE("atlas.tag.outbox.consumer.repair.batch.size", 300),
+
     // Entity audit: async retry with backoff, then publish to Kafka DLQ if still failing (main request never fails)
     ENTITY_AUDIT_DLQ_ENABLED("atlas.entity.audit.dlq.enabled", true),
     ENTITY_AUDIT_DLQ_QUEUE_CAPACITY("atlas.entity.audit.dlq.queue.capacity", 10000),
