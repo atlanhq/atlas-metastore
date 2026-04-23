@@ -23,6 +23,8 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.service.config.ConfigKey;
 import org.apache.atlas.service.config.DynamicConfigCacheStore.ConfigEntry;
 import org.apache.atlas.service.config.DynamicConfigStore;
+import org.apache.atlas.service.config.StaticConfigKey;
+import org.apache.atlas.service.config.StaticConfigStore;
 import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.atlas.web.util.Servlets;
 import org.apache.commons.lang3.StringUtils;
@@ -329,6 +331,80 @@ public class ConfigREST {
 
             if (LOG.isDebugEnabled()) {
                 LOG.debug("<== ConfigREST.deleteConfig({})", key);
+            }
+        }
+    }
+
+    // ================== Static Config Seed ==================
+
+    /**
+     * Admin-only: Seed a static config value into Cassandra.
+     * The value is persisted but does NOT take effect until Atlas is restarted.
+     *
+     * @param key Config key (must be a valid StaticConfigKey)
+     * @param updateRequest Update request containing the new value
+     * @param servletRequest HTTP servlet request
+     * @return ConfigResponse with restart warning
+     * @throws AtlasBaseException if operation fails
+     */
+    @PUT
+    @Path("static/{key}")
+    @Timed
+    public ConfigResponse seedStaticConfig(@PathParam("key") String key,
+                                           ConfigUpdateRequest updateRequest,
+                                           @Context HttpServletRequest servletRequest) throws AtlasBaseException {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("==> ConfigREST.seedStaticConfig({}, {})", key,
+                    updateRequest != null ? updateRequest.getValue() : "null");
+        }
+
+        AtlasPerfTracer perf = null;
+        try {
+            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "ConfigREST.seedStaticConfig(" + key + ")");
+            }
+
+            if (!StaticConfigStore.isReady()) {
+                throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Static config store is not ready");
+            }
+
+            if (StringUtils.isBlank(key)) {
+                throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Config key cannot be empty");
+            }
+
+            if (updateRequest == null || StringUtils.isBlank(updateRequest.getValue())) {
+                throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Config value cannot be empty");
+            }
+
+            if (!StaticConfigKey.isValidKey(key)) {
+                throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST,
+                        "Invalid static config key: " + key + ". Valid keys are: " + Arrays.toString(StaticConfigKey.getAllKeys()));
+            }
+
+            String updatedBy = servletRequest.getRemoteUser() != null ?
+                    servletRequest.getRemoteUser() : "anonymous";
+
+            StaticConfigStore.seedConfig(key, updateRequest.getValue(), updatedBy);
+
+            LOG.info("Static config '{}' seeded to Cassandra with value: {} by user: {} (restart required)",
+                    key, updateRequest.getValue(), updatedBy);
+
+            ConfigResponse response = new ConfigResponse();
+            response.setSuccess(true);
+            response.setMessage("Static config '" + key + "' seeded in Cassandra with value: " +
+                    updateRequest.getValue() + ". WARNING: Restart required to take effect.");
+            response.setKey(key);
+            response.setValue(updateRequest.getValue());
+            response.setTimestamp(new Date());
+
+            return response;
+
+        } finally {
+            AtlasPerfTracer.log(perf);
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("<== ConfigREST.seedStaticConfig({}, {})", key,
+                        updateRequest != null ? updateRequest.getValue() : "null");
             }
         }
     }

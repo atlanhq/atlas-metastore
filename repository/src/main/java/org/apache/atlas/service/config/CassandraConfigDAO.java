@@ -94,19 +94,12 @@ public class CassandraConfigDAO implements AutoCloseable {
     }
 
     /**
-     * Initialize the singleton instance with StaticConfigStore configuration.
-     * Safe to call even if already initialized by DynamicConfigStore — subsequent calls are no-ops.
-     *
-     * @param config the static config store configuration
-     * @throws AtlasBaseException if initialization fails
+     * Initialize the singleton with explicit parameters.
+     * Package-private so StaticConfigStore (same package) can call it directly
+     * without needing its own config class.
+     * Safe to call multiple times — subsequent calls are no-ops.
      */
-    public static synchronized void initialize(StaticConfigStoreConfig config) throws AtlasBaseException {
-        doInitialize(config.getKeyspace(), config.getTable(), config.getAppName(),
-                config.getHostname(), config.getCassandraPort(), config.getDatacenter(),
-                config.getReplicationFactor(), config.getConsistencyLevel());
-    }
-
-    private static void doInitialize(String keyspace, String table, String appName,
+    static synchronized void doInitialize(String keyspace, String table, String appName,
                                      String hostname, int port, String datacenter,
                                      int replicationFactor, String consistencyLevel) throws AtlasBaseException {
         if (initialized) {
@@ -278,57 +271,105 @@ public class CassandraConfigDAO implements AutoCloseable {
         LOG.info("Ensured table {}.{} exists", keyspace, table);
     }
 
+    // ================== Table-aware methods (for StaticConfigStore) ==================
+    // These use SimpleStatement instead of prepared statements because they target
+    // a different table and are only called once at startup.
+
     /**
-     * Get all configs for a specific app_name partition.
-     * Used by StaticConfigStore to read from a different partition (e.g., "atlas_static").
+     * Ensure a table with the standard config schema exists.
+     * Creates the keyspace and table if they don't exist.
      *
-     * @param appName the partition key (app_name)
-     * @return map of config key to config entry
-     * @throws AtlasBaseException if query fails
+     * @return true if the table exists or was created, false if creation failed
      */
-    public Map<String, DynamicConfigCacheStore.ConfigEntry> getAllConfigsForApp(String appName) throws AtlasBaseException {
+    public boolean ensureTableExists(String targetKeyspace, String targetTable, int replicationFactor) {
+        try {
+            String createKs = String.format(
+                    "CREATE KEYSPACE IF NOT EXISTS %s WITH replication = " +
+                    "{'class': 'SimpleStrategy', 'replication_factor': '%d'} AND durable_writes = true",
+                    targetKeyspace, replicationFactor);
+            executeWithRetry(SimpleStatement.builder(createKs)
+                    .setConsistencyLevel(DefaultConsistencyLevel.ALL).build());
+
+            String createTbl = String.format(
+                    "CREATE TABLE IF NOT EXISTS %s.%s (" +
+                    "app_name text, config_key text, config_value text, " +
+                    "updated_by text, last_updated timestamp, " +
+                    "PRIMARY KEY ((app_name), config_key))",
+                    targetKeyspace, targetTable);
+            executeWithRetry(SimpleStatement.builder(createTbl)
+                    .setConsistencyLevel(DefaultConsistencyLevel.ALL).build());
+
+            LOG.info("Ensured table {}.{} exists", targetKeyspace, targetTable);
+            return true;
+
+        } catch (Exception e) {
+            LOG.warn("Failed to ensure table {}.{} exists: {}", targetKeyspace, targetTable, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Read all configs from a specific keyspace.table for a given app_name.
+     * Uses SimpleStatement (called once at startup — no need for prepared statements).
+     */
+    public Map<String, DynamicConfigCacheStore.ConfigEntry> getAllConfigsFromTable(
+            String targetKeyspace, String targetTable, String targetAppName) throws AtlasBaseException {
         Map<String, DynamicConfigCacheStore.ConfigEntry> configs = new HashMap<>();
         try {
-            BoundStatement bound = selectAllStmt.bind(appName);
-            ResultSet rs = executeWithRetry(bound);
+            String cql = String.format(
+                    "SELECT config_key, config_value, updated_by, last_updated FROM %s.%s WHERE app_name = ?",
+                    targetKeyspace, targetTable);
+            SimpleStatement stmt = SimpleStatement.builder(cql)
+                    .addPositionalValue(targetAppName)
+                    .setConsistencyLevel(consistencyLevel)
+                    .build();
+            ResultSet rs = executeWithRetry(stmt);
 
             for (Row row : rs) {
                 String key = row.getString(COL_CONFIG_KEY);
                 String value = row.getString(COL_CONFIG_VALUE);
                 String updatedBy = row.getString(COL_UPDATED_BY);
                 Instant lastUpdated = row.getInstant(COL_LAST_UPDATED);
-
                 configs.put(key, new DynamicConfigCacheStore.ConfigEntry(value, updatedBy, lastUpdated));
             }
 
-            LOG.debug("Retrieved {} configs from Cassandra for app_name: {}", configs.size(), appName);
+            LOG.debug("Retrieved {} configs from {}.{} for app_name: {}", configs.size(),
+                    targetKeyspace, targetTable, targetAppName);
             return configs;
 
         } catch (Exception e) {
-            LOG.error("Error fetching all configs for app_name: {}", appName, e);
-            throw new AtlasBaseException("Error fetching all configs for app_name: " + appName, e);
+            LOG.error("Error fetching configs from {}.{} for app_name: {}", targetKeyspace, targetTable, targetAppName, e);
+            throw new AtlasBaseException("Error fetching configs from " + targetKeyspace + "." + targetTable, e);
         }
     }
 
     /**
-     * Upsert a config value for a specific app_name partition.
-     * Used by StaticConfigStore admin endpoint to seed values into the "atlas_static" partition.
-     *
-     * @param appName the partition key (app_name)
-     * @param key the config key
-     * @param value the config value
-     * @param updatedBy who is making the update
-     * @throws AtlasBaseException if update fails
+     * Write a config to a specific keyspace.table for a given app_name.
+     * Uses SimpleStatement.
      */
-    public void putConfigForApp(String appName, String key, String value, String updatedBy) throws AtlasBaseException {
+    public void putConfigToTable(String targetKeyspace, String targetTable,
+                                 String targetAppName, String key, String value,
+                                 String updatedBy) throws AtlasBaseException {
         try {
-            BoundStatement bound = upsertStmt.bind(appName, key, value, updatedBy, Instant.now());
-            executeWithRetry(bound);
-            LOG.info("Config updated for app_name: {} - key: {}, value: {}, updatedBy: {}", appName, key, value, updatedBy);
+            String cql = String.format(
+                    "INSERT INTO %s.%s (app_name, config_key, config_value, updated_by, last_updated) " +
+                    "VALUES (?, ?, ?, ?, ?)",
+                    targetKeyspace, targetTable);
+            SimpleStatement stmt = SimpleStatement.builder(cql)
+                    .addPositionalValue(targetAppName)
+                    .addPositionalValue(key)
+                    .addPositionalValue(value)
+                    .addPositionalValue(updatedBy)
+                    .addPositionalValue(Instant.now())
+                    .setConsistencyLevel(consistencyLevel)
+                    .build();
+            executeWithRetry(stmt);
+            LOG.info("Config written to {}.{} - app_name: {}, key: {}, value: {}, updatedBy: {}",
+                    targetKeyspace, targetTable, targetAppName, key, value, updatedBy);
 
         } catch (Exception e) {
-            LOG.error("Error updating config for app_name: {} - key: {}, value: {}", appName, key, value, e);
-            throw new AtlasBaseException("Error updating config for app_name: " + appName + ", key: " + key, e);
+            LOG.error("Error writing config to {}.{} - key: {}", targetKeyspace, targetTable, key, e);
+            throw new AtlasBaseException("Error writing config to " + targetKeyspace + "." + targetTable + ", key: " + key, e);
         }
     }
 

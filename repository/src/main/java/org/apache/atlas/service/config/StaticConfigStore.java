@@ -9,7 +9,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
-import javax.inject.Inject;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -21,16 +20,12 @@ import java.util.Map;
  * No cache layer, no background refresh, no runtime updates.
  * A restart is required to pick up changes seeded via the admin endpoint.
  *
- * <h3>Initialization</h3>
- * Self-contained — initializes CassandraConfigDAO itself if not already initialized
- * (safe to call from both DynamicConfigStore and StaticConfigStore; the first caller wins,
- * subsequent calls are no-ops).
- *
  * <h3>Resolution strategy (per key)</h3>
  * <ol>
- *   <li>Cassandra reachable, row found      → use value from Cassandra</li>
- *   <li>Cassandra reachable, no row         → fallback to atlas-application.properties</li>
- *   <li>Cassandra UNREACHABLE (after retry) → KILL PROCESS (System.exit)</li>
+ *   <li>Cassandra reachable, table exists, row found → use value from Cassandra</li>
+ *   <li>Cassandra reachable, table exists, no row   → fallback to atlas-application.properties</li>
+ *   <li>Cassandra reachable, table missing           → try create; if fails, fallback to atlas-application.properties</li>
+ *   <li>Cassandra UNREACHABLE (after retry)          → KILL PROCESS (System.exit)</li>
  * </ol>
  */
 @Component("staticConfigStore")
@@ -39,77 +34,87 @@ public class StaticConfigStore {
 
     private static volatile StaticConfigStore INSTANCE;
 
-    private final StaticConfigStoreConfig config;
+    private final boolean enabled;
+    private final String appName;
+    private final String keyspace;
+    private final String table;
+    private final int replicationFactor;
 
     private volatile Map<String, String> configs = Collections.emptyMap();
     private volatile boolean ready = false;
 
-    @Inject
-    public StaticConfigStore(StaticConfigStoreConfig config) {
-        this.config = config;
+    public StaticConfigStore() {
+        boolean enabledVal = true;
+        String appNameVal = "atlas_static";
+        String keyspaceVal = "config_store";
+        String tableVal = "static_configs";
+        int replicationFactorVal = 3;
+        try {
+            Configuration props = ApplicationProperties.get();
+            enabledVal = props.getBoolean("atlas.static.config.store.enabled", true);
+            appNameVal = props.getString("atlas.static.config.store.app.name", "atlas_static");
+            keyspaceVal = props.getString(DynamicConfigStoreConfig.PROP_KEYSPACE, "config_store");
+            tableVal = props.getString("atlas.static.config.store.table", "static_configs");
+            replicationFactorVal = props.getInt(DynamicConfigStoreConfig.PROP_REPLICATION_FACTOR, 3);
+        } catch (Exception e) {
+            LOG.warn("Failed to read static config store properties, using defaults", e);
+        }
+        this.enabled = enabledVal;
+        this.appName = appNameVal;
+        this.keyspace = keyspaceVal;
+        this.table = tableVal;
+        this.replicationFactor = replicationFactorVal;
         INSTANCE = this;
-        LOG.info("StaticConfigStore created - enabled: {}, appName: {}", config.isEnabled(), config.getAppName());
+        LOG.info("StaticConfigStore created - enabled: {}, appName: {}, table: {}.{}", enabled, appName, keyspace, table);
+    }
+
+    // Test-only constructor
+    StaticConfigStore(boolean enabled, String appName, String keyspace, String table) {
+        this.enabled = enabled;
+        this.appName = appName;
+        this.keyspace = keyspace;
+        this.table = table;
+        this.replicationFactor = 1;
+        INSTANCE = this;
     }
 
     @PostConstruct
     public void initialize() {
-        if (!config.isEnabled()) {
-            LOG.info("Static config store is disabled (atlas.static.config.store.enabled=false). Falling back to application properties.");
+        if (!enabled) {
+            LOG.info("Static config store is disabled. Falling back to application properties.");
             configs = buildFallbackMap();
             ready = true;
             return;
         }
 
-        LOG.info("Initializing StaticConfigStore - reading from Cassandra partition '{}'...", config.getAppName());
+        LOG.info("Initializing StaticConfigStore - reading from {}.{} partition '{}'...", keyspace, table, appName);
         long startTime = System.currentTimeMillis();
 
         try {
             // Ensure CassandraConfigDAO is initialized (no-op if already done by DynamicConfigStore).
-            CassandraConfigDAO.initialize(config);
+            initializeDAO();
 
-            // Read all configs for the static partition from Cassandra.
-            // CassandraConfigDAO retry logic handles transient failures (3 retries with backoff).
-            // If still fails after retries -> AtlasBaseException is thrown -> process KILLED.
             CassandraConfigDAO dao = CassandraConfigDAO.getInstance();
-            Map<String, ConfigEntry> cassandraConfigs = dao.getAllConfigsForApp(config.getAppName());
 
-            // Load application properties for fallback when Cassandra has no entry
-            Configuration appProps = ApplicationProperties.get();
-
-            // Build config map: for each StaticConfigKey, use Cassandra value or fall back to application properties
-            Map<String, String> configMap = new HashMap<>();
-            StringBuilder logBuilder = new StringBuilder();
-            logBuilder.append("Static config values loaded at startup:\n");
-
-            for (StaticConfigKey staticKey : StaticConfigKey.values()) {
-                String key = staticKey.getKey();
-                ConfigEntry entry = cassandraConfigs.get(key);
-
-                String value;
-                String source;
-                if (entry != null && entry.getValue() != null) {
-                    value = entry.getValue();
-                    source = "cassandra";
-                } else {
-                    // Fallback to atlas-application.properties
-                    value = appProps.getString(key, null);
-                    source = value != null ? "application.properties" : "not-set";
-                }
-
-                if (value != null) {
-                    configMap.put(key, value);
-                }
-
-                logBuilder.append("  ").append(key).append(" = ").append(value)
-                          .append(" [source=").append(source).append("]\n");
+            // Try to ensure the static config table exists.
+            // If creation fails (e.g., permissions), fall back to application.properties.
+            boolean tableReady = dao.ensureTableExists(keyspace, table, replicationFactor);
+            if (!tableReady) {
+                LOG.warn("Static config table {}.{} could not be created. Falling back to application properties.", keyspace, table);
+                configs = buildFallbackMap();
+                ready = true;
+                return;
             }
 
-            configs = Collections.unmodifiableMap(configMap);
+            // Read all configs for the static partition from Cassandra.
+            Map<String, ConfigEntry> cassandraConfigs = dao.getAllConfigsFromTable(keyspace, table, appName);
+
+            // Build config map: for each StaticConfigKey, use Cassandra value or fall back to application properties
+            configs = buildConfigMap(cassandraConfigs);
             ready = true;
 
             long duration = System.currentTimeMillis() - startTime;
             LOG.info("StaticConfigStore initialization completed in {}ms - {} configs loaded", duration, configs.size());
-            LOG.info(logBuilder.toString());
 
         } catch (Exception e) {
             // FAIL-FAST: Cassandra unreachable -> kill the process
@@ -119,8 +124,77 @@ public class StaticConfigStore {
     }
 
     /**
+     * Initialize CassandraConfigDAO using shared Cassandra connection properties.
+     * This is a no-op if the DAO was already initialized by DynamicConfigStore.
+     */
+    private void initializeDAO() throws Exception {
+        Configuration props = ApplicationProperties.get();
+
+        String hostname = props.getString(DynamicConfigStoreConfig.PROP_HOSTNAME, null);
+        if (hostname == null || hostname.isEmpty()) {
+            hostname = props.getString("atlas.graph.storage.hostname", "localhost");
+        }
+
+        int port = props.getInt(DynamicConfigStoreConfig.PROP_PORT, -1);
+        if (port <= 0) {
+            port = props.getInt("atlas.graph.storage.cql.port", 9042);
+        }
+
+        CassandraConfigDAO.doInitialize(
+                props.getString(DynamicConfigStoreConfig.PROP_KEYSPACE, "config_store"),
+                props.getString(DynamicConfigStoreConfig.PROP_TABLE, "configs"),
+                appName,
+                hostname,
+                port,
+                props.getString(DynamicConfigStoreConfig.PROP_DATACENTER, "datacenter1"),
+                replicationFactor,
+                props.getString(DynamicConfigStoreConfig.PROP_CONSISTENCY_LEVEL, "LOCAL_QUORUM")
+        );
+    }
+
+    private Map<String, String> buildConfigMap(Map<String, ConfigEntry> cassandraConfigs) {
+        Map<String, String> configMap = new HashMap<>();
+        StringBuilder logBuilder = new StringBuilder("Static config values loaded at startup:\n");
+
+        Configuration appProps = null;
+        try {
+            appProps = ApplicationProperties.get();
+        } catch (Exception e) {
+            LOG.warn("Failed to load application properties for fallback", e);
+        }
+
+        for (StaticConfigKey staticKey : StaticConfigKey.values()) {
+            String key = staticKey.getKey();
+            ConfigEntry entry = cassandraConfigs.get(key);
+
+            String value;
+            String source;
+            if (entry != null && entry.getValue() != null) {
+                value = entry.getValue();
+                source = "cassandra";
+            } else if (appProps != null) {
+                value = appProps.getString(key, null);
+                source = value != null ? "application.properties" : "not-set";
+            } else {
+                value = null;
+                source = "not-set";
+            }
+
+            if (value != null) {
+                configMap.put(key, value);
+            }
+
+            logBuilder.append("  ").append(key).append(" = ").append(value)
+                      .append(" [source=").append(source).append("]\n");
+        }
+
+        LOG.info(logBuilder.toString());
+        return Collections.unmodifiableMap(configMap);
+    }
+
+    /**
      * Build fallback map from atlas-application.properties.
-     * Used when static config store is disabled.
+     * Used when static config store is disabled or table creation fails.
      */
     private Map<String, String> buildFallbackMap() {
         Map<String, String> fallback = new HashMap<>();
@@ -140,11 +214,6 @@ public class StaticConfigStore {
 
     // ================== Static API ==================
 
-    /**
-     * Get a static config value.
-     * @param key the config key
-     * @return the value or null if not found
-     */
     public static String getConfig(String key) {
         StaticConfigStore store = INSTANCE;
         if (store == null || !store.ready) {
@@ -153,45 +222,24 @@ public class StaticConfigStore {
         return store.configs.get(key);
     }
 
-    /**
-     * Get a static config value as boolean.
-     * @param key the config key
-     * @return true if value is "true" (case-insensitive), false otherwise
-     */
     public static boolean getConfigAsBoolean(String key) {
         String value = getConfig(key);
         return "true".equalsIgnoreCase(value);
     }
 
-    /**
-     * Get the configured graph backend value.
-     * @return "janus" or "cassandra"
-     */
     public static String getGraphBackend() {
         return getConfig(StaticConfigKey.GRAPH_BACKEND.getKey());
     }
 
-    /**
-     * Check if the graph backend is configured to use CassandraGraph.
-     * @return true if GRAPH_BACKEND == "cassandra"
-     */
     public static boolean isCassandraGraphBackend() {
         return "cassandra".equalsIgnoreCase(getGraphBackend());
     }
 
-    /**
-     * Check if the store has completed initialization.
-     * @return true after @PostConstruct completes successfully
-     */
     public static boolean isReady() {
         StaticConfigStore store = INSTANCE;
         return store != null && store.ready;
     }
 
-    /**
-     * Get all static configs as an unmodifiable map.
-     * @return unmodifiable map of all static config key-value pairs
-     */
     public static Map<String, String> getAllConfigs() {
         StaticConfigStore store = INSTANCE;
         if (store == null || !store.ready) {
@@ -202,13 +250,8 @@ public class StaticConfigStore {
 
     /**
      * Seed a static config value into Cassandra.
-     * This writes to Cassandra but does NOT update the in-memory map.
+     * Writes to Cassandra but does NOT update the in-memory map.
      * A restart is required for the new value to take effect.
-     *
-     * @param key the config key
-     * @param value the config value
-     * @param updatedBy who is making the update
-     * @throws AtlasBaseException if the write fails
      */
     public static void seedConfig(String key, String value, String updatedBy) throws AtlasBaseException {
         StaticConfigStore store = INSTANCE;
@@ -217,7 +260,7 @@ public class StaticConfigStore {
         }
 
         CassandraConfigDAO dao = CassandraConfigDAO.getInstance();
-        dao.putConfigForApp(store.config.getAppName(), key, value, updatedBy);
+        dao.putConfigToTable(store.keyspace, store.table, store.appName, key, value, updatedBy);
         LOG.info("Static config seeded in Cassandra - key: {}, value: {}, updatedBy: {} (restart required to take effect)",
                 key, value, updatedBy);
     }
@@ -238,10 +281,5 @@ public class StaticConfigStore {
             LOG.warn("Failed to read application property for key: {}", key, e);
             return null;
         }
-    }
-
-    // For testing
-    StaticConfigStoreConfig getStoreConfig() {
-        return config;
     }
 }
