@@ -29,12 +29,19 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.DependsOn;
 
 /**
  * Provides access to the AtlasGraph
  *
  */
 @Configuration
+// Graph-backend selection reads StaticConfigStore.getGraphBackend() in
+// AtlasRepositoryConfiguration.getGraphDatabaseImpl(). Without this @DependsOn
+// Spring may construct beans that @Inject AtlasGraph before StaticConfigStore's
+// @PostConstruct has run its Cassandra overlay — picking the file default instead
+// of the operator-seeded value and caching it permanently in graphDb_.
+@DependsOn("staticConfigStore")
 public class AtlasGraphProvider implements IAtlasGraphProvider {
 
     private static volatile GraphDatabase<?,?> graphDb_;
