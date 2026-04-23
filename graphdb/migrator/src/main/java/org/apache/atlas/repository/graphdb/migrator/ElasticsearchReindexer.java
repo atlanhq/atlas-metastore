@@ -239,51 +239,32 @@ public class ElasticsearchReindexer implements AutoCloseable {
     }
 
     /**
-     * Default mappings applied when the source index doesn't exist (e.g., deleted during
-     * remigration cleanup). Maps all strings to keyword to match the Atlas ES schema
-     * (addons/elasticsearch/es-mappings.json). Without this, ES dynamic mapping creates
-     * text fields which break sort/aggregation queries on __guid, __typeName, etc.
-     */
-    private static final String DEFAULT_MAPPINGS_JSON =
-        "{\"properties\":{" +
-        "\"nestedColumnOrder\":{\"type\":\"nested\",\"properties\":" +
-        "{\"version\":{\"type\":\"version\"},\"order\":{\"type\":\"keyword\"}}}," +
-        "\"relationshipList\":{\"type\":\"nested\",\"properties\":" +
-        "{\"typeName\":{\"type\":\"keyword\"},\"guid\":{\"type\":\"keyword\"}," +
-        "\"provenanceType\":{\"type\":\"integer\"},\"endName\":{\"type\":\"keyword\"}," +
-        "\"endGuid\":{\"type\":\"keyword\"},\"endTypeName\":{\"type\":\"keyword\"}," +
-        "\"endQualifiedName\":{\"type\":\"keyword\"},\"label\":{\"type\":\"keyword\"}," +
-        "\"propagateTags\":{\"type\":\"keyword\"},\"status\":{\"type\":\"keyword\"}," +
-        "\"createdBy\":{\"type\":\"keyword\"},\"updatedBy\":{\"type\":\"keyword\"}," +
-        "\"createTime\":{\"type\":\"long\"},\"updateTime\":{\"type\":\"long\"}," +
-        "\"version\":{\"type\":\"long\"}}}}," +
-        "\"dynamic_templates\":[{\"custom_metadata_strings\":" +
-        "{\"match_mapping_type\":\"string\",\"mapping\":{\"type\":\"keyword\",\"ignore_above\":5120}}}]}";
-
-    /**
      * Reads mappings and settings from the source JanusGraph ES index and returns
      * a JSON body suitable for PUT /{index} to create the target index with
      * identical field mappings and analyzer settings.
      *
-     * Falls back to default Atlas mappings (keyword for strings) if the source
-     * index doesn't exist (e.g., deleted during remigration cleanup).
+     * Returns "{}" on source absence or read failure so the matching ES index
+     * template (atlas-graph-template / atlan-template) owns the mappings. An
+     * explicit partial mappings body here would suppress the template's own
+     * properties merge, locking __typeName and other system fields into plain
+     * keyword via the dynamic template.
      */
     private String getCreateBodyFromSourceIndex(String sourceIndex) {
         if (sourceIndex == null || sourceIndex.isEmpty()) {
-            LOG.info("No source ES index configured, using default Atlas mappings");
-            return "{\"mappings\":" + DEFAULT_MAPPINGS_JSON + "}";
+            LOG.info("No source ES index configured, deferring to ES index template");
+            return "{}";
         }
 
         try {
             // Check if source index exists
             Response headResp = esClient.performRequest(new Request("HEAD", "/" + sourceIndex));
             if (headResp.getStatusLine().getStatusCode() != 200) {
-                LOG.info("Source ES index '{}' does not exist, using default Atlas mappings", sourceIndex);
-                return "{\"mappings\":" + DEFAULT_MAPPINGS_JSON + "}";
+                LOG.info("Source ES index '{}' does not exist, deferring to ES index template", sourceIndex);
+                return "{}";
             }
         } catch (IOException e) {
-            LOG.info("Source ES index '{}' not found, using default Atlas mappings", sourceIndex);
-            return "{\"mappings\":" + DEFAULT_MAPPINGS_JSON + "}";
+            LOG.info("Source ES index '{}' not found, deferring to ES index template", sourceIndex);
+            return "{}";
         }
 
         try {
@@ -341,9 +322,9 @@ public class ElasticsearchReindexer implements AutoCloseable {
             return createBody.toString();
 
         } catch (Exception e) {
-            LOG.warn("Failed to read mappings/settings from source index '{}', falling back to default Atlas mappings: {}",
+            LOG.warn("Failed to read mappings/settings from source index '{}', deferring to ES index template: {}",
                      sourceIndex, e.getMessage());
-            return "{\"mappings\":" + DEFAULT_MAPPINGS_JSON + "}";
+            return "{}";
         }
     }
 
