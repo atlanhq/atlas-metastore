@@ -240,8 +240,6 @@ public class StaticConfigStore {
         return Collections.unmodifiableMap(fallback);
     }
 
-    // ================== Static API ==================
-
     public static String getConfig(String key) {
         StaticConfigStore store = INSTANCE;
         if (store == null || !store.ready) {
@@ -299,8 +297,6 @@ public class StaticConfigStore {
     void exitProcess(int status) {
         System.exit(status);
     }
-
-    // ================== Internal helpers ==================
 
     private static String getPropertyFallback(String key) {
         try {

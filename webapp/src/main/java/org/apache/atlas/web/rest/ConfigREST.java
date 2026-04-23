@@ -47,12 +47,10 @@ import java.util.*;
  * - Delete config (reset to default)
  *
  * Endpoints:
- * - GET    /api/atlas/v2/configs         - List all dynamic configs
- * - GET    /api/atlas/v2/configs/{key}   - Get single dynamic config
- * - PUT    /api/atlas/v2/configs/{key}   - Update dynamic config
- * - DELETE /api/atlas/v2/configs/{key}   - Delete dynamic config (reset to default)
- *
- * Static config endpoints are in {@link StaticConfigREST} at /api/atlas/v2/static-configs.
+ * - GET  /api/atlas/v2/configs         - List all configs
+ * - GET  /api/atlas/v2/configs/{key}   - Get single config
+ * - PUT  /api/atlas/v2/configs/{key}   - Update config
+ * - DELETE /api/atlas/v2/configs/{key} - Delete config
  */
 @Path("configs")
 @Singleton

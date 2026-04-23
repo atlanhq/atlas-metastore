@@ -81,10 +81,10 @@ public class CassandraConfigDAO implements AutoCloseable {
     private final PreparedStatement healthCheckStmt;
 
     /**
-     * Initialize the singleton instance with DynamicConfigStore configuration.
+     * Initialize the singleton instance with configuration.
      * Must be called before getInstance().
      *
-     * @param config the dynamic config store configuration
+     * @param config the configuration
      * @throws AtlasBaseException if initialization fails
      */
     public static synchronized void initialize(DynamicConfigStoreConfig config) throws AtlasBaseException {
@@ -93,12 +93,6 @@ public class CassandraConfigDAO implements AutoCloseable {
                 config.getReplicationFactor(), config.getConsistencyLevel());
     }
 
-    /**
-     * Initialize the singleton with explicit parameters.
-     * Package-private so StaticConfigStore (same package) can call it directly
-     * without needing its own config class.
-     * Safe to call multiple times — subsequent calls are no-ops.
-     */
     static synchronized void doInitialize(String keyspace, String table, String appName,
                                      String hostname, int port, String datacenter,
                                      int replicationFactor, String consistencyLevel) throws AtlasBaseException {
@@ -270,10 +264,6 @@ public class CassandraConfigDAO implements AutoCloseable {
                 .build());
         LOG.info("Ensured table {}.{} exists", keyspace, table);
     }
-
-    // ================== Table-aware methods (for StaticConfigStore) ==================
-    // These use SimpleStatement instead of prepared statements because they target
-    // a different table and are only called once at startup.
 
     /**
      * Ensure a table with the standard config schema exists.
