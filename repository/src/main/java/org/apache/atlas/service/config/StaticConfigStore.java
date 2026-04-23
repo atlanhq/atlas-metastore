@@ -53,9 +53,9 @@ public class StaticConfigStore {
             Configuration props = ApplicationProperties.get();
             enabledVal = props.getBoolean("atlas.static.config.store.enabled", true);
             appNameVal = props.getString("atlas.static.config.store.app.name", "atlas_static");
-            keyspaceVal = props.getString(DynamicConfigStoreConfig.PROP_KEYSPACE, "config_store");
+            keyspaceVal = props.getString("atlas.config.store.cassandra.keyspace", "config_store");
             tableVal = props.getString("atlas.static.config.store.table", "static_configs");
-            replicationFactorVal = props.getInt(DynamicConfigStoreConfig.PROP_REPLICATION_FACTOR, 3);
+            replicationFactorVal = props.getInt("atlas.config.store.cassandra.replication.factor", 3);
         } catch (Exception e) {
             LOG.warn("Failed to read static config store properties, using defaults", e);
         }
@@ -91,7 +91,7 @@ public class StaticConfigStore {
         long startTime = System.currentTimeMillis();
 
         try {
-            // Ensure CassandraConfigDAO is initialized (no-op if already done by DynamicConfigStore).
+            // Ensure CassandraConfigDAO is initialized (no-op if already initialized).
             initializeDAO();
 
             CassandraConfigDAO dao = CassandraConfigDAO.getInstance();
@@ -131,30 +131,30 @@ public class StaticConfigStore {
 
     /**
      * Initialize CassandraConfigDAO using shared Cassandra connection properties.
-     * This is a no-op if the DAO was already initialized by DynamicConfigStore.
+     * No-op if the DAO was already initialized.
      */
     private void initializeDAO() throws Exception {
         Configuration props = ApplicationProperties.get();
 
-        String hostname = props.getString(DynamicConfigStoreConfig.PROP_HOSTNAME, null);
+        String hostname = props.getString("atlas.config.store.cassandra.hostname", null);
         if (hostname == null || hostname.isEmpty()) {
             hostname = props.getString("atlas.graph.storage.hostname", "localhost");
         }
 
-        int port = props.getInt(DynamicConfigStoreConfig.PROP_PORT, -1);
+        int port = props.getInt("atlas.config.store.cassandra.port", -1);
         if (port <= 0) {
             port = props.getInt("atlas.graph.storage.cql.port", 9042);
         }
 
         CassandraConfigDAO.doInitialize(
-                props.getString(DynamicConfigStoreConfig.PROP_KEYSPACE, "config_store"),
-                props.getString(DynamicConfigStoreConfig.PROP_TABLE, "configs"),
+                props.getString("atlas.config.store.cassandra.keyspace", "config_store"),
+                props.getString("atlas.config.store.cassandra.table", "configs"),
                 appName,
                 hostname,
                 port,
-                props.getString(DynamicConfigStoreConfig.PROP_DATACENTER, "datacenter1"),
+                props.getString("atlas.config.store.cassandra.datacenter", "datacenter1"),
                 replicationFactor,
-                props.getString(DynamicConfigStoreConfig.PROP_CONSISTENCY_LEVEL, "LOCAL_QUORUM")
+                props.getString("atlas.config.store.cassandra.consistency.level", "LOCAL_QUORUM")
         );
     }
 
