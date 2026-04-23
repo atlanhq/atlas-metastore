@@ -202,20 +202,24 @@ public class ElasticsearchReindexer implements AutoCloseable {
         verifyEsDocCount(esIndex, totalBulkItemSuccesses);
     }
 
-    void ensureIndexExists(String esIndex) {
-        try {
-            Response response = esClient.performRequest(new Request("HEAD", "/" + esIndex));
-            if (response.getStatusLine().getStatusCode() == 200) {
-                LOG.info("ES index '{}' already exists", esIndex);
-                return;
-            }
-        } catch (IOException e) {
-            // Index doesn't exist, create it below
-        }
+    // Name of the ES index template covering the atlas_graph_* pattern. We delete
+    // it prior to creating the target vertex index so its mappings cannot merge
+    // with the JG-copied body and produce validation conflicts (e.g. on
+    // __qualifiedNameHierarchy, where JG's keyword shape clashes with the
+    // template's text+search_analyzer shape). Atlas re-creates this template on
+    // its next startup via initElasticsearch().
+    private static final String ATLAS_GRAPH_TEMPLATE = "atlas-graph-template";
 
-        // Try to copy mappings + settings from the source JanusGraph index (migrated tenant).
-        // If the source index doesn't exist (fresh tenant), fall back to empty body
-        // so the ES index template (atlan-template) applies its defaults.
+    void ensureIndexExists(String esIndex) {
+        // Wipe anything that could shape the new index differently from the
+        // JG source: (1) the matching template, (2) any pre-existing index.
+        // Without these, a partial overlap (template + body, or prior
+        // dynamically-mapped index) silently corrupts the system-field shapes.
+        deleteTemplateIfExists(ATLAS_GRAPH_TEMPLATE);
+        deleteIndexIfExists(esIndex);
+
+        // Copy mappings + settings from the source JanusGraph index (migrated tenant).
+        // If the source index doesn't exist (fresh tenant), fall back to empty body.
         String sourceIndex = config.getSourceEsIndex();
         String createBody = getCreateBodyFromSourceIndex(sourceIndex);
 
@@ -228,62 +232,72 @@ public class ElasticsearchReindexer implements AutoCloseable {
             esClient.performRequest(createReq);
 
             if ("{}".equals(createBody)) {
-                LOG.info("Created ES index '{}' (fresh tenant — settings from ES index template)", esIndex);
+                LOG.info("Created ES index '{}' (fresh tenant — empty body, no template merge)", esIndex);
             } else {
                 LOG.info("Created ES index '{}' with mappings+settings copied from source index '{}'",
                          esIndex, sourceIndex);
             }
         } catch (IOException e) {
-            LOG.warn("Failed to create ES index '{}' (may already exist): {}", esIndex, e.getMessage());
+            // Primary path failed — this must not be silent, otherwise ES auto-creates the
+            // index later via dynamic mapping with shapes that diverge from JG parity.
+            throw new RuntimeException(
+                "Failed to create ES index '" + esIndex + "' with JG-copied mappings. "
+                + "Migration cannot proceed safely — the index would be auto-created with "
+                + "the wrong field shapes on first bulk write. Original error: " + e.getMessage(), e);
         }
     }
 
-    /**
-     * Default mappings applied when the source index doesn't exist (e.g., deleted during
-     * remigration cleanup). Maps all strings to keyword to match the Atlas ES schema
-     * (addons/elasticsearch/es-mappings.json). Without this, ES dynamic mapping creates
-     * text fields which break sort/aggregation queries on __guid, __typeName, etc.
-     */
-    private static final String DEFAULT_MAPPINGS_JSON =
-        "{\"properties\":{" +
-        "\"nestedColumnOrder\":{\"type\":\"nested\",\"properties\":" +
-        "{\"version\":{\"type\":\"version\"},\"order\":{\"type\":\"keyword\"}}}," +
-        "\"relationshipList\":{\"type\":\"nested\",\"properties\":" +
-        "{\"typeName\":{\"type\":\"keyword\"},\"guid\":{\"type\":\"keyword\"}," +
-        "\"provenanceType\":{\"type\":\"integer\"},\"endName\":{\"type\":\"keyword\"}," +
-        "\"endGuid\":{\"type\":\"keyword\"},\"endTypeName\":{\"type\":\"keyword\"}," +
-        "\"endQualifiedName\":{\"type\":\"keyword\"},\"label\":{\"type\":\"keyword\"}," +
-        "\"propagateTags\":{\"type\":\"keyword\"},\"status\":{\"type\":\"keyword\"}," +
-        "\"createdBy\":{\"type\":\"keyword\"},\"updatedBy\":{\"type\":\"keyword\"}," +
-        "\"createTime\":{\"type\":\"long\"},\"updateTime\":{\"type\":\"long\"}," +
-        "\"version\":{\"type\":\"long\"}}}}," +
-        "\"dynamic_templates\":[{\"custom_metadata_strings\":" +
-        "{\"match_mapping_type\":\"string\",\"mapping\":{\"type\":\"keyword\",\"ignore_above\":5120}}}]}";
+    private void deleteTemplateIfExists(String templateName) {
+        try {
+            esClient.performRequest(new Request("DELETE", "/_template/" + templateName));
+            LOG.info("Deleted ES index template '{}' (will be recreated on next Atlas startup)", templateName);
+        } catch (IOException e) {
+            // 404 is expected when the template is absent. Any other error we log
+            // and continue — the subsequent PUT will fail loudly if the template
+            // is still present and conflicts.
+            LOG.debug("Template '{}' delete skipped ({}): {}",
+                      templateName, e.getClass().getSimpleName(), e.getMessage());
+        }
+    }
+
+    private void deleteIndexIfExists(String index) {
+        try {
+            esClient.performRequest(new Request("DELETE", "/" + index));
+            LOG.info("Deleted existing ES index '{}'", index);
+        } catch (IOException e) {
+            // 404 is expected when the index doesn't exist.
+            LOG.debug("Index '{}' delete skipped ({}): {}",
+                      index, e.getClass().getSimpleName(), e.getMessage());
+        }
+    }
 
     /**
      * Reads mappings and settings from the source JanusGraph ES index and returns
      * a JSON body suitable for PUT /{index} to create the target index with
      * identical field mappings and analyzer settings.
      *
-     * Falls back to default Atlas mappings (keyword for strings) if the source
-     * index doesn't exist (e.g., deleted during remigration cleanup).
+     * Returns "{}" on source absence or read failure so the matching ES index
+     * template (atlas-graph-template / atlan-template) owns the mappings. An
+     * explicit partial mappings body here would suppress the template's own
+     * properties merge, locking __typeName and other system fields into plain
+     * keyword via the dynamic template.
      */
     private String getCreateBodyFromSourceIndex(String sourceIndex) {
         if (sourceIndex == null || sourceIndex.isEmpty()) {
-            LOG.info("No source ES index configured, using default Atlas mappings");
-            return "{\"mappings\":" + DEFAULT_MAPPINGS_JSON + "}";
+            LOG.info("No source ES index configured, deferring to ES index template");
+            return "{}";
         }
 
         try {
             // Check if source index exists
             Response headResp = esClient.performRequest(new Request("HEAD", "/" + sourceIndex));
             if (headResp.getStatusLine().getStatusCode() != 200) {
-                LOG.info("Source ES index '{}' does not exist, using default Atlas mappings", sourceIndex);
-                return "{\"mappings\":" + DEFAULT_MAPPINGS_JSON + "}";
+                LOG.info("Source ES index '{}' does not exist, deferring to ES index template", sourceIndex);
+                return "{}";
             }
         } catch (IOException e) {
-            LOG.info("Source ES index '{}' not found, using default Atlas mappings", sourceIndex);
-            return "{\"mappings\":" + DEFAULT_MAPPINGS_JSON + "}";
+            LOG.info("Source ES index '{}' not found, deferring to ES index template", sourceIndex);
+            return "{}";
         }
 
         try {
@@ -341,9 +355,9 @@ public class ElasticsearchReindexer implements AutoCloseable {
             return createBody.toString();
 
         } catch (Exception e) {
-            LOG.warn("Failed to read mappings/settings from source index '{}', falling back to default Atlas mappings: {}",
+            LOG.warn("Failed to read mappings/settings from source index '{}', deferring to ES index template: {}",
                      sourceIndex, e.getMessage());
-            return "{\"mappings\":" + DEFAULT_MAPPINGS_JSON + "}";
+            return "{}";
         }
     }
 

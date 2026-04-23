@@ -98,6 +98,8 @@ public class CassandraVertexTest {
         List<AtlasEdge<CassandraVertex, CassandraEdge>> knowsEdges = Collections.singletonList(edge1);
         List<AtlasEdge<CassandraVertex, CassandraEdge>> likesEdges = Collections.singletonList(edge2);
 
+        // Batch threshold must be high enough so 2 labels takes the per-label path
+        when(mockGraph.getEdgeLabelBatchThreshold()).thenReturn(10);
         when(mockGraph.getEdgesForVertex("v1", AtlasEdgeDirection.OUT, "knows")).thenReturn(knowsEdges);
         when(mockGraph.getEdgesForVertex("v1", AtlasEdgeDirection.OUT, "likes")).thenReturn(likesEdges);
 
@@ -166,10 +168,9 @@ public class CassandraVertexTest {
     @Test
     public void testGetEdgesCount() {
         CassandraVertex v = new CassandraVertex("v1", mockGraph);
-        CassandraEdge e1 = new CassandraEdge("e1", "v1", "v2", "knows", mockGraph);
-        CassandraEdge e2 = new CassandraEdge("e2", "v1", "v3", "knows", mockGraph);
-        List<AtlasEdge<CassandraVertex, CassandraEdge>> edges = Arrays.asList(e1, e2);
-        when(mockGraph.getEdgesForVertex("v1", AtlasEdgeDirection.OUT, "knows")).thenReturn(edges);
+        // getEdgesCount now uses CQL COUNT(*) fast-path + buffer adjustment
+        when(mockGraph.countEdgesForVertex("v1", AtlasEdgeDirection.OUT, "knows")).thenReturn(2L);
+        when(mockGraph.countBufferedEdgeAdjustment("v1", AtlasEdgeDirection.OUT, "knows")).thenReturn(0L);
 
         assertEquals(v.getEdgesCount(AtlasEdgeDirection.OUT, "knows"), 2);
     }
@@ -185,9 +186,9 @@ public class CassandraVertexTest {
     @Test
     public void testHasEdgesTrue() {
         CassandraVertex v = new CassandraVertex("v1", mockGraph);
-        CassandraEdge e1 = new CassandraEdge("e1", "v1", "v2", "knows", mockGraph);
-        when(mockGraph.getEdgesForVertex("v1", AtlasEdgeDirection.OUT, "knows"))
-                .thenReturn(Collections.singletonList(e1));
+        // hasEdges now uses CQL LIMIT 1 fast-path
+        when(mockGraph.hasBufferedEdges("v1", AtlasEdgeDirection.OUT, "knows")).thenReturn(false);
+        when(mockGraph.hasEdgesForVertex("v1", AtlasEdgeDirection.OUT, "knows")).thenReturn(true);
         assertTrue(v.hasEdges(AtlasEdgeDirection.OUT, "knows"));
     }
 

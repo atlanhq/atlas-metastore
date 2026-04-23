@@ -212,7 +212,25 @@ public enum AtlasConfiguration {
     BULK_PURGE_BATCH_SIZE("atlas.bulk.purge.batch.size", 500),
     BULK_PURGE_WORKER_COUNT("atlas.bulk.purge.worker.count", 4),
     BULK_PURGE_REDIS_TTL_SECONDS("atlas.bulk.purge.redis.ttl.seconds", 86400),
-    BULK_PURGE_ORPHAN_CHECK_ENABLED("atlas.bulk.purge.orphan.check.enabled", true);
+    BULK_PURGE_ORPHAN_CHECK_ENABLED("atlas.bulk.purge.orphan.check.enabled", true),
+
+    // Cassandra edge pagination: page size for lazy edge iteration (super vertex mitigation)
+    CASSANDRA_EDGE_PAGE_SIZE("atlas.cassandra.edge.page.size", 500),
+
+    // When getEdges(direction, labels) is called with more labels than this threshold,
+    // switch from N per-label CQL queries to a single partition scan + client-side filter.
+    CASSANDRA_EDGE_LABEL_BATCH_THRESHOLD("atlas.cassandra.edge.label.batch.threshold", 5),
+
+    // Async-ingestion (ZG WAL) topic config — applied at startup via AdminClient create/alter.
+    // Defaults: 90-day retention for DR replay, 5 MB per message for large bulk payloads.
+    ASYNC_INGESTION_TOPIC_RETENTION_MS("atlas.async.ingestion.topic.retention.ms", 7776000000L),
+    ASYNC_INGESTION_TOPIC_MAX_MESSAGE_BYTES("atlas.async.ingestion.topic.max.message.bytes", 5242880),
+
+    // Shadow mode (MS-1017): pod-local flag. When true, the pod still writes to the graph
+    // but suppresses all outward side effects — ATLAS_ENTITIES CDC, entity_audits, search
+    // logs, Keycloak role/user/group mutations. Set in the ZG STS ConfigMap during dual-stack
+    // cutover; the JG STS stays false so it remains the source of truth.
+    SHADOW_MODE_ENABLED("atlas.shadow.mode.enabled", false);
 
     private static final Configuration APPLICATION_PROPERTIES;
 

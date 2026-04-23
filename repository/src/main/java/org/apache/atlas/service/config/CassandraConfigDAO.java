@@ -47,6 +47,12 @@ import java.util.Map;
 public class CassandraConfigDAO implements AutoCloseable {
     private static final Logger LOG = LoggerFactory.getLogger(CassandraConfigDAO.class);
 
+    // Column name constants
+    private static final String COL_CONFIG_KEY   = "config_key";
+    private static final String COL_CONFIG_VALUE = "config_value";
+    private static final String COL_UPDATED_BY   = "updated_by";
+    private static final String COL_LAST_UPDATED = "last_updated";
+
     // Retry configuration
     private static final int MAX_RETRIES = 3;
     private static final Duration INITIAL_BACKOFF = Duration.ofMillis(100);
@@ -75,20 +81,35 @@ public class CassandraConfigDAO implements AutoCloseable {
     private final PreparedStatement healthCheckStmt;
 
     /**
-     * Initialize the singleton instance with configuration.
+     * Initialize the singleton instance with DynamicConfigStore configuration.
      * Must be called before getInstance().
      *
-     * @param config the configuration
+     * @param config the dynamic config store configuration
      * @throws AtlasBaseException if initialization fails
      */
     public static synchronized void initialize(DynamicConfigStoreConfig config) throws AtlasBaseException {
+        doInitialize(config.getKeyspace(), config.getTable(), config.getAppName(),
+                config.getHostname(), config.getCassandraPort(), config.getDatacenter(),
+                config.getReplicationFactor(), config.getConsistencyLevel());
+    }
+
+    /**
+     * Initialize the singleton with explicit parameters.
+     * Package-private so StaticConfigStore (same package) can call it directly
+     * without needing its own config class.
+     * Safe to call multiple times — subsequent calls are no-ops.
+     */
+    static synchronized void doInitialize(String keyspace, String table, String appName,
+                                     String hostname, int port, String datacenter,
+                                     int replicationFactor, String consistencyLevel) throws AtlasBaseException {
         if (initialized) {
             LOG.debug("CassandraConfigDAO already initialized");
             return;
         }
 
         try {
-            INSTANCE = new CassandraConfigDAO(config);
+            INSTANCE = new CassandraConfigDAO(keyspace, table, appName, hostname, port,
+                    datacenter, replicationFactor, consistencyLevel);
             initialized = true;
             initializationException = null;
             LOG.info("CassandraConfigDAO singleton initialized successfully");
@@ -122,15 +143,17 @@ public class CassandraConfigDAO implements AutoCloseable {
         return initialized;
     }
 
-    private CassandraConfigDAO(DynamicConfigStoreConfig config) throws AtlasBaseException {
-        this.keyspace = config.getKeyspace();
-        this.table = config.getTable();
-        this.appName = config.getAppName();
-        this.consistencyLevel = parseConsistencyLevel(config.getConsistencyLevel());
+    private CassandraConfigDAO(String keyspace, String table, String appName,
+                               String hostname, int port, String datacenter,
+                               int replicationFactor, String consistencyLevel) throws AtlasBaseException {
+        this.keyspace = keyspace;
+        this.table = table;
+        this.appName = appName;
+        this.consistencyLevel = parseConsistencyLevel(consistencyLevel);
 
         try {
             LOG.info("Initializing CassandraConfigDAO - hostname: {}, keyspace: {}, table: {}, consistencyLevel: {}",
-                    config.getHostname(), keyspace, table, consistencyLevel);
+                    hostname, keyspace, table, this.consistencyLevel);
 
             // Try to reuse the shared Cassandra session from the graph provider to avoid creating
             // a separate connection pool (saves ~0.2s startup and reduces resource usage).
@@ -140,8 +163,7 @@ public class CassandraConfigDAO implements AutoCloseable {
                 String backend = ApplicationProperties.get().getString(
                         ApplicationProperties.GRAPHDB_BACKEND_CONF, ApplicationProperties.DEFAULT_GRAPHDB_BACKEND);
                 if (ApplicationProperties.GRAPHDB_BACKEND_CASSANDRA.equalsIgnoreCase(backend)) {
-                    sharedSession = CassandraSessionProvider.getSharedSession(
-                            config.getHostname(), config.getCassandraPort(), config.getDatacenter());
+                    sharedSession = CassandraSessionProvider.getSharedSession(hostname, port, datacenter);
                     LOG.info("CassandraConfigDAO: Reusing shared Cassandra session from CassandraSessionProvider");
                 }
             } catch (Exception e) {
@@ -162,15 +184,15 @@ public class CassandraConfigDAO implements AutoCloseable {
                         .build();
 
                 session = CqlSession.builder()
-                        .addContactPoint(new InetSocketAddress(config.getHostname(), config.getCassandraPort()))
+                        .addContactPoint(new InetSocketAddress(hostname, port))
                         .withConfigLoader(configLoader)
-                        .withLocalDatacenter(config.getDatacenter())
+                        .withLocalDatacenter(datacenter)
                         .build();
                 ownsSession = true;
             }
 
             // Initialize schema
-            initializeSchema(config.getReplicationFactor());
+            initializeSchema(replicationFactor);
 
             // Prepare statements
             selectAllStmt = prepare(String.format(
@@ -249,6 +271,108 @@ public class CassandraConfigDAO implements AutoCloseable {
         LOG.info("Ensured table {}.{} exists", keyspace, table);
     }
 
+    // ================== Table-aware methods (for StaticConfigStore) ==================
+    // These use SimpleStatement instead of prepared statements because they target
+    // a different table and are only called once at startup.
+
+    /**
+     * Ensure a table with the standard config schema exists.
+     * Creates the keyspace and table if they don't exist.
+     *
+     * @return true if the table exists or was created, false if creation failed
+     */
+    public boolean ensureTableExists(String targetKeyspace, String targetTable, int replicationFactor) {
+        try {
+            String createKs = String.format(
+                    "CREATE KEYSPACE IF NOT EXISTS %s WITH replication = " +
+                    "{'class': 'SimpleStrategy', 'replication_factor': '%d'} AND durable_writes = true",
+                    targetKeyspace, replicationFactor);
+            executeWithRetry(SimpleStatement.builder(createKs)
+                    .setConsistencyLevel(DefaultConsistencyLevel.ALL).build());
+
+            String createTbl = String.format(
+                    "CREATE TABLE IF NOT EXISTS %s.%s (" +
+                    "app_name text, config_key text, config_value text, " +
+                    "updated_by text, last_updated timestamp, " +
+                    "PRIMARY KEY ((app_name), config_key))",
+                    targetKeyspace, targetTable);
+            executeWithRetry(SimpleStatement.builder(createTbl)
+                    .setConsistencyLevel(DefaultConsistencyLevel.ALL).build());
+
+            LOG.info("Ensured table {}.{} exists", targetKeyspace, targetTable);
+            return true;
+
+        } catch (Exception e) {
+            LOG.warn("Failed to ensure table {}.{} exists: {}", targetKeyspace, targetTable, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Read all configs from a specific keyspace.table for a given app_name.
+     * Uses SimpleStatement (called once at startup — no need for prepared statements).
+     */
+    public Map<String, DynamicConfigCacheStore.ConfigEntry> getAllConfigsFromTable(
+            String targetKeyspace, String targetTable, String targetAppName) throws AtlasBaseException {
+        Map<String, DynamicConfigCacheStore.ConfigEntry> configs = new HashMap<>();
+        try {
+            String cql = String.format(
+                    "SELECT config_key, config_value, updated_by, last_updated FROM %s.%s WHERE app_name = ?",
+                    targetKeyspace, targetTable);
+            SimpleStatement stmt = SimpleStatement.builder(cql)
+                    .addPositionalValue(targetAppName)
+                    .setConsistencyLevel(consistencyLevel)
+                    .build();
+            ResultSet rs = executeWithRetry(stmt);
+
+            for (Row row : rs) {
+                String key = row.getString(COL_CONFIG_KEY);
+                String value = row.getString(COL_CONFIG_VALUE);
+                String updatedBy = row.getString(COL_UPDATED_BY);
+                Instant lastUpdated = row.getInstant(COL_LAST_UPDATED);
+                configs.put(key, new DynamicConfigCacheStore.ConfigEntry(value, updatedBy, lastUpdated));
+            }
+
+            LOG.debug("Retrieved {} configs from {}.{} for app_name: {}", configs.size(),
+                    targetKeyspace, targetTable, targetAppName);
+            return configs;
+
+        } catch (Exception e) {
+            LOG.error("Error fetching configs from {}.{} for app_name: {}", targetKeyspace, targetTable, targetAppName, e);
+            throw new AtlasBaseException("Error fetching configs from " + targetKeyspace + "." + targetTable, e);
+        }
+    }
+
+    /**
+     * Write a config to a specific keyspace.table for a given app_name.
+     * Uses SimpleStatement.
+     */
+    public void putConfigToTable(String targetKeyspace, String targetTable,
+                                 String targetAppName, String key, String value,
+                                 String updatedBy) throws AtlasBaseException {
+        try {
+            String cql = String.format(
+                    "INSERT INTO %s.%s (app_name, config_key, config_value, updated_by, last_updated) " +
+                    "VALUES (?, ?, ?, ?, ?)",
+                    targetKeyspace, targetTable);
+            SimpleStatement stmt = SimpleStatement.builder(cql)
+                    .addPositionalValue(targetAppName)
+                    .addPositionalValue(key)
+                    .addPositionalValue(value)
+                    .addPositionalValue(updatedBy)
+                    .addPositionalValue(Instant.now())
+                    .setConsistencyLevel(consistencyLevel)
+                    .build();
+            executeWithRetry(stmt);
+            LOG.info("Config written to {}.{} - app_name: {}, key: {}, value: {}, updatedBy: {}",
+                    targetKeyspace, targetTable, targetAppName, key, value, updatedBy);
+
+        } catch (Exception e) {
+            LOG.error("Error writing config to {}.{} - key: {}", targetKeyspace, targetTable, key, e);
+            throw new AtlasBaseException("Error writing config to " + targetKeyspace + "." + targetTable + ", key: " + key, e);
+        }
+    }
+
     /**
      * Get all configs for the application.
      * @return map of config key to config entry
@@ -261,10 +385,10 @@ public class CassandraConfigDAO implements AutoCloseable {
             ResultSet rs = executeWithRetry(bound);
 
             for (Row row : rs) {
-                String key = row.getString("config_key");
-                String value = row.getString("config_value");
-                String updatedBy = row.getString("updated_by");
-                Instant lastUpdated = row.getInstant("last_updated");
+                String key = row.getString(COL_CONFIG_KEY);
+                String value = row.getString(COL_CONFIG_VALUE);
+                String updatedBy = row.getString(COL_UPDATED_BY);
+                Instant lastUpdated = row.getInstant(COL_LAST_UPDATED);
 
                 configs.put(key, new DynamicConfigCacheStore.ConfigEntry(value, updatedBy, lastUpdated));
             }
@@ -295,9 +419,9 @@ public class CassandraConfigDAO implements AutoCloseable {
                 return null;
             }
 
-            String value = row.getString("config_value");
-            String updatedBy = row.getString("updated_by");
-            Instant lastUpdated = row.getInstant("last_updated");
+            String value = row.getString(COL_CONFIG_VALUE);
+            String updatedBy = row.getString(COL_UPDATED_BY);
+            Instant lastUpdated = row.getInstant(COL_LAST_UPDATED);
 
             return new DynamicConfigCacheStore.ConfigEntry(value, updatedBy, lastUpdated);
 

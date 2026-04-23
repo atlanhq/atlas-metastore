@@ -18,6 +18,7 @@
 
 package org.apache.atlas.repository.store.users;
 
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.type.AtlasType;
 import org.apache.commons.collections.CollectionUtils;
@@ -59,6 +60,10 @@ public class KeycloakStore {
 
     public RoleRepresentation createRoleForConnection(String name, boolean isComposite,
                                                       List<String> users, List<String> groups, List<String> roles) throws AtlasBaseException {
+        if (AtlasConfiguration.SHADOW_MODE_ENABLED.getBoolean()) {
+            LOG.info("Shadow mode: skipping Keycloak role creation for connection [{}]", name);
+            return shadowRoleStub(name, isComposite);
+        }
 
         List<UserRepresentation> roleUsers = new ArrayList<>();
 
@@ -136,6 +141,10 @@ public class KeycloakStore {
     public RoleRepresentation createRole(String name, boolean isComposite,
                                          List<String> users, List<String> groups, List<String> roles,
                                          Map<String, List<String>> attributes) throws AtlasBaseException {
+        if (AtlasConfiguration.SHADOW_MODE_ENABLED.getBoolean()) {
+            LOG.info("Shadow mode: skipping Keycloak role creation [{}]", name);
+            return shadowRoleStub(name, isComposite);
+        }
 
         List<UserRepresentation> roleUsers = new ArrayList<>();
 
@@ -235,6 +244,10 @@ public class KeycloakStore {
     }
 
     public RoleRepresentation createRole(RoleRepresentation role) throws AtlasBaseException {
+        if (AtlasConfiguration.SHADOW_MODE_ENABLED.getBoolean()) {
+            LOG.info("Shadow mode: skipping Keycloak role creation [{}]", role != null ? role.getName() : null);
+            return role != null ? role : shadowRoleStub(null, false);
+        }
         getKeycloakClient().createRole(role);
         return getKeycloakClient().getRoleByName(role.getName());
     }
@@ -252,6 +265,10 @@ public class KeycloakStore {
     public void updateRoleUsers(String roleName,
                                 List<String> existingUsers, List<String> newUsers,
                                 RoleRepresentation roleRepresentation) throws AtlasBaseException {
+        if (AtlasConfiguration.SHADOW_MODE_ENABLED.getBoolean()) {
+            LOG.info("Shadow mode: skipping Keycloak user-role mapping update [{}]", roleName);
+            return;
+        }
 
         if (roleRepresentation == null) {
             throw new AtlasBaseException("Failed to updateRoleUsers as roleRepresentation is null");
@@ -296,6 +313,10 @@ public class KeycloakStore {
     public void updateRoleGroups(String roleName,
                                  List<String> existingGroups, List<String> newGroups,
                                  RoleRepresentation roleRepresentation) throws AtlasBaseException {
+        if (AtlasConfiguration.SHADOW_MODE_ENABLED.getBoolean()) {
+            LOG.info("Shadow mode: skipping Keycloak group-role mapping update [{}]", roleName);
+            return;
+        }
 
         if (roleRepresentation == null) {
             throw new AtlasBaseException("Failed to updateRoleGroups as roleRepresentation is null");
@@ -340,6 +361,10 @@ public class KeycloakStore {
     public void updateRoleRoles(String roleName,
                                 List<String> existingRoles, List<String> newRoles,
                                 RoleRepresentation roleRepresentation) throws AtlasBaseException {
+        if (AtlasConfiguration.SHADOW_MODE_ENABLED.getBoolean()) {
+            LOG.info("Shadow mode: skipping Keycloak role-composite update [{}]", roleName);
+            return;
+        }
 
         if (roleRepresentation == null) {
             throw new AtlasBaseException("Failed to updateRoleRoles as roleRepresentation is null");
@@ -370,16 +395,32 @@ public class KeycloakStore {
     }
 
     public void removeRole(String roleId) throws AtlasBaseException {
+        if (AtlasConfiguration.SHADOW_MODE_ENABLED.getBoolean()) {
+            LOG.info("Shadow mode: skipping Keycloak role removal by id [{}]", roleId);
+            return;
+        }
         if (StringUtils.isNotEmpty(roleId)) {
             getKeycloakClient().deleteRoleById(roleId);
             LOG.info("Removed keycloak role with id {}", roleId);
         }
     }
     public void removeRoleByName(String roleName) throws AtlasBaseException {
+        if (AtlasConfiguration.SHADOW_MODE_ENABLED.getBoolean()) {
+            LOG.info("Shadow mode: skipping Keycloak role removal by name [{}]", roleName);
+            return;
+        }
         if (StringUtils.isNotEmpty(roleName)) {
             getKeycloakClient().deleteRoleByName(roleName);
             LOG.info("Removed keycloak role with name {}", roleName);
         }
+    }
+
+    /** Placeholder role for shadow mode — lets callers proceed without hitting Keycloak. */
+    private static RoleRepresentation shadowRoleStub(String name, boolean isComposite) {
+        RoleRepresentation stub = new RoleRepresentation();
+        stub.setName(name);
+        stub.setComposite(isComposite);
+        return stub;
     }
 
     private RoleRepresentation getRoleById(String roleId) throws AtlasBaseException {
