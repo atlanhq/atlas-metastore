@@ -391,6 +391,47 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         return result;
     }
 
+    /**
+     * Per-vertex-type edge fetch: each vertex gets its own label set with direction.
+     * Delegates to EdgeRepository.getEdgesForVerticesPerType() and merges with transaction buffer.
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, List<AtlasEdge<CassandraVertex, CassandraEdge>>> getEdgesForVerticesPerType(
+            Map<String, Map<String, AtlasEdgeDirection>> perVertexLabels, int limitPerLabel) {
+
+        if (perVertexLabels == null || perVertexLabels.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        Map<String, List<CassandraEdge>> persisted =
+                edgeRepository.getEdgesForVerticesPerType(perVertexLabels, this, limitPerLabel);
+
+        Map<String, List<AtlasEdge<CassandraVertex, CassandraEdge>>> result = new LinkedHashMap<>();
+        for (String vertexId : perVertexLabels.keySet()) {
+            List<CassandraEdge> persistedEdges = persisted.getOrDefault(vertexId, Collections.emptyList());
+
+            Map<String, CassandraEdge> merged = new LinkedHashMap<>();
+            for (CassandraEdge e : persistedEdges) {
+                if (!txBuffer.get().isEdgeRemoved(e.getIdString())) {
+                    merged.put(e.getIdString(), e);
+                }
+            }
+
+            // Check transaction buffer for matching labels
+            Set<String> labelSet = perVertexLabels.get(vertexId).keySet();
+            List<CassandraEdge> bufferedEdges = txBuffer.get().getEdgesForVertex(vertexId, AtlasEdgeDirection.BOTH, null);
+            for (CassandraEdge e : bufferedEdges) {
+                if (labelSet.contains(e.getLabel())) {
+                    merged.put(e.getIdString(), e);
+                }
+            }
+
+            result.put(vertexId, (List) new ArrayList<>(merged.values()));
+        }
+
+        return result;
+    }
+
     @Override
     public Iterable<AtlasVertex<CassandraVertex, CassandraEdge>> getVertices(String key, Object value) {
         // Try composite index lookup first

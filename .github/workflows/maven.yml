@@ -34,6 +34,7 @@ on:
       - ms-664-fix-audit-search
       - hotfix-reindex-refresh
       - nb-switchable-graph-provider
+      - ms-692-indexsearch-rewrite
       - ms-864-keycloak-jwks-internal-url
       - ms-911-add-observability
       - ms-610-ranges-policy-cache

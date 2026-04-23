@@ -25,6 +25,7 @@ import org.apache.atlas.*;
 import org.apache.atlas.annotation.GraphTransaction;
 import org.apache.atlas.authorize.AtlasSearchResultScrubRequest;
 import org.apache.atlas.authorizer.AtlasAuthorizationUtils;
+import org.apache.atlas.discovery.searchpipeline.IndexSearchResultRenderer;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.discovery.*;
 import org.apache.atlas.model.discovery.AtlasSearchResult.AtlasQueryType;
@@ -91,6 +92,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     private final ElasticsearchDslOptimizer dslOptimizer;
 
     private EntityGraphRetriever            entityRetriever;
+    private IndexSearchResultRenderer       indexSearchResultRenderer;
 
     @Inject
     public EntityDiscoveryService(AtlasTypeRegistry typeRegistry,
@@ -102,6 +104,20 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                                   EntityGraphRetriever entityRetriever) throws AtlasException {
         this(typeRegistry, graph, indexer, searchTracker, userProfileService, statsClient);
         this.entityRetriever          = entityRetriever;
+    }
+
+    /**
+     * Setter-based injection for IndexSearchResultRenderer (optional dependency).
+     * Kept separate from the 7-arg constructor to preserve its signature for
+     * manual instantiations (e.g., from entity preprocessors that pass null for
+     * indexer/searchTracker/userProfileService/statsClient).
+     *
+     * <p>When null (manual instantiation), the feature-flag gate in
+     * {@code directIndexSearch} falls back to the old {@code prepareSearchResult} path.</p>
+     */
+    @Inject
+    public void setIndexSearchResultRenderer(IndexSearchResultRenderer indexSearchResultRenderer) {
+        this.indexSearchResultRenderer = indexSearchResultRenderer;
     }
 
     public EntityDiscoveryService(AtlasTypeRegistry typeRegistry,
@@ -365,7 +381,17 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 return null;
             }
             RequestContext.get().endMetricRecord(elasticSearchQueryMetric);
-            prepareSearchResult(ret, indexQueryResult, resultAttributes, true, useVertexEdgeBulkFetching);
+
+            if (AtlasConfiguration.ATLAS_INDEXSEARCH_USE_OPTIMISED_PIPELINE.getBoolean()
+                    && indexSearchResultRenderer != null) {
+                // scrubSearchResults is called inside renderInternal (including for collapse results),
+                // matching existing prepareSearchResult behaviour.
+                // Null check guards manual instantiations (e.g., entity preprocessors that pass null
+                // for non-DI dependencies) — fall back to old path in that case.
+                indexSearchResultRenderer.render(ret, indexQueryResult, resultAttributes, searchParams);
+            } else {
+                prepareSearchResult(ret, indexQueryResult, resultAttributes, true, useVertexEdgeBulkFetching);
+            }
 
             ret.setAggregations(indexQueryResult.getAggregationMap());
             ret.setApproximateCount(indexQuery.vertexTotals());
