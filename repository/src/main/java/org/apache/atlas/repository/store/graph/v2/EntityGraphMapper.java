@@ -409,6 +409,60 @@ public class EntityGraphMapper {
                 reqContext.cacheDifferentialEntity(diffEntity);
 
                 resp.addEntity(UPDATE, restoredEntity);
+
+                // MS-1099: On restore, notify BOTH endpoints of the restored entity's ACTIVE
+                // lineage edges (PROCESS_INPUTS/PROCESS_OUTPUTS). For Process/ColumnProcess,
+                // soft delete marks the vertex DELETED but leaves edges ACTIVE. On restore
+                // (DELETED -> ACTIVE) those edges are unchanged, so downstream Columns never
+                // get a notification that their upstream Process is back. Lakehouse stays
+                // stale. Explicit notification here closes the gap.
+                //
+                // Scope & safety:
+                //   - Limited to PROCESS_EDGE_LABELS (input/output lineage). No broad scan.
+                //   - Skip self, deleted entities, and other restored entities (to avoid
+                //     duplicate notifications if the counterpart is also being restored in
+                //     the same transaction).
+                //   - O(edges) per restored vertex. ColumnProcess: typically 1 in + 1 out.
+                //     Standard Process: small fan-in/out. No recursion.
+                try {
+                    AtlasVertex restoredVertex = context.getVertex(restoredEntity.getGuid());
+                    if (restoredVertex == null) {
+                        restoredVertex = AtlasGraphUtilsV2.findByGuid(graph, restoredEntity.getGuid());
+                    }
+                    if (restoredVertex != null) {
+                        String vGuid = restoredEntity.getGuid();
+                        // Iterate BOTH directions. Don't filter by edge label — custom
+                        // relationship types (e.g. process_outputs, r:process_outputs,
+                        // dataset_process_inputs) vary by tenant typedef but all represent
+                        // lineage or hierarchy. isRelationshipEdge + status=ACTIVE is the
+                        // safe filter for "a live relationship that consumers should refresh".
+                        //
+                        // Note on edge state: soft-delete of a Process may leave OUT edges
+                        // (e.g. process_outputs) ACTIVE while IN edges (e.g. process_inputs)
+                        // become DELETED. We only notify endpoints of ACTIVE edges — these
+                        // represent relationships that are still live and whose endpoints
+                        // need to be informed that their counterpart came back.
+                        for (AtlasEdgeDirection direction : new AtlasEdgeDirection[]{AtlasEdgeDirection.OUT, AtlasEdgeDirection.IN}) {
+                            Iterable<AtlasEdge> edges = restoredVertex.getEdges(direction);
+                            for (AtlasEdge edge : edges) {
+                                if (!isRelationshipEdge(edge)) continue;
+                                if (getStatus(edge) != AtlasEntity.Status.ACTIVE) continue;
+                                AtlasVertex opposite = (direction == AtlasEdgeDirection.OUT) ? edge.getInVertex() : edge.getOutVertex();
+                                if (opposite == null) continue;
+                                String oppGuid = GraphHelper.getGuid(opposite);
+                                if (oppGuid == null
+                                        || vGuid.equals(oppGuid)
+                                        || reqContext.isDeletedEntity(oppGuid)
+                                        || reqContext.isRestoredEntity(oppGuid)) continue;
+                                reqContext.recordEntityUpdateForRelationshipChange(
+                                        entityRetriever.toAtlasEntityHeader(opposite));
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    LOG.warn("MS-1099: failed to record endpoint updates for restored entity {}",
+                            restoredEntity.getGuid(), e);
+                }
             }
         }
 
@@ -555,6 +609,10 @@ public class EntityGraphMapper {
                     if (CollectionUtils.isNotEmpty(context.getEntitiesToRestore()) && context.getEntitiesToRestore().contains(vertex)) {
                         Set<AtlasEdge> restoredInputOutputEdges = getRestoredInputOutputEdges(vertex);
                         addHasLineage(restoredInputOutputEdges, true);
+                        // Note: MS-1099 restore-path endpoint notification is handled earlier in
+                        // the `context.getEntitiesToRestore()` processing loop (search for MS-1099),
+                        // which guarantees it runs even when restoredInputOutputEdges is empty
+                        // (common case: edges were never deleted during Process soft-delete).
                     }
 
                     Set<AtlasEdge> removedEdges = getRemovedInputOutputEdges(guid);

@@ -208,21 +208,38 @@ public abstract class DeleteHandlerV1 {
                 // called and parent entities never get an ENTITY_UPDATE notification.
                 // MS-701 (PR #6381) fixed this for outgoing edges in deleteEdgeReference(), but
                 // that path is only reached during hard delete edge processing.
-                // Fix: find parent vertices via incoming relationship edges and record them now,
-                // before the vertex is marked as deleted.
+                // Fix: find related vertices via BOTH incoming AND outgoing relationship edges
+                // and record them now, before the vertex is marked as deleted.
+                //
+                // MS-1099: Extended to OUT edges. On soft delete of a Process, the upstream
+                // (input-side) asset is reachable via IN edges but the downstream (output-side)
+                // asset is reachable via OUT edges. Without iterating OUT edges, the downstream
+                // asset never gets an ENTITY_UPDATE notification — downstream Columns stay stale
+                // in Lakehouse.
                 try {
                     Iterable<AtlasEdge> inEdges = vertexInfo.getVertex().getEdges(AtlasEdgeDirection.IN);
                     for (AtlasEdge inEdge : inEdges) {
                         if (isRelationshipEdge(inEdge) && ACTIVE.equals(getStatus(inEdge))) {
-                            AtlasVertex parentVertex = inEdge.getOutVertex();
-                            if (parentVertex != null && !requestContext.isDeletedEntity(GraphHelper.getGuid(parentVertex))) {
+                            AtlasVertex relatedVertex = inEdge.getOutVertex();
+                            if (relatedVertex != null && !requestContext.isDeletedEntity(GraphHelper.getGuid(relatedVertex))) {
                                 requestContext.recordEntityUpdateForRelationshipChange(
-                                        entityRetriever.toAtlasEntityHeader(parentVertex));
+                                        entityRetriever.toAtlasEntityHeader(relatedVertex));
+                            }
+                        }
+                    }
+                    // MS-1099: mirror of above for OUT edges — notify the inVertex side.
+                    Iterable<AtlasEdge> outEdges = vertexInfo.getVertex().getEdges(AtlasEdgeDirection.OUT);
+                    for (AtlasEdge outEdge : outEdges) {
+                        if (isRelationshipEdge(outEdge) && ACTIVE.equals(getStatus(outEdge))) {
+                            AtlasVertex relatedVertex = outEdge.getInVertex();
+                            if (relatedVertex != null && !requestContext.isDeletedEntity(GraphHelper.getGuid(relatedVertex))) {
+                                requestContext.recordEntityUpdateForRelationshipChange(
+                                        entityRetriever.toAtlasEntityHeader(relatedVertex));
                             }
                         }
                     }
                 } catch (Exception e) {
-                    LOG.warn("Failed to record parent entity updates for deleted entity {}",
+                    LOG.warn("Failed to record related entity updates for deleted entity {}",
                             entityHeader.getGuid(), e);
                 }
             }
