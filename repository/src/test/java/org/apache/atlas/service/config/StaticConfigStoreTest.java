@@ -289,7 +289,7 @@ class StaticConfigStoreTest {
         cassandraData.put("atlas.graphdb.backend", entry("cassandra"));
         cassandraData.put("atlas.graph.id.strategy", entry("nanoid"));
         cassandraData.put("atlas.graph.claim.enabled", entry("true"));
-        cassandraData.put("atlas.graph.index.search.es.prefix", entry("myprefix"));
+        cassandraData.put("atlas.cassandra.graph.keyspace", entry("custom_ks"));
 
         when(mockDAO.getAllConfigsFromTable(TEST_KEYSPACE, TEST_TABLE, TEST_APP_NAME)).thenReturn(cassandraData);
 
@@ -299,7 +299,7 @@ class StaticConfigStoreTest {
         assertEquals("cassandra", StaticConfigStore.getConfig("atlas.graphdb.backend"));
         assertEquals("nanoid", StaticConfigStore.getConfig("atlas.graph.id.strategy"));
         assertEquals("true", StaticConfigStore.getConfig("atlas.graph.claim.enabled"));
-        assertEquals("myprefix", StaticConfigStore.getConfig("atlas.graph.index.search.es.prefix"));
+        assertEquals("custom_ks", StaticConfigStore.getConfig("atlas.cassandra.graph.keyspace"));
     }
 
     // =================== Unknown Key ===================

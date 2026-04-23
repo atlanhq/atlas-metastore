@@ -18,7 +18,11 @@ public enum StaticConfigKey {
 
     GRAPH_BACKEND("atlas.graphdb.backend", "janus"),
 
-    GRAPH_ES_INDEX_PREFIX("atlas.graph.index.search.es.prefix", null),
+    // NOTE: atlas.graph.index.search.es.prefix is intentionally NOT a static config.
+    // The ES index prefix is derived strictly from GRAPH_BACKEND in Constants.java
+    // ("cassandra" → "atlas_graph_", "janus" → "janusgraph_"). Allowing an explicit
+    // override caused a drift bug where backend and prefix could disagree, pointing
+    // reads at the wrong index. Flip GRAPH_BACKEND and the prefix follows.
 
     CASSANDRA_GRAPH_HOSTNAME("atlas.cassandra.graph.hostname", "localhost"),
 

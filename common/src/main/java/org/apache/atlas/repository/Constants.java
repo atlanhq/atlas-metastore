@@ -281,14 +281,16 @@ public final class Constants {
     /**
      * Elasticsearch index prefix.
      *
-     * Derived automatically from atlas.graphdb.backend:
-     *   - "cassandra" → "atlas_graph_"
-     *   - "janus" (default) → "janusgraph_"
+     * Always derived from {@code atlas.graphdb.backend} — backend and prefix are
+     * 1:1 by design and must stay paired:
+     *   - "cassandra" → "atlas_graph_" (ZG writes to atlas_graph_vertex_index)
+     *   - "janus"     → "janusgraph_"  (JG writes to janusgraph_vertex_index)
      *
-     * Can be overridden explicitly via atlas.graph.index.search.es.prefix,
-     * but normally you should just set the backend and let this follow.
+     * The explicit {@code atlas.graph.index.search.es.prefix} override was
+     * removed because it could drift from the backend and silently point reads
+     * at the wrong index (e.g. backend=janus but prefix=atlas_graph_). Flip the
+     * backend and this follows automatically.
      */
-    public static final String ES_INDEX_PREFIX_PROPERTY = "atlas.graph.index.search.es.prefix";
     public static final String INDEX_PREFIX;
     public static final String VERTEX_INDEX_NAME;
     public static final String EDGE_INDEX_NAME;
@@ -298,17 +300,14 @@ public final class Constants {
         try {
             Configuration config = ApplicationProperties.get();
 
-            // Derive default prefix from the graphdb backend
+            // Derive prefix strictly from the graphdb backend.
             String backend = config.getString(ApplicationProperties.GRAPHDB_BACKEND_CONF,
                                               ApplicationProperties.DEFAULT_GRAPHDB_BACKEND);
-            String backendDefault = ApplicationProperties.GRAPHDB_BACKEND_CASSANDRA.equalsIgnoreCase(backend)
-                                    ? "atlas_graph_" : "janusgraph_";
-
-            // Allow explicit override, but default follows the backend
-            prefix = config.getString(ES_INDEX_PREFIX_PROPERTY, backendDefault);
+            prefix = ApplicationProperties.GRAPHDB_BACKEND_CASSANDRA.equalsIgnoreCase(backend)
+                     ? "atlas_graph_" : "janusgraph_";
         } catch (Exception e) {
             prefix = "janusgraph_";
-            LOG.warn("Failed to read ES index prefix from config, using default: {}", prefix);
+            LOG.warn("Failed to read graphdb backend, defaulting ES index prefix to: {}", prefix);
         }
         INDEX_PREFIX = prefix;
         VERTEX_INDEX_NAME = INDEX_PREFIX + VERTEX_INDEX;
