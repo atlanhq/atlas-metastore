@@ -55,6 +55,23 @@ class StaticConfigStoreTest {
 
     @BeforeEach
     void setUp() {
+        // Reset ApplicationProperties to original values before each test.
+        // overlayOntoApplicationProperties() in happy-path tests modifies the shared
+        // singleton, which would contaminate fallback tests that read from it.
+        try {
+            PropertiesConfiguration config = (PropertiesConfiguration) ApplicationProperties.get();
+            config.setProperty("atlas.graphdb.backend", "janus");
+            config.setProperty("atlas.graph.id.strategy", "legacy");
+            config.setProperty("atlas.graph.claim.enabled", "false");
+            config.clearProperty("atlas.graph.index.search.es.prefix");
+            config.clearProperty("atlas.cassandra.graph.hostname");
+            config.clearProperty("atlas.cassandra.graph.port");
+            config.clearProperty("atlas.cassandra.graph.keyspace");
+            config.clearProperty("atlas.cassandra.graph.datacenter");
+        } catch (Exception e) {
+            // ignore
+        }
+
         mockDAO = mock(CassandraConfigDAO.class);
 
         mockedCassandraDAO = mockStatic(CassandraConfigDAO.class);
