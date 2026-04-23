@@ -1,9 +1,40 @@
 {
   "properties": {
-    "__qualifiedNameHierarchy": {
+    "__typeName": {
       "type": "text",
-      "analyzer": "atlan_path_analyzer",
-      "search_analyzer": "keyword"
+      "copy_to": ["all"],
+      "fields": {
+        "keyword": {
+          "type": "keyword",
+          "normalizer": "atlan_normalizer"
+        }
+      }
+    },
+    "__superTypeNames": {
+      "type": "text",
+      "copy_to": ["all"],
+      "fields": {
+        "keyword": {
+          "type": "keyword",
+          "normalizer": "atlan_normalizer"
+        }
+      }
+    },
+    "__guid": {
+      "type": "keyword",
+      "copy_to": ["all"]
+    },
+    "__state": {
+      "type": "keyword",
+      "copy_to": ["all"]
+    },
+    "__traitNames": {
+      "type": "keyword",
+      "copy_to": ["all"]
+    },
+    "__propagatedTraitNames": {
+      "type": "keyword",
+      "copy_to": ["all"]
     },
     "nestedColumnOrder": {
       "type": "nested",

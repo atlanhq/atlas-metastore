@@ -360,11 +360,11 @@ public final class Atlas {
 
         // Also create a template for atlas_graph_* pattern so the Cassandra graph backend
         // gets the same analyzers, normalizers, and dynamic templates when its index is created.
-        // This is best-effort — failure does not block startup.
-        if (!INDEX_PREFIX.equals("atlas_graph_")) {
-            createESTemplateIfNotExists(esClient, "atlas-graph-template",
-                    Arrays.asList("atlas_graph_*"), settingsJson, mappingsJson, false);
-        }
+        // Always invoked — regardless of current INDEX_PREFIX — so the template is present
+        // for the migrator to rely on even when Atlas boots in janus mode before a migration.
+        // Best-effort — failure does not block startup.
+        createESTemplateIfNotExists(esClient, "atlas-graph-template",
+                Arrays.asList("atlas_graph_*"), settingsJson, mappingsJson, false);
 
         // Create a unified alias "atlas_vertex_index" pointing to the actual vertex index.
         // This allows consumers to use a stable alias regardless of the backend-specific index name.
