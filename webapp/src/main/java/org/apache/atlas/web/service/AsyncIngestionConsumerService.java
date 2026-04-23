@@ -39,6 +39,7 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
@@ -71,6 +72,11 @@ import java.util.concurrent.atomic.AtomicLong;
  * </ul>
  */
 @Service
+// Guarantees StaticConfigStore's @PostConstruct (which overlays Cassandra-sourced
+// values onto ApplicationProperties) completes BEFORE this bean's init() runs.
+// Without this, the shadow-mode gate read in init() may see the raw application.properties
+// default and skip consumer startup even when mothership seeded shadow=true in Cassandra.
+@DependsOn("staticConfigStore")
 public class AsyncIngestionConsumerService {
 
     private static final Logger LOG = LoggerFactory.getLogger(AsyncIngestionConsumerService.class);
