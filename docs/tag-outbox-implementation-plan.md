@@ -137,11 +137,12 @@ Failures in tag ES sync surface at two distinct points in the existing code. Bot
 - 3 call sites changed in-file (Cassandra-read failure, ES partial failure, total exception). DLQ producer stays wired for 1-commit revert.
 
 **Surface 2 — direct attachment failures** (inside `EntityMutationService.executeESPostProcessing`):
-- Today: `ESWriteFailureRegistry.record(failure)` is called, but **no sink is installed** — failures are silently dropped (see the class javadoc, which explicitly reserves this integration point for MS-1010).
-- After this PR: `TagOutboxService.init()` installs a `FailureSink` on `ESWriteFailureRegistry` that extracts entity GUIDs from the `ESDeferredOperation` payloads (resolving vertex IDs → GUIDs via graph lookup) and calls `TagOutboxSink.enqueue(guids)`.
-- `EntityMutationService.executeESPostProcessing` itself is **not modified** — it already calls `ESWriteFailureRegistry.record`. We only provide the consumer side.
+- This PR introduces a new **tag-scoped registry** `TagESWriteFailureRegistry` in `org.apache.atlas.repository.tagoutbox`, structurally parallel to PR #6568's `ESWriteFailureRegistry` but fully independent (separate class, separate sink slot, separate `TagESWriteFailure` payload type).
+- `EntityMutationService.executeESPostProcessing`'s catch block is redirected — it now records to `TagESWriteFailureRegistry` instead of the shared `ESWriteFailureRegistry`. Similarly, `EntityGraphMapper.safeFlushTagDenormToES` is redirected.
+- `TagOutboxService.init()` installs `TagOutboxFailureSink` on `TagESWriteFailureRegistry`.
+- **Why a separate registry:** prevents any possibility of cross-routing between the tag outbox and the asset-sync outbox. The shared `ESWriteFailureRegistry` stays untouched and remains available for asset-sync's own future use. Two independent failure pipes, two independent sinks — mechanically impossible for a tag failure to land in `asset_sync_outbox`, or vice versa.
 
-**Net effect for direct attachment paths:** failures that were silently dropped today are now durably captured in the outbox and eventually replayed. Pure addition of recovery capability — zero risk of introducing regressions in the happy path because that path is untouched.
+**Net effect for direct attachment paths:** failures that were recorded on a no-op sink today are now durably captured in the tag outbox and eventually replayed. Pure addition of recovery capability on a dedicated failure pipe.
 
 ---
 
@@ -204,8 +205,9 @@ Path: `repository/src/main/java/org/apache/atlas/repository/tagoutbox/`
 | `TagOutboxConsumer.java` | ~150 | `OutboxConsumer<EntityGuidRef>`. Replays batch via `entityStore.repairClassificationMappingsV2(batch)` + `postProcessor.executeESOperations(deferredOps)` + clear-in-finally. Constructor: `(AtlasEntityStore, EntityCreateOrUpdateMutationPostProcessor, TagOutboxConfig)`. |
 | `TagOutboxProcessor.java` | ~280 | Relay thread. Constructor: `(Outbox<EntityGuidRef>, OutboxConsumer<EntityGuidRef>, LeaseManager, OutboxMetrics, TagOutboxConfig)`. Lease-guarded single-thread scheduler, adaptive idle/drain polling. |
 | `TagOutboxReconciler.java` | ~200 | Hourly sweeper. Constructor: `(TagOutbox, OutboxConsumer<EntityGuidRef>, LeaseManager, OutboxMetrics, TagOutboxConfig)`. Scans FAILED + stuck-PENDING, ALWAYS replays via consumer (no `findPresentInEs` short-circuit). |
-| `TagOutboxFailureSink.java` | ~110 | **Surface 2 bridge.** Implements `ESWriteFailureRegistry.FailureSink`. Installed by `TagOutboxService` on `ESWriteFailureRegistry`. Extracts vertex IDs from `ESDeferredOperation` payloads (plus `failedVertexIds`), resolves to entity GUIDs via `AtlasGraph.getVertex().getGuid()`, calls `TagOutboxSink.enqueueInternal`. Enablement point — until installed, direct-attachment failures are silently dropped by the registry's default no-op sink. |
-| `TagOutboxService.java` | ~170 | `@Service`-annotated Spring bean. `@PostConstruct` bootstraps schema → builds config → builds lease manager → builds outbox → builds metrics → builds consumer → builds processor → builds reconciler → installs `TagOutboxSink` singleton (Surface 1 integration point) → installs `FailureSink` on `ESWriteFailureRegistry` (Surface 2 integration point) → starts processor + reconciler. Exposes `getOutbox()` / `getActiveConfig()` / `isStarted()` for the admin controller. Gated by `atlas.tag.outbox.enabled` (default true). |
+| `TagESWriteFailureRegistry.java` | ~95 | **Tag-scoped failure registry.** Parallel to PR #6568's `ESWriteFailureRegistry` but fully independent: separate class, separate sink slot, separate `TagESWriteFailure` payload. Producers in `EntityMutationService.executeESPostProcessing` and `EntityGraphMapper.safeFlushTagDenormToES` record tag failures here; the tag-outbox sink is the single registered consumer. Mechanical isolation between tag and asset-sync failure pipes. |
+| `TagOutboxFailureSink.java` | ~110 | **Surface 2 bridge.** Implements `TagESWriteFailureRegistry.FailureSink`. Installed by `TagOutboxService` on `TagESWriteFailureRegistry`. Extracts vertex IDs from `ESDeferredOperation` payloads (plus `failedVertexIds`), resolves to entity GUIDs via `AtlasGraph.getVertex().getGuid()`, calls `TagOutboxSink.enqueueInternal`. No stage filter needed — the tag-scoped registry only carries tag events. |
+| `TagOutboxService.java` | ~170 | `@Service`-annotated Spring bean. `@PostConstruct` bootstraps schema → builds config → builds lease manager → builds outbox → builds metrics → builds consumer → builds processor → builds reconciler → installs `TagOutboxSink` singleton (Surface 1 integration point) → installs `FailureSink` on `TagESWriteFailureRegistry` (Surface 2 integration point) → starts processor + reconciler. Exposes `getOutbox()` / `getActiveConfig()` / `isStarted()` for the admin controller. Gated by `atlas.tag.outbox.enabled` (default true). |
 
 ### 4.3 Reused from PR #6568 (`repository.assetsync` package)
 
@@ -234,14 +236,14 @@ Tag package imports these 7 files unchanged. All are stable interfaces or small 
 
 | File | Change | Scope of change |
 |---|---|---|
-| `repository/.../store/graph/v2/EntityGraphMapper.java` | Replace 3 `tagDenormDLQProducer.emitFailedVertices(...)` call sites inside `flushTagDenormToES` with `TagOutboxSink.enqueue(toGuids(...))`. Add private helper `toGuids(Collection<String>, Map<String,String>)`. `tagDenormDLQProducer` field and constructor param retained. | Propagation failure sink (Surface 1). **Zero change** to the 7 tag mutation methods themselves — see §2.8. |
-| `intg/.../AtlasConfiguration.java` | Add ~15 new config entries under `atlas.tag.outbox.*`. | Config registration only. |
+| `repository/.../store/graph/v2/EntityGraphMapper.java` | (1) Replace 3 `tagDenormDLQProducer.emitFailedVertices(...)` call sites inside `flushTagDenormToES` with `TagOutboxSink.enqueue(toGuids(...))`; add private `toGuids` helper. (2) Redirect the `safeFlushTagDenormToES` catch-block `record(...)` call from the shared `ESWriteFailureRegistry` to the tag-scoped `TagESWriteFailureRegistry`. `tagDenormDLQProducer` field and constructor param retained for rollback. | Surface 1 sink swap + Surface 2 registry redirect. **Zero change** to the 7 tag mutation methods themselves — see §2.8. |
+| `repository/.../store/graph/v2/EntityMutationService.java` | Redirect the `executeESPostProcessing` catch-block `record(...)` call from `ESWriteFailureRegistry` to `TagESWriteFailureRegistry` (payload type updated correspondingly). Add one import. | Surface 2 registry redirect. Catch-block body only; the happy path and method shape are untouched. |
+| `intg/.../AtlasConfiguration.java` | Add ~22 new config entries under `atlas.tag.outbox.*`. | Config registration only. |
 
 ### 4.6 Unchanged from PR #6568 and the existing codebase
 
 - All `AssetSync*` concrete classes.
-- `EntityMutationService.executeESPostProcessing` — already calls `ESWriteFailureRegistry.record`; we install the consumer side (Surface 2 sink) in `TagOutboxService`, no change to the method itself.
-- `ESWriteFailureRegistry` — no source change; `TagOutboxService` calls `setSink(...)` at startup.
+- `ESWriteFailureRegistry` — **source-unchanged, runtime-dormant after this PR** (no production producers reference it anymore; asset-sync may wire it to their own sink later, at which point it serves asset-sync exclusively).
 - The 7 tag mutation methods listed in §2.8 — zero lines changed.
 - `TagDenormDLQProducer` stays as a Spring bean (injected but uncalled — rollback safety).
 - Kafka topic `ATLAS_TAG_DENORM_DLQ` and `TagDenormDLQReplayService` stay in place (cleaned up in Phase 2 follow-up once outbox is proven in staging).
@@ -290,7 +292,7 @@ EntityMutationService.executeESPostProcessing (unchanged)
         │
         ├─ entityMutationPostProcessor.executeESOperations(deferredOps) throws
         ▼
-ESWriteFailureRegistry.record(failure)    ← already called today, was no-op
+TagESWriteFailureRegistry.record(failure)  ← this PR redirects the call here (was ESWriteFailureRegistry in PR #6568)
         │
         ▼
 [FailureSink installed by TagOutboxService.init]
@@ -359,14 +361,14 @@ TagOutboxReconciler (every ~60 min, lease-guarded)
 8. Build `TagOutboxConsumer(entityStore, postProcessor)`.
 9. Build `TagOutboxProcessor(outbox, consumer, lease, metrics, config)`.
 10. Build `TagOutboxSink(outbox)` and `TagOutboxSink.install(sink)` — Surface 1 integration point (propagation failure path in `EntityGraphMapper.flushTagDenormToES`).
-11. Install a `FailureSink` on `ESWriteFailureRegistry` — Surface 2 integration point (direct attachment failure path in `EntityMutationService.executeESPostProcessing`). The sink extracts vertex IDs from `ESDeferredOperation` payloads, resolves them to GUIDs via graph lookup, and calls `TagOutboxSink.enqueue(guids)`.
+11. Install a `FailureSink` on `TagESWriteFailureRegistry` — Surface 2 integration point (direct attachment failure path in `EntityMutationService.executeESPostProcessing` + propagation-flush safety net in `EntityGraphMapper.safeFlushTagDenormToES`). The sink extracts vertex IDs from `ESDeferredOperation` payloads, resolves them to GUIDs via graph lookup, and calls `TagOutboxSink.enqueue(guids)`. The tag-scoped registry is separate from asset-sync's `ESWriteFailureRegistry` — tag failures and asset-sync failures flow through independent registries with independent sink slots.
 12. `processor.start()` — schedules first poll with jittered delay.
 13. If `atlas.tag.outbox.reconciler.enabled` (default true): build and start `TagOutboxReconciler`.
 
 ### 6.2 Shutdown (`@PreDestroy`)
 
 1. `TagOutboxSink.install(null)` — uninstall Surface 1 sink.
-2. `ESWriteFailureRegistry.setSink(null)` — uninstall Surface 2 sink (reverts to default no-op).
+2. `TagESWriteFailureRegistry.setSink(null)` — uninstall Surface 2 sink (reverts to default no-op).
 3. Stop reconciler (cancels scheduled task, graceful thread join).
 4. Stop processor (cancels poll task, releases lease immediately for fast failover).
 
@@ -616,7 +618,7 @@ repository/src/main/java/org/apache/atlas/repository/outbox/shared/
 └── OutboxMetrics.java                    ~250 LOC
 ```
 
-### New files — tag package (9)
+### New files — tag package (10)
 ```
 repository/src/main/java/org/apache/atlas/repository/tagoutbox/
 ├── TagOutboxConfig.java                  ~120 LOC
@@ -626,6 +628,7 @@ repository/src/main/java/org/apache/atlas/repository/tagoutbox/
 ├── TagOutboxConsumer.java                ~150 LOC
 ├── TagOutboxProcessor.java               ~280 LOC
 ├── TagOutboxReconciler.java              ~200 LOC
+├── TagESWriteFailureRegistry.java        ~95  LOC
 ├── TagOutboxFailureSink.java             ~110 LOC
 └── TagOutboxService.java                 ~170 LOC
 ```
@@ -640,12 +643,16 @@ docs/
 └── tag-outbox-runbook.md                 ~200 LOC (markdown)
 ```
 
-### Modified existing files (2)
+### Modified existing files (3)
 ```
 repository/src/main/java/org/apache/atlas/repository/store/graph/v2/EntityGraphMapper.java
-    3 call sites swapped + new private helper toGuids(), ~30 LOC changed
+    3 flushTagDenormToES call sites swapped + toGuids helper (~30 LOC)
+    + safeFlushTagDenormToES redirect to TagESWriteFailureRegistry (~7 LOC)
+repository/src/main/java/org/apache/atlas/repository/store/graph/v2/EntityMutationService.java
+    executeESPostProcessing catch-block record() redirect to TagESWriteFailureRegistry
+    + 1 import (~3 LOC)
 intg/src/main/java/org/apache/atlas/AtlasConfiguration.java
-    +15 new config entries under atlas.tag.outbox.*, ~40 LOC added
+    +22 new config entries under atlas.tag.outbox.*, ~40 LOC added
 ```
 
 ### Reused from PR #6568 (unchanged, integration points only)
@@ -662,22 +669,18 @@ repository/src/main/java/org/apache/atlas/repository/assetsync/
 └── EntityGuidRef.java       (payload data class)
 ```
 
-Integrated with via public APIs (no source change):
-```
-repository/src/main/java/org/apache/atlas/repository/store/graph/v2/
-└── ESWriteFailureRegistry.java
-    — TagOutboxService calls ESWriteFailureRegistry.setSink(...) to install the
-      Surface 2 failure sink. Class already exists and is already populated by
-      EntityMutationService.executeESPostProcessing today; we consume it.
-```
-
-Read for payload extraction:
+Read for payload extraction (not modified):
 ```
 intg/src/main/java/org/apache/atlas/model/
 └── ESDeferredOperation.java
     — the Surface 2 sink reads getPayload() + getEntityId() to extract vertex IDs
       before resolving them to GUIDs for outbox enqueue.
 ```
+
+**Not used by this PR (but adjacent):** PR #6568's `ESWriteFailureRegistry` stays in
+place, unreferenced by production code after this PR's redirect. It remains
+available for asset-sync to wire up their own consumer in a future change,
+without any interaction with the tag subsystem.
 
 ### Unchanged from PR #6568 (zero touch)
 All `AssetSync*` concrete classes, `PostCommitEsVerifier`, `EntityMutationService.executeESPostProcessing`.

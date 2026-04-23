@@ -8,7 +8,6 @@ import org.apache.atlas.repository.outbox.shared.ConfigurableLeaseManager;
 import org.apache.atlas.repository.outbox.shared.OutboxMetrics;
 import org.apache.atlas.repository.outbox.shared.OutboxPodId;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
-import org.apache.atlas.repository.store.graph.v2.ESWriteFailureRegistry;
 import org.apache.atlas.repository.store.graph.v2.EntityCreateOrUpdateMutationPostProcessor;
 import org.apache.atlas.repository.store.graph.v2.tags.CassandraTagConfig;
 import org.apache.atlas.service.metrics.MetricUtils;
@@ -36,7 +35,7 @@ import javax.annotation.PreDestroy;
  *     <li>Install <b>Surface 1 sink</b>: {@code TagOutboxSink.install(sink)} so
  *         {@code EntityGraphMapper.flushTagDenormToES} can reach the sink via
  *         static accessor.</li>
- *     <li>Install <b>Surface 2 sink</b>: {@code ESWriteFailureRegistry.setSink(new TagOutboxFailureSink(...))}
+ *     <li>Install <b>Surface 2 sink</b>: {@code TagESWriteFailureRegistry.setSink(new TagOutboxFailureSink(...))}
  *         so direct-tag-attachment failures in
  *         {@code EntityMutationService.executeESPostProcessing} flow into the
  *         same outbox.</li>
@@ -111,11 +110,12 @@ public final class TagOutboxService {
             sink = new TagOutboxSink(outbox, metrics);
             TagOutboxSink.install(sink);
 
-            // Surface 2 sink — consumes ESWriteFailureRegistry records emitted by
-            // EntityMutationService.executeESPostProcessing when direct-attachment
-            // tag paths fail the deferred-op flush. Until now, that registry had no
-            // consumer and failures were dropped silently.
-            ESWriteFailureRegistry.setSink(new TagOutboxFailureSink(graph, sink));
+            // Surface 2 sink — consumes TagESWriteFailureRegistry records emitted by
+            // EntityMutationService.executeESPostProcessing and by
+            // EntityGraphMapper.safeFlushTagDenormToES. Tag-scoped registry (separate
+            // class from asset-sync's ESWriteFailureRegistry) ensures no cross-routing
+            // between the two outboxes.
+            TagESWriteFailureRegistry.setSink(new TagOutboxFailureSink(graph, sink));
 
             processor.start();
 
@@ -157,7 +157,7 @@ public final class TagOutboxService {
         if (!started) return;
         try {
             TagOutboxSink.install(null);
-            ESWriteFailureRegistry.setSink(null);
+            TagESWriteFailureRegistry.setSink(null);
             if (reconciler != null) reconciler.stop();
             if (processor  != null) processor.stop();
             LOG.info("TagOutboxService: shutdown complete");

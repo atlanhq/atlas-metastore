@@ -16,6 +16,7 @@ import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
+import org.apache.atlas.repository.tagoutbox.TagESWriteFailureRegistry;
 import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -409,9 +410,9 @@ public class EntityMutationService {
                     // 4c (interpretation A): surface the failure to the registry instead of
                     // silently swallowing. API caller still receives the same response — the
                     // outbox (MS-1010) will durably capture the failed ops for replay.
-                    LOG.error("Failed to execute ES deferred operations — surfacing to ESWriteFailureRegistry for outbox replay", e);
+                    LOG.error("Failed to execute ES deferred operations — surfacing to TagESWriteFailureRegistry for outbox replay", e);
                     ESConnectorMetrics.recordFailure("post_processing_exception");
-                    ESWriteFailureRegistry.record(new ESWriteFailureRegistry.ESWriteFailure(
+                    TagESWriteFailureRegistry.record(new TagESWriteFailureRegistry.TagESWriteFailure(
                             snapshot, Collections.emptyList(), e, "post-processing"));
                 }
             }

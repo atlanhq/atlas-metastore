@@ -23,7 +23,7 @@ import java.util.Set;
  *         {@code flushTagDenormToES} is a method on an already-wired Spring bean
  *         — injecting another dependency would risk bean cycles.</li>
  *     <li><b>Surface 2 — direct-attachment failures</b>: {@code TagOutboxFailureSink}
- *         (installed on {@code ESWriteFailureRegistry}) extracts GUIDs from the
+ *         (installed on {@code TagESWriteFailureRegistry}) extracts GUIDs from the
  *         failed {@code ESDeferredOperation}s and calls {@link #enqueue(Set)} with them.</li>
  * </ul>
  *

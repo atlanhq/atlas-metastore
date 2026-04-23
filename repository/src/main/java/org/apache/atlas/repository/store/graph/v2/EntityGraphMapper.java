@@ -66,6 +66,7 @@ import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
 import org.apache.atlas.repository.store.graph.v2.tasks.ClassificationTask;
 import org.apache.atlas.repository.store.graph.v2.utils.TagAttributeMapper;
+import org.apache.atlas.repository.tagoutbox.TagESWriteFailureRegistry;
 import org.apache.atlas.repository.tagoutbox.TagOutboxSink;
 import org.apache.atlas.repository.util.TagDeNormAttributesUtil;
 import org.apache.atlas.service.config.ConfigKey;
@@ -6362,12 +6363,11 @@ public class EntityGraphMapper {
             // remains the immediate safety net.
             LOG.error("flushTagDenormToES failed during {}, DLQ/outbox handles recovery", operation, e);
             org.apache.atlas.repository.store.graph.v2.ESConnectorMetrics.recordFailure("propagation_flush_exception");
-            org.apache.atlas.repository.store.graph.v2.ESWriteFailureRegistry.record(
-                    new org.apache.atlas.repository.store.graph.v2.ESWriteFailureRegistry.ESWriteFailure(
-                            java.util.Collections.emptyList(),
-                            java.util.Collections.emptyList(),
-                            e,
-                            "propagation-flush:" + operation));
+            TagESWriteFailureRegistry.record(new TagESWriteFailureRegistry.TagESWriteFailure(
+                    Collections.emptyList(),
+                    Collections.emptyList(),
+                    e,
+                    "propagation-flush:" + operation));
         }
     }
 
