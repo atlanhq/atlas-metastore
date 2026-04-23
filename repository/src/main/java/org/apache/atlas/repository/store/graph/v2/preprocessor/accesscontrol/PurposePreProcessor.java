@@ -39,6 +39,7 @@ import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -106,6 +107,16 @@ public class PurposePreProcessor extends AccessControlPreProcessor {
 
     private void processCreatePurpose(AtlasStruct entity) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreatePurpose");
+
+        if (RequestContext.get().isImportInProgress()) {
+            // During import/async-ingestion, skip ES-dependent operations, existence checks, and authorization
+            if (StringUtils.isEmpty((String) entity.getAttribute(QUALIFIED_NAME))) {
+                String tenantId = getTenantId(entity);
+                entity.setAttribute(QUALIFIED_NAME, String.format("%s/%s", tenantId, getUUID()));
+            }
+            RequestContext.get().endMetricRecord(metricRecorder);
+            return;
+        }
 
         validatePurpose(graph, (AtlasEntity) entity);
 
