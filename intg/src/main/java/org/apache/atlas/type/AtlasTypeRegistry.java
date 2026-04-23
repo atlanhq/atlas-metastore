@@ -733,6 +733,8 @@ public class AtlasTypeRegistry {
         }
 
         public void removeTypesDef(AtlasTypesDef typesDef) throws AtlasBaseException {
+            resolveReferences();
+
             if (null != typesDef && !typesDef.isEmpty()) {
                 removeTypesWithNoRefResolve(typesDef.getEnumDefs());
                 removeTypesWithNoRefResolve(typesDef.getStructDefs());
@@ -742,7 +744,6 @@ public class AtlasTypeRegistry {
                 removeTypesWithNoRefResolve(typesDef.getBusinessMetadataDefs());
             }
 
-            resolveReferences();
         }
 
         private void removeTypesWithNoRefResolve(Collection<? extends AtlasBaseTypeDef> typeDefs) {
