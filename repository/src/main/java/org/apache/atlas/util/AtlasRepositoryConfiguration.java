@@ -153,6 +153,9 @@ public class AtlasRepositoryConfiguration {
     public static Class<? extends GraphDatabase> getGraphDatabaseImpl() {
         try {
             final Class<? extends GraphDatabase> ret;
+
+            // StaticConfigStore overlays Cassandra-backed values onto ApplicationProperties
+            // at startup, so ApplicationProperties already has the correct graph backend.
             Configuration                        config            = ApplicationProperties.get();
             String                               graphDatabaseImpl = config.getString(ApplicationProperties.GRAPHDB_BACKEND_CONF);
 

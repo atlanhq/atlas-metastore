@@ -1,0 +1,303 @@
+package org.apache.atlas.service.config;
+
+import org.apache.atlas.ApplicationProperties;
+import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.service.config.DynamicConfigCacheStore.ConfigEntry;
+import org.apache.commons.configuration.PropertiesConfiguration;
+import org.junit.jupiter.api.*;
+import org.mockito.MockedStatic;
+
+import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+/**
+ * Unit tests for StaticConfigStore.
+ *
+ * Covers:
+ * - Happy path: Cassandra returns "cassandra" -> isCassandraGraphBackend() == true
+ * - Empty row -> fallback to application.properties
+ * - Table creation fails -> fallback to application.properties
+ * - Cassandra unreachable -> fail-fast: System.exit called
+ * - Immutability: Attempt to modify returned map -> UnsupportedOperationException
+ * - Static API methods return correct values
+ * - Overlay onto ApplicationProperties
+ */
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
+class StaticConfigStoreTest {
+
+    private static final String TEST_KEYSPACE = "config_store";
+    private static final String TEST_TABLE = "static_configs";
+    private static final String TEST_APP_NAME = "atlas_static";
+
+    private static MockedStatic<CassandraConfigDAO> mockedCassandraDAO;
+    private static CassandraConfigDAO mockDAO;
+
+    static {
+        try {
+            PropertiesConfiguration config = new PropertiesConfiguration();
+            config.setProperty("atlas.graph.storage.hostname", "localhost");
+            config.setProperty("atlas.graph.index.search.hostname", "localhost:9200");
+            config.setProperty("atlas.static.config.store.enabled", "true");
+            config.setProperty("atlas.config.store.cassandra.enabled", "true");
+            // Application properties fallback values
+            config.setProperty("atlas.graphdb.backend", "janus");
+            config.setProperty("atlas.graph.id.strategy", "legacy");
+            ApplicationProperties.set(config);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to initialize test configuration", e);
+        }
+    }
+
+    @BeforeEach
+    void setUp() {
+        // Reset ApplicationProperties to original values before each test.
+        // overlayOntoApplicationProperties() in happy-path tests modifies the shared
+        // singleton, which would contaminate fallback tests that read from it.
+        try {
+            PropertiesConfiguration config = (PropertiesConfiguration) ApplicationProperties.get();
+            config.setProperty("atlas.graphdb.backend", "janus");
+            config.setProperty("atlas.graph.id.strategy", "legacy");
+        } catch (Exception e) {
+            // ignore
+        }
+
+        mockDAO = mock(CassandraConfigDAO.class);
+
+        mockedCassandraDAO = mockStatic(CassandraConfigDAO.class);
+        mockedCassandraDAO.when(CassandraConfigDAO::getInstance).thenReturn(mockDAO);
+        mockedCassandraDAO.when(() -> CassandraConfigDAO.initialize(any(DynamicConfigStoreConfig.class))).thenAnswer(inv -> null);
+        mockedCassandraDAO.when(() -> CassandraConfigDAO.doInitialize(
+                anyString(), anyString(), anyString(), anyString(), anyInt(), anyString(), anyInt(), anyString()
+        )).thenAnswer(inv -> null);
+        mockedCassandraDAO.when(CassandraConfigDAO::isInitialized).thenReturn(true);
+
+        // Default: table creation succeeds
+        when(mockDAO.ensureTableExists(anyString(), anyString(), anyInt())).thenReturn(true);
+    }
+
+    @AfterEach
+    void tearDown() {
+        mockedCassandraDAO.close();
+    }
+
+    @AfterAll
+    void tearDownAll() {
+        ApplicationProperties.forceReload();
+    }
+
+    // =================== Happy Path ===================
+
+    @Test
+    void testHappyPath_cassandraReturnsCassandra_isCassandraGraphBackend() throws AtlasBaseException {
+        Map<String, ConfigEntry> cassandraData = new HashMap<>();
+        cassandraData.put("atlas.graphdb.backend", entry("cassandra"));
+
+        when(mockDAO.getAllConfigsFromTable(TEST_KEYSPACE, TEST_TABLE, TEST_APP_NAME)).thenReturn(cassandraData);
+
+        StaticConfigStore store = createStore(true);
+        store.initialize();
+
+        assertTrue(StaticConfigStore.isReady());
+        assertTrue(StaticConfigStore.isCassandraGraphBackend());
+        assertEquals("cassandra", StaticConfigStore.getGraphBackend());
+    }
+
+    @Test
+    void testHappyPath_cassandraReturnsJanus_isNotCassandraGraphBackend() throws AtlasBaseException {
+        Map<String, ConfigEntry> cassandraData = new HashMap<>();
+        cassandraData.put("atlas.graphdb.backend", entry("janus"));
+
+        when(mockDAO.getAllConfigsFromTable(TEST_KEYSPACE, TEST_TABLE, TEST_APP_NAME)).thenReturn(cassandraData);
+
+        StaticConfigStore store = createStore(true);
+        store.initialize();
+
+        assertTrue(StaticConfigStore.isReady());
+        assertFalse(StaticConfigStore.isCassandraGraphBackend());
+        assertEquals("janus", StaticConfigStore.getGraphBackend());
+    }
+
+    // =================== Empty Row -> Fallback to Application Properties ===================
+
+    @Test
+    void testEmptyRow_fallsBackToApplicationProperties() throws AtlasBaseException {
+        when(mockDAO.getAllConfigsFromTable(TEST_KEYSPACE, TEST_TABLE, TEST_APP_NAME)).thenReturn(new HashMap<>());
+
+        StaticConfigStore store = createStore(true);
+        store.initialize();
+
+        assertTrue(StaticConfigStore.isReady());
+        assertFalse(StaticConfigStore.isCassandraGraphBackend());
+        assertEquals("janus", StaticConfigStore.getGraphBackend());
+    }
+
+    @Test
+    void testPartialRows_missingKeysFallBackToApplicationProperties() throws AtlasBaseException {
+        Map<String, ConfigEntry> cassandraData = new HashMap<>();
+        cassandraData.put("atlas.graphdb.backend", entry("cassandra"));
+        // atlas.graph.id.strategy NOT in Cassandra -> should fall back to application.properties
+
+        when(mockDAO.getAllConfigsFromTable(TEST_KEYSPACE, TEST_TABLE, TEST_APP_NAME)).thenReturn(cassandraData);
+
+        StaticConfigStore store = createStore(true);
+        store.initialize();
+
+        assertEquals("cassandra", StaticConfigStore.getConfig("atlas.graphdb.backend"));
+        assertEquals("legacy", StaticConfigStore.getConfig("atlas.graph.id.strategy"));
+    }
+
+    // =================== Table Creation Fails -> Fallback ===================
+
+    @Test
+    void testTableCreationFails_fallsBackToApplicationProperties() {
+        when(mockDAO.ensureTableExists(TEST_KEYSPACE, TEST_TABLE, 1)).thenReturn(false);
+
+        StaticConfigStore store = createStore(true);
+        store.initialize();
+
+        assertTrue(StaticConfigStore.isReady());
+        // Falls back to atlas-application.properties
+        assertEquals("janus", StaticConfigStore.getGraphBackend());
+        assertFalse(StaticConfigStore.isCassandraGraphBackend());
+        assertEquals("legacy", StaticConfigStore.getConfig("atlas.graph.id.strategy"));
+    }
+
+    // =================== Fail-Fast: Kill Process ===================
+
+    @Test
+    void testCassandraUnreachable_callsExitProcess() throws AtlasBaseException {
+        when(mockDAO.getAllConfigsFromTable(TEST_KEYSPACE, TEST_TABLE, TEST_APP_NAME))
+                .thenThrow(new AtlasBaseException("Cassandra unreachable after 3 retries"));
+
+        StaticConfigStore store = spy(createStore(true));
+        doNothing().when(store).exitProcess(anyInt());
+
+        store.initialize();
+
+        verify(store).exitProcess(1);
+        assertFalse(StaticConfigStore.isReady());
+    }
+
+    // =================== Immutability ===================
+
+    @Test
+    void testGetAllConfigs_returnsUnmodifiableMap() throws AtlasBaseException {
+        Map<String, ConfigEntry> cassandraData = new HashMap<>();
+        cassandraData.put("atlas.graphdb.backend", entry("janus"));
+
+        when(mockDAO.getAllConfigsFromTable(TEST_KEYSPACE, TEST_TABLE, TEST_APP_NAME)).thenReturn(cassandraData);
+
+        StaticConfigStore store = createStore(true);
+        store.initialize();
+
+        Map<String, String> configs = StaticConfigStore.getAllConfigs();
+
+        assertThrows(UnsupportedOperationException.class,
+                () -> configs.put("atlas.graphdb.backend", "cassandra"),
+                "Returned map should be unmodifiable");
+    }
+
+    // =================== Disabled Store ===================
+
+    @Test
+    void testDisabledStore_fallsBackToApplicationProperties() {
+        StaticConfigStore store = createStore(false);
+        store.initialize();
+
+        assertTrue(StaticConfigStore.isReady());
+        assertEquals("janus", StaticConfigStore.getGraphBackend());
+        assertFalse(StaticConfigStore.isCassandraGraphBackend());
+        assertEquals("legacy", StaticConfigStore.getConfig("atlas.graph.id.strategy"));
+    }
+
+    // =================== Seed Config ===================
+
+    @Test
+    void testSeedConfig_writesToCassandra() throws AtlasBaseException {
+        when(mockDAO.getAllConfigsFromTable(TEST_KEYSPACE, TEST_TABLE, TEST_APP_NAME)).thenReturn(new HashMap<>());
+
+        StaticConfigStore store = createStore(true);
+        store.initialize();
+
+        StaticConfigStore.seedConfig("atlas.graphdb.backend", "cassandra", "admin");
+
+        verify(mockDAO).putConfigToTable(TEST_KEYSPACE, TEST_TABLE, TEST_APP_NAME,
+                "atlas.graphdb.backend", "cassandra", "admin");
+    }
+
+    @Test
+    void testSeedConfig_doesNotChangeInMemoryValue() throws AtlasBaseException {
+        when(mockDAO.getAllConfigsFromTable(TEST_KEYSPACE, TEST_TABLE, TEST_APP_NAME)).thenReturn(new HashMap<>());
+
+        StaticConfigStore store = createStore(true);
+        store.initialize();
+
+        assertEquals("janus", StaticConfigStore.getGraphBackend());
+
+        StaticConfigStore.seedConfig("atlas.graphdb.backend", "cassandra", "admin");
+
+        // In-memory value should STILL be "janus" (restart required)
+        assertEquals("janus", StaticConfigStore.getGraphBackend());
+    }
+
+    // =================== All Configs with Cassandra Override ===================
+
+    @Test
+    void testAllConfigsFromCassandra_overrideApplicationProperties() throws AtlasBaseException {
+        Map<String, ConfigEntry> cassandraData = new HashMap<>();
+        cassandraData.put("atlas.graphdb.backend", entry("cassandra"));
+        cassandraData.put("atlas.graph.id.strategy", entry("nanoid"));
+
+        when(mockDAO.getAllConfigsFromTable(TEST_KEYSPACE, TEST_TABLE, TEST_APP_NAME)).thenReturn(cassandraData);
+
+        StaticConfigStore store = createStore(true);
+        store.initialize();
+
+        assertEquals("cassandra", StaticConfigStore.getConfig("atlas.graphdb.backend"));
+        assertEquals("nanoid", StaticConfigStore.getConfig("atlas.graph.id.strategy"));
+    }
+
+    // =================== Overlay onto ApplicationProperties ===================
+
+    @Test
+    void testOverlay_updatesApplicationProperties() throws Exception {
+        Map<String, ConfigEntry> cassandraData = new HashMap<>();
+        cassandraData.put("atlas.graphdb.backend", entry("cassandra"));
+        cassandraData.put("atlas.graph.id.strategy", entry("nanoid"));
+
+        when(mockDAO.getAllConfigsFromTable(TEST_KEYSPACE, TEST_TABLE, TEST_APP_NAME)).thenReturn(cassandraData);
+
+        StaticConfigStore store = createStore(true);
+        store.initialize();
+
+        // Verify ApplicationProperties was overlaid
+        assertEquals("cassandra", ApplicationProperties.get().getString("atlas.graphdb.backend"));
+        assertEquals("nanoid", ApplicationProperties.get().getString("atlas.graph.id.strategy"));
+    }
+
+    // =================== Unknown Key ===================
+
+    @Test
+    void testGetConfig_unknownKey_returnsNull() throws AtlasBaseException {
+        when(mockDAO.getAllConfigsFromTable(TEST_KEYSPACE, TEST_TABLE, TEST_APP_NAME)).thenReturn(new HashMap<>());
+
+        StaticConfigStore store = createStore(true);
+        store.initialize();
+
+        assertNull(StaticConfigStore.getConfig("non.existent.key"));
+    }
+
+    // =================== Helpers ===================
+
+    private StaticConfigStore createStore(boolean enabled) {
+        return new StaticConfigStore(enabled, TEST_APP_NAME, TEST_KEYSPACE, TEST_TABLE);
+    }
+
+    private static ConfigEntry entry(String value) {
+        return new ConfigEntry(value, "test", Instant.now());
+    }
+}
