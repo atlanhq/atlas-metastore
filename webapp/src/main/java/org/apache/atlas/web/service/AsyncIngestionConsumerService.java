@@ -19,6 +19,8 @@ import org.apache.atlas.repository.store.graph.v2.AtlasEntityStream;
 import org.apache.atlas.repository.store.graph.v2.BulkRequestContext;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationService;
 import org.apache.atlas.repository.store.bootstrap.AtlasTypeDefStoreInitializer;
+import org.apache.atlas.service.config.ConfigKey;
+import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.service.redis.RedisService;
 import org.apache.atlas.store.AtlasTypeDefStore;
 import org.apache.atlas.type.AtlasEntityType;
@@ -160,6 +162,17 @@ public class AsyncIngestionConsumerService {
 
     // Cached lag info — updated on the consumer thread, safe to read from HTTP threads
     private volatile Map<String, Object> cachedLagInfo = Collections.emptyMap();
+
+    // ── WAL_REPLAY_COMPLETE signalling ────────────────────────────────────
+    // When totalLag stays at 0 for DRAIN_STABLE_WINDOW_MS, we set the
+    // WAL_REPLAY_COMPLETE dynamic config key to "true" so mothership's
+    // rollback orchestrator knows the replay has drained. When lag rises
+    // above 0 again, we reset the key to "false".
+    //
+    // Fields touched ONLY on the single consumer thread — no locking needed.
+    private static final long DRAIN_STABLE_WINDOW_MS = 30_000L;
+    private Long zeroLagSinceMs = null;
+    private boolean walReplayCompleteReported = false;
 
     // Retry & backoff trackers keyed by "partition-offset"
     private final ConcurrentHashMap<String, RetryTrackerEntry> retryTracker = new ConcurrentHashMap<>();
@@ -1249,8 +1262,52 @@ public class AsyncIngestionConsumerService {
             lagInfo.put("partitions", partitionLags);
             lagInfo.put("updatedAt", System.currentTimeMillis());
             cachedLagInfo = lagInfo;
+
+            updateWalReplayCompleteFlag(totalLag);
         } catch (Exception e) {
             LOG.warn("Failed to compute consumer lag", e);
+        }
+    }
+
+    /**
+     * Writes the WAL_REPLAY_COMPLETE dynamic config on transitions:
+     *   totalLag==0 stable for {@link #DRAIN_STABLE_WINDOW_MS} → "true"
+     *   totalLag>0 (or first non-zero after drained state)       → "false"
+     *
+     * Only writes on transitions to avoid thrashing Cassandra with no-op updates.
+     * Exceptions are swallowed — this is an advisory signal for mothership, never
+     * a reason to fail consumer processing.
+     */
+    private void updateWalReplayCompleteFlag(long totalLag) {
+        try {
+            long now = System.currentTimeMillis();
+            if (totalLag == 0) {
+                if (zeroLagSinceMs == null) {
+                    zeroLagSinceMs = now;
+                }
+                if (!walReplayCompleteReported
+                        && (now - zeroLagSinceMs) >= DRAIN_STABLE_WINDOW_MS) {
+                    DynamicConfigStore.setConfig(
+                            ConfigKey.WAL_REPLAY_COMPLETE.getKey(),
+                            "true",
+                            "async-ingestion-consumer");
+                    walReplayCompleteReported = true;
+                    LOG.info("AsyncIngestionConsumer: WAL_REPLAY_COMPLETE=true (totalLag stable at 0 for {}ms)",
+                            (now - zeroLagSinceMs));
+                }
+            } else {
+                zeroLagSinceMs = null;
+                if (walReplayCompleteReported) {
+                    DynamicConfigStore.setConfig(
+                            ConfigKey.WAL_REPLAY_COMPLETE.getKey(),
+                            "false",
+                            "async-ingestion-consumer");
+                    walReplayCompleteReported = false;
+                    LOG.info("AsyncIngestionConsumer: WAL_REPLAY_COMPLETE=false (totalLag={} after drained)", totalLag);
+                }
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to update WAL_REPLAY_COMPLETE flag", e);
         }
     }
 

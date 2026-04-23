@@ -30,7 +30,15 @@ public enum StaticConfigKey {
 
     GRAPH_ID_STRATEGY("atlas.graph.id.strategy", "legacy"),
 
-    GRAPH_CLAIM_ENABLED("atlas.graph.claim.enabled", "false");
+    GRAPH_CLAIM_ENABLED("atlas.graph.claim.enabled", "false"),
+
+    // Shadow mode — when true, suppresses CDC notifications, entity_audits writes,
+    // search logs, and Keycloak role mutations. Used during WAL replay rollback so
+    // downstream systems don't see duplicate events.
+    // Lives in StaticConfigStore so mothership can flip it via the admin API and
+    // the next pod restart picks it up; AtlasConfiguration.SHADOW_MODE_ENABLED
+    // reads from ApplicationProperties, which StaticConfigStore overlays at init.
+    ATLAS_SHADOW_MODE_ENABLED("atlas.shadow.mode.enabled", "false");
 
     private final String key;
     private final String defaultValue;
