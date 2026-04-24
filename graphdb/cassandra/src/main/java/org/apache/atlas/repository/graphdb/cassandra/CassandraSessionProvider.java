@@ -67,10 +67,20 @@ public class CassandraSessionProvider {
     }
 
     private static CqlSession createSession(Configuration configuration) {
-        String hostname = configuration.getString(CONFIG_PREFIX + "hostname", DEFAULT_HOSTNAME);
-        int    port     = configuration.getInt(CONFIG_PREFIX + "port", DEFAULT_PORT);
+        // Prefer atlas.cassandra.graph.* properties; fall back to atlas.graph.storage.* (JanusGraph properties)
+        // so existing deployments work without adding new config keys.
+        String hostname = configuration.getString(CONFIG_PREFIX + "hostname", null);
+        if (hostname == null || hostname.isEmpty()) {
+            hostname = configuration.getString("atlas.graph.storage.hostname", DEFAULT_HOSTNAME);
+        }
+        int port = configuration.getInt(CONFIG_PREFIX + "port", -1);
+        if (port <= 0) {
+            port = configuration.getInt("atlas.graph.storage.cql.port",
+                    configuration.getInt("atlas.graph.storage.port", DEFAULT_PORT));
+        }
         String keyspace = configuration.getString(CONFIG_PREFIX + "keyspace", DEFAULT_KEYSPACE);
-        String dc       = configuration.getString(CONFIG_PREFIX + "datacenter", DEFAULT_DC);
+        String dc = configuration.getString(CONFIG_PREFIX + "datacenter",
+                configuration.getString("atlas.graph.storage.cql.local-datacenter", DEFAULT_DC));
 
         // Store connection config for shared session reuse by TagDAO, ConfigDAO, etc.
         configuredHostname = hostname;
