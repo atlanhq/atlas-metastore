@@ -27,6 +27,8 @@ on:
       - lite_master
       - switchable-graph-provider
       - ring-*
+      - feat/cs-es-sync-for-tags
+      - feat/cs-es-sync-master
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'

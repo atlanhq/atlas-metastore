@@ -5,6 +5,7 @@ import com.google.common.collect.Sets;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.CassandraTagOperation;
+import org.apache.atlas.model.ESDeferredOperation;
 import org.apache.atlas.model.instance.AtlasClassification;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntityHeaders;
@@ -15,6 +16,7 @@ import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
+import org.apache.atlas.repository.tagoutbox.TagESWriteFailureRegistry;
 import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -397,15 +399,29 @@ public class EntityMutationService {
     private void executeESPostProcessing(boolean isGraphTransactionFailed) {
         if (!isGraphTransactionFailed) {
             // Process deferred operations from direct tag paths (add/delete/update classifications)
-            if (!RequestContext.get().getESDeferredOperations().isEmpty()) {
+            List<ESDeferredOperation> deferredOps = RequestContext.get().getESDeferredOperations();
+            if (!deferredOps.isEmpty()) {
+                // Snapshot before the call — the failure registry / outbox needs the original
+                // payloads even if the inner call mutates or partially consumes the list.
+                List<ESDeferredOperation> snapshot = new ArrayList<>(deferredOps);
                 try {
-                    entityMutationPostProcessor.executeESOperations(RequestContext.get().getESDeferredOperations());
+                    entityMutationPostProcessor.executeESOperations(deferredOps);
                 } catch (Exception e) {
-                    LOG.error("Failed to execute ES deferred operations", e);
+                    // 4c (interpretation A): surface the failure to the registry instead of
+                    // silently swallowing. API caller still receives the same response — the
+                    // outbox (MS-1010) will durably capture the failed ops for replay.
+                    LOG.error("Failed to execute ES deferred operations — surfacing to TagESWriteFailureRegistry for outbox replay", e);
+                    ESConnectorMetrics.recordFailure("post_processing_exception");
+                    TagESWriteFailureRegistry.record(new TagESWriteFailureRegistry.TagESWriteFailure(
+                            snapshot, Collections.emptyList(), e, "post-processing"));
                 }
             }
             // Flush any remaining buffered propagation denorms (no-op when buffer is empty)
             entityGraphMapper.safeFlushTagDenormToES("post-processing");
+
+            // MS-1010 Option B verifier hook lives in AtlasEntityChangeNotifier.onEntitiesMutated
+            // — that's where the EntityMutationResponse (with createdEntities + updatedEntities
+            // + partiallyUpdatedEntities) is available. RequestContext alone doesn't track creates.
         }
     }
 

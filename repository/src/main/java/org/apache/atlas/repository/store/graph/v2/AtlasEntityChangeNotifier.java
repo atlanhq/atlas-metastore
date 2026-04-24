@@ -42,6 +42,7 @@ import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics.MetricRecorder;
 import org.apache.atlas.v1.model.instance.Referenceable;
 import org.apache.atlas.v1.model.instance.Struct;
+import org.apache.atlas.repository.assetsync.PostCommitEsVerifier;
 import org.apache.atlas.repository.converters.AtlasInstanceConverter;
 import org.apache.atlas.repository.graph.FullTextMapperV2;
 import org.apache.atlas.repository.graph.GraphHelper;
@@ -101,8 +102,41 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
         this.notifyDifferentialEntityChangesEnabled = AtlasConfiguration.NOTIFY_DIFFERENTIAL_ENTITY_CHANGES.getBoolean();
     }
 
+    /**
+     * Extract the GUIDs of entities that should be present in ES after this
+     * commit (creates + updates + partial updates) — i.e. the inverse of
+     * deletes/purges. Used by the MS-1010 Option B post-commit verifier hook.
+     */
+    private static java.util.Set<String> collectCommittedGuids(EntityMutationResponse resp) {
+        java.util.Set<String> guids = new java.util.HashSet<>();
+        addCommittedGuids(guids, resp.getCreatedEntities());
+        addCommittedGuids(guids, resp.getUpdatedEntities());
+        addCommittedGuids(guids, resp.getPartialUpdatedEntities());
+        return guids;
+    }
+
+    private static void addCommittedGuids(java.util.Set<String> out, List<AtlasEntityHeader> headers) {
+        if (headers == null) return;
+        for (AtlasEntityHeader h : headers) {
+            if (h != null && h.getGuid() != null) out.add(h.getGuid());
+        }
+    }
+
     @Override
     public void onEntitiesMutated(EntityMutationResponse entityMutationResponse, boolean isImport) throws AtlasBaseException {
+        // MS-1010 Option B: schedule async post-commit ES presence verify for the
+        // entities just committed via JG. Done BEFORE the legacy listener-empty
+        // short-circuit so the verifier runs even on minimal deployments without
+        // entity-change listeners. No-op when AssetSyncOutboxService is disabled.
+        try {
+            java.util.Set<String> committedGuids = collectCommittedGuids(entityMutationResponse);
+            if (!committedGuids.isEmpty()) {
+                PostCommitEsVerifier.postCommit(committedGuids);
+            }
+        } catch (Throwable t) {
+            // Verifier is best-effort — never let it affect the API path.
+        }
+
         if (CollectionUtils.isEmpty(entityChangeListeners)) {
             return;
         }
