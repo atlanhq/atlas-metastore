@@ -450,9 +450,22 @@ public class EntityGraphMapper {
                          * represent relationships that are still live and whose endpoints
                          * need to be informed that their counterpart came back.
                          */
+                        // Super-vertex protection: bound both-direction scans by edge count +
+                        // wall-clock deadline. The deadline spans the whole restore-notification
+                        // scan for this vertex (both directions share a budget).
+                        final int maxEdges = AtlasConfiguration.MAX_EDGES_SUPER_VERTEX.getInt();
+                        final long deadlineNanos = System.nanoTime()
+                                + AtlasConfiguration.MIN_TIMEOUT_SUPER_VERTEX.getLong() * 1_000_000_000L;
+
                         for (AtlasEdgeDirection direction : new AtlasEdgeDirection[]{AtlasEdgeDirection.OUT, AtlasEdgeDirection.IN}) {
+                            int examined = 0;
+                            boolean truncated = false;
                             Iterable<AtlasEdge> edges = restoredVertex.getEdges(direction);
                             for (AtlasEdge edge : edges) {
+                                if (examined++ >= maxEdges || System.nanoTime() > deadlineNanos) {
+                                    truncated = true;
+                                    break;
+                                }
                                 if (!isRelationshipEdge(edge)) continue;
                                 if (getStatus(edge) != AtlasEntity.Status.ACTIVE) continue;
                                 AtlasVertex opposite = (direction == AtlasEdgeDirection.OUT) ? edge.getInVertex() : edge.getOutVertex();
@@ -464,6 +477,13 @@ public class EntityGraphMapper {
                                         || reqContext.isRestoredEntity(oppGuid)) continue;
                                 reqContext.recordEntityUpdateForRelationshipChange(
                                         entityRetriever.toAtlasEntityHeader(opposite));
+                            }
+                            if (truncated) {
+                                LOG.warn("MS-1099: super-vertex protection — edge-notification scan ({}) truncated for "
+                                        + "restored entity {} (examined={}, maxEdges={}, timeoutSec={}). Some related "
+                                        + "entities may miss ENTITY_UPDATE.",
+                                        direction, vGuid, examined, maxEdges,
+                                        AtlasConfiguration.MIN_TIMEOUT_SUPER_VERTEX.getLong());
                             }
                         }
                     }
