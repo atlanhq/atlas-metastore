@@ -40,6 +40,7 @@ on:
       - ms-901-hidelineage
       - ms-894-override-classification
       - small-tenant-migrate-bug-fix
+      - config-store-ring-dev
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
