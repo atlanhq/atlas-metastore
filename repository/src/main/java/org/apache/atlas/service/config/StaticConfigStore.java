@@ -1,5 +1,11 @@
 package org.apache.atlas.service.config;
 
+import com.datastax.oss.driver.api.core.CqlSession;
+import com.datastax.oss.driver.api.core.config.DefaultDriverOption;
+import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
+import com.datastax.oss.driver.api.core.cql.ResultSet;
+import com.datastax.oss.driver.api.core.cql.Row;
+import com.datastax.oss.driver.api.core.cql.SimpleStatement;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.service.config.DynamicConfigCacheStore.ConfigEntry;
@@ -9,6 +15,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
+import java.net.InetSocketAddress;
+import java.time.Duration;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -76,6 +84,91 @@ public class StaticConfigStore {
         this.table = table;
         this.replicationFactor = 1;
         INSTANCE = this;
+    }
+
+    /**
+     * Early overlay: reads static configs from Cassandra and overlays onto ApplicationProperties
+     * BEFORE Spring context starts. Must be called from Atlas.main() to ensure graph backend and
+     * ES prefix are set correctly before Constants class loading and AtlasGraphProvider bean creation.
+     *
+     * Best-effort: if Cassandra is unreachable or table doesn't exist, falls back silently.
+     * The @PostConstruct initialize() will handle fail-fast later.
+     */
+    public static void earlyOverlay() {
+        long start = System.currentTimeMillis();
+        CqlSession session = null;
+        try {
+            Configuration props = ApplicationProperties.get();
+
+            boolean enabled = props.getBoolean("atlas.static.config.store.enabled", true);
+            if (!enabled) {
+                LOG.info("Static config store disabled, skipping early overlay");
+                return;
+            }
+
+            String hostname = props.getString("atlas.config.store.cassandra.hostname", null);
+            if (hostname == null || hostname.isEmpty()) {
+                hostname = props.getString("atlas.graph.storage.hostname", "localhost");
+            }
+            int port = props.getInt("atlas.config.store.cassandra.port", -1);
+            if (port <= 0) {
+                port = props.getInt("atlas.graph.storage.cql.port", 9042);
+            }
+            String datacenter = props.getString("atlas.config.store.cassandra.datacenter", "datacenter1");
+            String keyspace = props.getString("atlas.config.store.cassandra.keyspace", "config_store");
+            String table = props.getString("atlas.static.config.store.table", "static_configs");
+            String appName = props.getString("atlas.static.config.store.app.name", "atlas_static");
+
+            DriverConfigLoader configLoader = DriverConfigLoader.programmaticBuilder()
+                    .withDuration(DefaultDriverOption.CONNECTION_INIT_QUERY_TIMEOUT, Duration.ofSeconds(5))
+                    .withDuration(DefaultDriverOption.CONNECTION_CONNECT_TIMEOUT, Duration.ofSeconds(5))
+                    .withDuration(DefaultDriverOption.CONTROL_CONNECTION_TIMEOUT, Duration.ofSeconds(5))
+                    .withInt(DefaultDriverOption.CONNECTION_POOL_LOCAL_SIZE, 1)
+                    .withInt(DefaultDriverOption.CONNECTION_POOL_REMOTE_SIZE, 1)
+                    .build();
+
+            session = CqlSession.builder()
+                    .addContactPoint(new InetSocketAddress(hostname, port))
+                    .withConfigLoader(configLoader)
+                    .withLocalDatacenter(datacenter)
+                    .build();
+
+            String cql = String.format(
+                    "SELECT config_key, config_value FROM %s.%s WHERE app_name = ?",
+                    keyspace, table);
+            SimpleStatement stmt = SimpleStatement.builder(cql)
+                    .addPositionalValue(appName)
+                    .build();
+            ResultSet rs = session.execute(stmt);
+
+            int overlayCount = 0;
+            for (Row row : rs) {
+                String key = row.getString("config_key");
+                String value = row.getString("config_value");
+                if (key != null && value != null && StaticConfigKey.isValidKey(key)) {
+                    String existing = props.getString(key, null);
+                    props.setProperty(key, value);
+                    LOG.info("Early overlay: {} = {} (was: {})", key, value, existing);
+                    overlayCount++;
+                }
+            }
+
+            long duration = System.currentTimeMillis() - start;
+            LOG.info("StaticConfigStore early overlay completed in {}ms - {} configs overlaid", duration, overlayCount);
+
+        } catch (Exception e) {
+            long duration = System.currentTimeMillis() - start;
+            LOG.warn("StaticConfigStore early overlay failed ({}ms) - will retry in @PostConstruct: {}",
+                    duration, e.getMessage());
+        } finally {
+            if (session != null) {
+                try {
+                    session.close();
+                } catch (Exception e) {
+                    LOG.warn("Failed to close early overlay Cassandra session", e);
+                }
+            }
+        }
     }
 
     @PostConstruct
