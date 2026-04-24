@@ -156,12 +156,17 @@ public class AtlasRepositoryConfiguration {
             Configuration                        config            = ApplicationProperties.get();
             String                               graphDatabaseImpl = config.getString(ApplicationProperties.GRAPHDB_BACKEND_CONF);
 
+            LOG.info("getGraphDatabaseImpl: atlas.graphdb.backend='{}' (from ApplicationProperties)", graphDatabaseImpl);
+
             if (StringUtils.equals(graphDatabaseImpl, ApplicationProperties.GRAPHDB_BACKEND_CASSANDRA)) {
                 ret = ApplicationProperties.getClass(CASSANDRA_GRAPH_DATABASE_IMPLEMENTATION_CLASS, GraphDatabase.class);
+                LOG.info("getGraphDatabaseImpl: selected CassandraGraphDatabase (class={})", CASSANDRA_GRAPH_DATABASE_IMPLEMENTATION_CLASS);
             } else if (StringUtils.equals(graphDatabaseImpl, ApplicationProperties.GRAPHDB_BACKEND_JANUS)) {
                 ret = ApplicationProperties.getClass(JANUS_GRAPH_DATABASE_IMPLEMENTATION_CLASS, GraphDatabase.class);
+                LOG.info("getGraphDatabaseImpl: selected JanusGraphDatabase (class={})", JANUS_GRAPH_DATABASE_IMPLEMENTATION_CLASS);
             } else {
                 ret = ApplicationProperties.getClass(graphDatabaseImpl, GraphDatabase.class);
+                LOG.info("getGraphDatabaseImpl: selected custom impl (class={})", graphDatabaseImpl);
             }
 
             return ret;

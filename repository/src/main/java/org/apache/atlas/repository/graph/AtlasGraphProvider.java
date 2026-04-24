@@ -61,10 +61,12 @@ public class AtlasGraphProvider implements IAtlasGraphProvider {
                 synchronized(AtlasGraphProvider.class) {
                     if(graphDb_ == null) {
                         Class implClass = AtlasRepositoryConfiguration.getGraphDatabaseImpl();
+                        LOG.info("AtlasGraphProvider: instantiating graph database impl={}", implClass.getName());
                         graphDb_ = (GraphDatabase<V, E>) implClass.newInstance();
+                        LOG.info("AtlasGraphProvider: graph database created successfully, class={}", graphDb_.getClass().getName());
                     }
                 }
-            }         
+            }
             return graphDb_;
         }
         catch (IllegalAccessException | InstantiationException e) {
