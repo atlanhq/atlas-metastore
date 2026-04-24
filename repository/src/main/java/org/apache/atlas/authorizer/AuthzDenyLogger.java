@@ -17,6 +17,7 @@
  */
 package org.apache.atlas.authorizer;
 
+// ring-authz-deny-logging build trigger
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.authorize.AtlasAccessResult;
