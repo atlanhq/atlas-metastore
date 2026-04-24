@@ -34,7 +34,9 @@ public class RelationshipAuthorizer {
     public static AtlasAccessResult isAccessAllowedInMemory(String action, String relationshipType, AtlasEntityHeader endOneEntity, AtlasEntityHeader endTwoEntity) throws AtlasBaseException {
         AtlasAccessResult denyResult = checkRelationshipAccessAllowedInMemory(action, relationshipType, endOneEntity, endTwoEntity, POLICY_TYPE_DENY);
         if (denyResult.isAllowed() && denyResult.getPolicyPriority() == RangerPolicy.POLICY_PRIORITY_OVERRIDE) {
-            return new AtlasAccessResult(false, denyResult.getPolicyId(), denyResult.getPolicyPriority());
+            AtlasAccessResult flipped = new AtlasAccessResult(false, denyResult.getPolicyId(), denyResult.getPolicyPriority());
+            flipped.setPolicyName(denyResult.getPolicyName());
+            return flipped;
         }
 
         AtlasAccessResult allowResult = checkRelationshipAccessAllowedInMemory(action, relationshipType, endOneEntity, endTwoEntity, POLICY_TYPE_ALLOW);
@@ -44,7 +46,9 @@ public class RelationshipAuthorizer {
 
         if (denyResult.isAllowed() && !"-1".equals(denyResult.getPolicyId())) {
             // explicit deny
-            return new AtlasAccessResult(false, denyResult.getPolicyId(), denyResult.getPolicyPriority());
+            AtlasAccessResult flipped = new AtlasAccessResult(false, denyResult.getPolicyId(), denyResult.getPolicyPriority());
+            flipped.setPolicyName(denyResult.getPolicyName());
+            return flipped;
         } else {
             return allowResult;
         }
@@ -75,6 +79,7 @@ public class RelationshipAuthorizer {
                     //ret = ret || eval;
                     if (eval) {
                         result = new AtlasAccessResult(true, policy.getGuid(), policy.getPolicyPriority());
+                        result.setPolicyName(policy.getName());
                         if (policy.getPolicyPriority() == RangerPolicy.POLICY_PRIORITY_OVERRIDE) {
                             return result;
                         }

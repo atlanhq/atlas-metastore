@@ -72,17 +72,21 @@ public class AtlasAuthorizationUtils {
     }
 
     public static void verifyAccess(AtlasAdminAccessRequest request, Object... errorMsgParams) throws AtlasBaseException {
-        if (! isAccessAllowed(request)) {
+        AtlasAccessResult result = isAccessAllowedResult(request);
+        if (!result.isAllowed()) {
             String message = (errorMsgParams != null && errorMsgParams.length > 0) ? StringUtils.join(errorMsgParams) : "";
 
+            AuthzDenyLogger.logAdminDeny(request, result, message);
             throw new AtlasBaseException(AtlasErrorCode.UNAUTHORIZED_ACCESS, request.getUser(), message);
         }
     }
 
     public static void verifyAccess(AtlasTypeAccessRequest request, Object... errorMsgParams) throws AtlasBaseException {
-        if (! isAccessAllowed(request)) {
+        AtlasAccessResult result = isAccessAllowedResult(request);
+        if (!result.isAllowed()) {
             String message = (errorMsgParams != null && errorMsgParams.length > 0) ? StringUtils.join(errorMsgParams) : "";
 
+            AuthzDenyLogger.logTypeDeny(request, result, message);
             throw new AtlasBaseException(AtlasErrorCode.UNAUTHORIZED_ACCESS, request.getUser(), message);
         }
     }
@@ -102,15 +106,18 @@ public class AtlasAuthorizationUtils {
     }
 
     public static void verifyAccess(AtlasEntityAccessRequest request, Object... errorMsgParams) throws AtlasBaseException {
-        if (! isAccessAllowed(request)) {
+        AtlasAccessResult result = isAccessAllowedResult(request, true);
+        if (!result.isAllowed()) {
             String message = (errorMsgParams != null && errorMsgParams.length > 0) ? StringUtils.join(errorMsgParams) : "";
 
+            AuthzDenyLogger.logEntityDeny(request, result, message);
             throw new AtlasBaseException(AtlasErrorCode.UNAUTHORIZED_ACCESS, request.getUser(), message);
         }
     }
 
     public static void verifyAccess(AtlasRelationshipAccessRequest request, Object... errorMsgParams) throws AtlasBaseException {
-        if (!isAccessAllowed(request)) {
+        AtlasAccessResult result = isAccessAllowedResult(request);
+        if (!result.isAllowed()) {
             String message = (errorMsgParams != null && errorMsgParams.length > 0) ? StringUtils.join(errorMsgParams) : "";
             if (StringUtils.isEmpty(message)){
                 String end1Type = request.getEnd1Entity() != null ? request.getEnd1Entity().getTypeName() : null;
@@ -143,9 +150,11 @@ public class AtlasAuthorizationUtils {
                 errorMap.put("end1", request.getEnd1Entity().getGuid());
                 errorMap.put("end2", request.getEnd2Entity().getGuid());
 
+                AuthzDenyLogger.logRelationshipDeny(request, result, message);
                 throw new AtlasBaseException(AtlasErrorCode.UNAUTHORIZED_ACCESS, errorMap, request.getUser(), message);
 
             } else {
+                AuthzDenyLogger.logRelationshipDeny(request, result, message);
                 throw new AtlasBaseException(AtlasErrorCode.UNAUTHORIZED_ACCESS, request.getUser(), message);
             }
         }
@@ -173,10 +182,14 @@ public class AtlasAuthorizationUtils {
     }
 
     public static boolean isAccessAllowed(AtlasAdminAccessRequest request) {
+        return isAccessAllowedResult(request).isAllowed();
+    }
+
+    static AtlasAccessResult isAccessAllowedResult(AtlasAdminAccessRequest request) {
         MetricRecorder metric = RequestContext.get().startMetricRecord("isAccessAllowed");
 
-        boolean ret      = false;
-        String  userName = getCurrentUserName();
+        AtlasAccessResult ret      = new AtlasAccessResult(false);
+        String            userName = getCurrentUserName();
 
         if (StringUtils.isNotEmpty(userName)) {
             try {
@@ -186,14 +199,12 @@ public class AtlasAuthorizationUtils {
                 request.setClientIPAddress(RequestContext.get().getClientIPAddress());
                 request.setForwardedAddresses(RequestContext.get().getForwardedAddresses());
                 request.setRemoteIPAddress(RequestContext.get().getClientIPAddress());
-                AtlasAccessResult atlasPoliciesResult = authorizer.isAccessAllowed(request);
-
-                ret = atlasPoliciesResult.isAllowed();
+                ret = authorizer.isAccessAllowed(request);
             } catch (AtlasAuthorizationException e) {
                 LOG.error("Unable to obtain AtlasAuthorizer", e);
             }
         } else {
-            ret = true;
+            ret = new AtlasAccessResult(true);
         }
 
         RequestContext.get().endMetricRecord(metric);
@@ -202,13 +213,17 @@ public class AtlasAuthorizationUtils {
     }
 
     public static boolean isAccessAllowed(AtlasEntityAccessRequest request) {
-        return isAccessAllowed(request, true);
+        return isAccessAllowedResult(request, true).isAllowed();
     }
 
     public static boolean isAccessAllowed(AtlasEntityAccessRequest request, boolean isAuditLogEnabled) {
+        return isAccessAllowedResult(request, isAuditLogEnabled).isAllowed();
+    }
+
+    static AtlasAccessResult isAccessAllowedResult(AtlasEntityAccessRequest request, boolean isAuditLogEnabled) {
         MetricRecorder metric = RequestContext.get().startMetricRecord("isAccessAllowed");
 
-        String  userName = getCurrentUserName();
+        String userName = getCurrentUserName();
 
         if (StringUtils.isNotEmpty(userName) && !RequestContext.get().isImportInProgress()) {
             try {
@@ -218,11 +233,11 @@ public class AtlasAuthorizationUtils {
                 request.setClientIPAddress(RequestContext.get().getClientIPAddress());
                 request.setForwardedAddresses(RequestContext.get().getForwardedAddresses());
                 request.setRemoteIPAddress(RequestContext.get().getClientIPAddress());
-                AtlasAccessResult atlasPoliciesResult =  authorizer.isAccessAllowed(request, isAuditLogEnabled);
+                AtlasAccessResult atlasPoliciesResult = authorizer.isAccessAllowed(request, isAuditLogEnabled);
 
                 RequestContext.get().endMetricRecord(metric);
                 if (!isABACAuthorizerEnabled()) {
-                    return atlasPoliciesResult.isAllowed();
+                    return atlasPoliciesResult;
                 }
 
                 metric = RequestContext.get().startMetricRecord("isAccessAllowed.abac");
@@ -232,7 +247,7 @@ public class AtlasAuthorizationUtils {
                     // if priority is override, then it's an explicit deny as implicit deny won't have priority set to override
                     if (!atlasPoliciesResult.isAllowed() && atlasPoliciesResult.getPolicyPriority() == RangerPolicy.POLICY_PRIORITY_OVERRIDE) {
                         finalResult = atlasPoliciesResult;
-                        return finalResult.isAllowed();
+                        return finalResult;
                     }
 
                     AtlasAccessResult abacPoliciesResult = ABACAuthorizerUtils.isAccessAllowed(request.getEntity(), request.getAction());
@@ -279,7 +294,7 @@ public class AtlasAuthorizationUtils {
                         }
                     }
 
-                    return finalResult.isAllowed();
+                    return finalResult;
                 } finally {
                     // log final result audit
                     NewAtlasAuditHandler auditHandler = new NewAtlasAuditHandler(request, SERVICE_DEF_ATLAS);
@@ -297,18 +312,22 @@ public class AtlasAuthorizationUtils {
                 LOG.error("Unable to obtain AtlasAuthorizer", e);
             }
         } else {
-            return true;
+            return new AtlasAccessResult(true);
         }
 
         LOG.warn("ABAC_AUTH: authorizer returning false by default, no case matched");
-        return false;
+        return new AtlasAccessResult(false);
     }
 
     public static boolean isAccessAllowed(AtlasTypeAccessRequest request) {
+        return isAccessAllowedResult(request).isAllowed();
+    }
+
+    static AtlasAccessResult isAccessAllowedResult(AtlasTypeAccessRequest request) {
         MetricRecorder metric = RequestContext.get().startMetricRecord("isAccessAllowed");
 
-        boolean ret      = false;
-        String  userName = getCurrentUserName();
+        AtlasAccessResult ret      = new AtlasAccessResult(false);
+        String            userName = getCurrentUserName();
 
         if (StringUtils.isNotEmpty(userName) && !RequestContext.get().isImportInProgress()) {
             try {
@@ -318,14 +337,12 @@ public class AtlasAuthorizationUtils {
                 request.setClientIPAddress(RequestContext.get().getClientIPAddress());
                 request.setForwardedAddresses(RequestContext.get().getForwardedAddresses());
                 request.setRemoteIPAddress(RequestContext.get().getClientIPAddress());
-                AtlasAccessResult atlasPoliciesResult = authorizer.isAccessAllowed(request);
-
-                ret = atlasPoliciesResult.isAllowed();
+                ret = authorizer.isAccessAllowed(request);
             } catch (AtlasAuthorizationException e) {
                 LOG.error("Unable to obtain AtlasAuthorizer", e);
             }
         } else {
-            ret = true;
+            ret = new AtlasAccessResult(true);
         }
 
         RequestContext.get().endMetricRecord(metric);
@@ -334,9 +351,13 @@ public class AtlasAuthorizationUtils {
     }
 
     public static boolean isAccessAllowed(AtlasRelationshipAccessRequest request) {
+        return isAccessAllowedResult(request).isAllowed();
+    }
+
+    static AtlasAccessResult isAccessAllowedResult(AtlasRelationshipAccessRequest request) {
         MetricRecorder metric = RequestContext.get().startMetricRecord("isAccessAllowed");
 
-        String  userName = getCurrentUserName();
+        String userName = getCurrentUserName();
 
         if (StringUtils.isNotEmpty(userName) && !RequestContext.get().isImportInProgress()) {
             try {
@@ -350,7 +371,7 @@ public class AtlasAuthorizationUtils {
 
                 RequestContext.get().endMetricRecord(metric);
                 if (!isABACAuthorizerEnabled()) {
-                    return atlasPoliciesResult.isAllowed();
+                    return atlasPoliciesResult;
                 }
 
                 metric = RequestContext.get().startMetricRecord("isAccessAllowed.abac");
@@ -360,7 +381,7 @@ public class AtlasAuthorizationUtils {
                     if (!atlasPoliciesResult.isAllowed() && atlasPoliciesResult.getPolicyPriority() == RangerPolicy.POLICY_PRIORITY_OVERRIDE) {
                         // Deny with higher priority
                         finalResult = atlasPoliciesResult;
-                        return finalResult.isAllowed();
+                        return finalResult;
                     }
 
                     AtlasAccessResult abacPoliciesResult = ABACAuthorizerUtils.isAccessAllowed(request.getRelationshipType(),
@@ -391,7 +412,7 @@ public class AtlasAuthorizationUtils {
                             }
                         }
                     }
-                    return finalResult.isAllowed();
+                    return finalResult;
 
                 } finally {
                     // log final result audit
@@ -410,10 +431,10 @@ public class AtlasAuthorizationUtils {
                 LOG.error("Unable to obtain AtlasAuthorizer", e);
             }
         } else {
-            return true;
+            return new AtlasAccessResult(true);
         }
 
-        return false;
+        return new AtlasAccessResult(false);
     }
 
     public static AtlasAccessorResponse getAccessors(AtlasEntityAccessRequest request) {
