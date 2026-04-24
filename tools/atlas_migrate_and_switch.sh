@@ -1059,6 +1059,8 @@ phase_switch() {
     step "Phase 2: Backend Switch"
 
     # 2.1 Seed static configs via API (persisted in Cassandra, take effect on restart)
+    #     Only 2 keys needed: backend + id strategy. Connection properties auto-resolve
+    #     from atlas.graph.storage.* via CassandraSessionProvider fallback.
     log "Seeding static configs via API..."
     seed_static_config "atlas.graphdb.backend" "cassandra"
     seed_static_config "atlas.graph.id.strategy" "${ID_STRATEGY}"

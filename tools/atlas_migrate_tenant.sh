@@ -1538,7 +1538,9 @@ phase_switch() {
     step "Phase 5: Backend Switch"
 
     # 5.1 Seed static configs via API (persisted in Cassandra, take effect on restart)
-    #     Only 2 keys needed — connection properties are already in atlas-application.properties.
+    #     Only 2 keys needed: backend + id strategy. earlyOverlay() reads these from
+    #     Cassandra BEFORE Spring context starts. Connection properties (hostname, port,
+    #     datacenter) auto-resolve from atlas.graph.storage.* via CassandraSessionProvider.
     #     No ConfigMap patching — Argo would revert it.
     log "Seeding static configs via API..."
     seed_static_config "atlas.graphdb.backend" "cassandra"
