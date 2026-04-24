@@ -86,6 +86,7 @@ SKIP_SWITCH="false"
 SWITCH_ONLY="false"
 SKIP_CLEANUP="false"
 SKIP_ALIAS="false"
+SKIP_BACKUP_CHECK="false"
 DRY_RUN="false"
 REPORT_FILE=""
 WAIT_TIMEOUT=300
@@ -161,6 +162,51 @@ kexec_quiet() {
     kubectl exec "$POD" -n "$NAMESPACE" -c "$CONTAINER" -- "$@" 2>/dev/null
 }
 
+# Seed a static config key via the localhost API (inside the pod)
+# Retries up to 3 times with token refresh on failure.
+seed_static_config() {
+    local key="$1" value="$2"
+    local max_retries=3
+
+    for attempt in $(seq 1 "$max_retries"); do
+        # Acquire or refresh token
+        if [ -z "$KEYCLOAK_TOKEN" ] || [ "$attempt" -gt 1 ]; then
+            KEYCLOAK_TOKEN=""
+            acquire_token || {
+                if [ "$attempt" -lt "$max_retries" ]; then
+                    warn "Token acquisition failed (attempt $attempt/$max_retries), retrying in 5s..."
+                    sleep 5
+                    continue
+                fi
+                die "Cannot acquire Keycloak token for seeding static config (after $max_retries attempts)" "$EXIT_SWITCH"
+            }
+        fi
+
+        local resp
+        resp=$(kexec_quiet curl -s -X PUT \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${KEYCLOAK_TOKEN}" \
+            -d "{\"value\": \"${value}\"}" \
+            "localhost:21000/api/atlas/v2/static-configs/${key}" 2>/dev/null || echo "")
+
+        local success
+        success=$(echo "$resp" | py_extract \
+            "import sys,json; print(json.load(sys.stdin).get('success','false'))" 2>/dev/null || echo "false")
+
+        if [ "$success" = "True" ] || [ "$success" = "true" ]; then
+            ok "  Seeded ${key}=${value}"
+            return 0
+        fi
+
+        if [ "$attempt" -lt "$max_retries" ]; then
+            warn "  Seed ${key} failed (attempt $attempt/$max_retries, resp: ${resp:0:120}), retrying in 5s..."
+            sleep 5
+        fi
+    done
+
+    die "Failed to seed static config ${key}=${value} after $max_retries attempts (last response: ${resp:0:200})" "$EXIT_SWITCH"
+}
+
 # Execute command on the Cassandra pod
 cexec() {
     kubectl exec "$CASSANDRA_POD" -n "$NAMESPACE" -- "$@"
@@ -220,6 +266,7 @@ Options:
   --skip-switch           Run migration but don't switch backend
   --switch-only           Skip migration, only do backend switch + verify
   --skip-cleanup          Skip cleanup phase (first-time migration)
+  --skip-backup-check     Skip migrator pod's backup verification (dev/test only)
   --maintenance-mode      Enable maintenance mode during migration
   --maintenance-cooldown <s>  Seconds to wait before disabling maintenance (default: 30)
   --max-retries <n>       Max migration retries on validation failure (default: 3)
@@ -274,7 +321,7 @@ parse_args() {
             --pod)            POD="$2"; shift 2 ;;
             --container)      CONTAINER="$2"; shift 2 ;;
             --cassandra-pod)  CASSANDRA_POD="$2"; shift 2 ;;
-            --id-strategy)    ID_STRATEGY="$2"; shift 2 ;;
+            --id-strategy)    warn "Ignoring --id-strategy (migration=legacy, runtime=deterministic)"; shift 2 ;;
             --claim-enabled)  CLAIM_ENABLED="true"; shift ;;
             --scanner-threads) SCANNER_THREADS="$2"; USER_SET_SCANNER=true; shift 2 ;;
             --writer-threads) WRITER_THREADS="$2"; USER_SET_WRITER=true; shift 2 ;;
@@ -291,6 +338,7 @@ parse_args() {
             --switch-only)    SWITCH_ONLY="true"; shift ;;
             --skip-cleanup)   SKIP_CLEANUP="true"; shift ;;
             --skip-alias)     SKIP_ALIAS="true"; shift ;;
+            --skip-backup-check) SKIP_BACKUP_CHECK="true"; shift ;;
             --maintenance-mode) MAINTENANCE_MODE="true"; shift ;;
             --maintenance-cooldown) MAINTENANCE_COOLDOWN="$2"; shift 2 ;;
             --alias-script)   warn "--alias-script is deprecated (alias logic is now inline); ignoring"; shift 2 ;;
@@ -615,7 +663,7 @@ else:
     log "  Container:         $CONTAINER"
     log "  Cassandra Pod:     $CASSANDRA_POD"
     log "  Current backend:   $current_backend"
-    log "  ID Strategy:       $ID_STRATEGY"
+    log "  ID Strategy:       legacy (migration) -> deterministic (runtime)"
     log "  Claim Enabled:     $CLAIM_ENABLED"
     log "  Migration Mode:    ${MIGRATION_MODE:-full}"
     log "  Migrator CPU:      $MIGRATOR_CPU"
@@ -658,21 +706,109 @@ phase_maintenance_on() {
 
     step "Phase 1: Enable Maintenance Mode"
 
+    # Acquire Keycloak token — maintenance mode API requires authentication
+    if [ -z "$KEYCLOAK_TOKEN" ]; then
+        acquire_token || die "Cannot acquire Keycloak token for maintenance mode" "$EXIT_PREFLIGHT"
+    fi
+
     local resp
     resp=$(kexec_quiet curl -s -X PUT \
         -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${KEYCLOAK_TOKEN}" \
         -d 'true' \
         "localhost:21000/api/atlas/v2/configs/MAINTENANCE_MODE" 2>/dev/null || echo "")
 
     # Verify
     local mode
-    mode=$(kexec_quiet curl -s "localhost:21000/api/atlas/v2/configs/MAINTENANCE_MODE" 2>/dev/null || echo "")
+    mode=$(kexec_quiet curl -s \
+        -H "Authorization: Bearer ${KEYCLOAK_TOKEN}" \
+        "localhost:21000/api/atlas/v2/configs/MAINTENANCE_MODE" 2>/dev/null || echo "")
     if [ "$mode" = "true" ]; then
         ok "Maintenance mode enabled"
         record_phase "Phase 1: Maintenance ON" "PASS"
     else
         record_phase "Phase 1: Maintenance ON" "FAIL"
         die "Failed to enable maintenance mode (response: $resp)" "$EXIT_PREFLIGHT"
+    fi
+}
+
+# ============================================================================
+# Revert ES alias moves done in Phase 4 (ZG index -> JG index).
+# Called from phase_cleanup before restarting the pod in janus mode, so the
+# pod boots with aliases pointing at janusgraph_vertex_index.
+#
+# Idempotent: no-op when NEW_ES_INDEX is absent or has no movable aliases.
+# Preserves filter and routing attributes; drops is_write_index because with
+# a single target index it is implicit.
+# ============================================================================
+revert_aliases_to_janusgraph() {
+    step "Reverting ES aliases: ${NEW_ES_INDEX} -> ${OLD_ES_INDEX}"
+
+    local new_status
+    new_status=$(kexec_quiet curl -s -o /dev/null -w "%{http_code}" "$(es_url)/${NEW_ES_INDEX}" 2>/dev/null || echo "000")
+    if [ "$new_status" != "200" ]; then
+        log "  ${NEW_ES_INDEX} does not exist — nothing to revert"
+        return 0
+    fi
+
+    local old_status
+    old_status=$(kexec_quiet curl -s -o /dev/null -w "%{http_code}" "$(es_url)/${OLD_ES_INDEX}" 2>/dev/null || echo "000")
+    if [ "$old_status" != "200" ]; then
+        warn "  ${OLD_ES_INDEX} does not exist — cannot move aliases back (fresh tenant?)"
+        return 0
+    fi
+
+    local new_aliases_json
+    new_aliases_json=$(kexec_quiet curl -s "$(es_url)/${NEW_ES_INDEX}/_alias/*" 2>/dev/null || echo "{}")
+
+    local actions
+    actions=$(echo "$new_aliases_json" | py_extract "
+import sys, json
+
+data = json.load(sys.stdin)
+aliases = data.get('${NEW_ES_INDEX}', {}).get('aliases', {})
+
+# Skip self-referential alias name if ES returns one.
+skip = {'${NEW_ES_INDEX}'}
+
+actions = []
+for name, config in aliases.items():
+    if name in skip:
+        continue
+    actions.append({'remove': {'index': '${NEW_ES_INDEX}', 'alias': name}})
+    add = {'index': '${OLD_ES_INDEX}', 'alias': name}
+    # Preserve access-control + routing attributes. Drop is_write_index —
+    # single-target aliases are implicitly writable and preserving it could
+    # conflict with existing write-index bindings on OLD_ES_INDEX.
+    for k in ('filter', 'index_routing', 'search_routing', 'routing'):
+        if k in config:
+            add[k] = config[k]
+    actions.append({'add': add})
+
+print(json.dumps({'actions': actions}) if actions else '')
+")
+
+    if [ -z "$actions" ]; then
+        log "  No aliases on ${NEW_ES_INDEX} to revert"
+        return 0
+    fi
+
+    local action_count
+    action_count=$(echo "$actions" | py_extract "import sys,json; print(len(json.load(sys.stdin).get('actions',[])) // 2)")
+    log "  Reverting ${action_count} aliases..."
+
+    local resp
+    resp=$(kexec_quiet curl -s -X POST "$(es_url)/_aliases" \
+        -H 'Content-Type: application/json' \
+        -d "$actions" 2>/dev/null || echo '{"acknowledged":false}')
+
+    local ack
+    ack=$(echo "$resp" | py_extract "import sys,json; print(json.load(sys.stdin).get('acknowledged', False))")
+
+    if [ "$ack" = "True" ] || [ "$ack" = "true" ]; then
+        ok "Reverted ${action_count} aliases to ${OLD_ES_INDEX}"
+    else
+        warn "Alias revert response: ${resp}"
     fi
 }
 
@@ -698,36 +834,15 @@ phase_cleanup() {
 
     if [ "$current_backend" = "cassandra" ]; then
         warn "Tenant is LIVE on Cassandra backend. Must revert to JanusGraph before dropping keyspace."
-        log "Reverting backend to JanusGraph..."
+        log "Reverting backend to JanusGraph via static config API..."
 
-        # Read current properties from pod
-        local revert_props_file="/tmp/atlas-props-revert-${VCLUSTER}-${TIMESTAMP}.txt"
-        kexec_quiet cat /opt/apache-atlas/conf/atlas-application.properties > "$revert_props_file"
+        # Seed janus defaults via static config API
+        seed_static_config "atlas.graphdb.backend" "janus"
+        seed_static_config "atlas.graph.id.strategy" "legacy"
 
-        # Remove Cassandra-specific properties and set backend to janus
-        local revert_clean="/tmp/atlas-props-revert-clean-${VCLUSTER}-${TIMESTAMP}.txt"
-        grep -v \
-            -e '^atlas\.graphdb\.backend=' \
-            -e '^atlas\.graph\.index\.search\.es\.prefix=' \
-            -e '^atlas\.cassandra\.graph\.' \
-            -e '^atlas\.graph\.id\.strategy=' \
-            -e '^atlas\.graph\.claim\.enabled=' \
-            -e '^# === Zero Graph' \
-            -e '^# ---- Zero Graph' \
-            -e '^# ---- Temporarily reverted' \
-            "$revert_props_file" > "$revert_clean" || true
-
-        cat >> "$revert_clean" << 'EOF'
-
-# ---- Reverted to JanusGraph for remigration cleanup ----
-atlas.graphdb.backend=janus
-atlas.graph.index.search.es.prefix=janusgraph_
-EOF
-
-        # Patch ConfigMap safely (preserve other keys)
-        patch_configmap_properties "$revert_clean"
-
-        rm -f "$revert_props_file" "$revert_clean"
+        # Move ES aliases back to JG index BEFORE the pod boots in janus mode,
+        # so janus reads land on janusgraph_vertex_index immediately after restart.
+        revert_aliases_to_janusgraph
 
         # Restart pod and wait
         log "Restarting pod after JanusGraph revert..."
@@ -751,6 +866,21 @@ EOF
         if [ "$revert_status" != "ACTIVE" ]; then
             record_phase "Phase 2: Cleanup" "FAIL (not ACTIVE after revert)"
             die "Atlas did not become ACTIVE after JanusGraph revert (status: $revert_status)" "$EXIT_CLEANUP"
+        fi
+
+        # Verify backend is actually janus after restart
+        KEYCLOAK_TOKEN=""
+        if acquire_token; then
+            local loaded_backend
+            loaded_backend=$(kexec_quiet curl -s \
+                -H "Authorization: Bearer ${KEYCLOAK_TOKEN}" \
+                "localhost:21000/api/atlas/v2/static-configs/atlas.graphdb.backend" 2>/dev/null | \
+                py_extract "import sys,json; print(json.load(sys.stdin).get('currentValue','unknown'))" || echo "unknown")
+            if [ "$loaded_backend" = "janus" ]; then
+                ok "Verified: backend is janus after revert"
+            else
+                warn "Backend after revert: $loaded_backend (expected janus)"
+            fi
         fi
         ok "Reverted to JanusGraph. Safe to drop Cassandra data."
     fi
@@ -962,11 +1092,12 @@ ${tolerations_yaml}
     - |
       echo "=== Atlas Migrator Pod ==="
       echo "Mode: ${mode_flag:-full}"
-      echo "ID Strategy: ${ID_STRATEGY}"
+      echo "ID Strategy: legacy (migration) -> deterministic (runtime)"
       echo "Claim Enabled: ${CLAIM_ENABLED}"
       echo ""
 
-      export ID_STRATEGY="${ID_STRATEGY}"
+      # Migrator always runs with legacy IDs; runtime switches to deterministic in Phase 5
+      export ID_STRATEGY="legacy"
       export CLAIM_ENABLED="${CLAIM_ENABLED}"
       export SCANNER_THREADS="${SCANNER_THREADS}"
       export WRITER_THREADS="${WRITER_THREADS}"
@@ -976,6 +1107,8 @@ ${tolerations_yaml}
       export MIGRATOR_JVM_MIN_HEAP="${JVM_MIN_HEAP}"
       export SOURCE_CONSISTENCY="ONE"
       export TARGET_CONSISTENCY="LOCAL_QUORUM"
+      export TENANT_NAME="${VCLUSTER}"
+      export SKIP_BACKUP_CHECK="${SKIP_BACKUP_CHECK}"
 
       MIGRATOR_EXIT=0
       /opt/apache-atlas/bin/atlas_migrate.sh ${mode_flag} || MIGRATOR_EXIT=\$?
@@ -1077,9 +1210,32 @@ EOYAML
             die "Migration pod did not start after $MAX_RETRIES attempts" "$EXIT_MIGRATION"
         fi
 
-        # Stream logs
-        log "Streaming logs from $job_pod..."
-        kubectl logs -f "$job_pod" -n "$NAMESPACE" || true
+        # Stream logs to file in background; poll for completion marker; explicitly kill.
+        # Pipeline approach (kubectl | tee | grep -m1) fails because bash waits for ALL
+        # pipeline processes before continuing — kubectl logs -f never gets SIGPIPE while
+        # the pod is silent (POST_SLEEP), so the entire pipeline blocks indefinitely.
+        local migrator_log_file="/tmp/migrator-${job_pod}-$(date +%s).log"
+        kubectl logs -f "$job_pod" -n "$NAMESPACE" > "$migrator_log_file" 2>/dev/null &
+        local _kubectl_pid=$!
+        log "Streaming logs from $job_pod (pid $_kubectl_pid)..."
+
+        # Poll until completion marker or kubectl exits on its own
+        while kill -0 "$_kubectl_pid" 2>/dev/null; do
+            if grep -q "Migration finished with exit code" "$migrator_log_file" 2>/dev/null; then
+                break
+            fi
+            sleep 2
+        done
+
+        # Explicitly kill kubectl logs if still alive (pod in post-sleep)
+        if kill -0 "$_kubectl_pid" 2>/dev/null; then
+            kill "$_kubectl_pid" 2>/dev/null || true
+            wait "$_kubectl_pid" 2>/dev/null || true
+        fi
+
+        # Emit the completion line to the script's own log stream
+        grep "Migration finished with exit code" "$migrator_log_file" 2>/dev/null | tail -1 || true
+        log "Log stream complete (full log saved to $migrator_log_file)"
 
         # Check pod status and exit code
         local job_status
@@ -1094,6 +1250,12 @@ EOYAML
             # Pod still running (in post-sleep phase)
             migration_passed="true"
             ok "Migration attempt $attempt: PASSED (pod in post-completion sleep)"
+        elif [ "$exit_code" = "2" ]; then
+            # Exit 2 = data migration succeeded but validation failed.
+            # Retrying won't help — need to investigate validation failures.
+            warn "Migration data written but VALIDATION FAILED (exit code 2)"
+            warn "Do not retry — investigate validation report in logs, or re-run with --fresh after fixing"
+            break
         else
             warn "Migration attempt $attempt failed (pod status: $job_status, exit code: $exit_code)"
             if [ "$attempt" -lt "$MAX_RETRIES" ]; then
@@ -1375,120 +1537,14 @@ phase_switch() {
 
     step "Phase 5: Backend Switch"
 
-    # 5.1 Backup ConfigMap
-    log "Backing up ConfigMap..."
-    CONFIGMAP_BACKUP="/tmp/atlas-config-backup-${VCLUSTER}-${TIMESTAMP}.yaml"
-    kubectl get configmap atlas-config -n "$NAMESPACE" -o yaml > "$CONFIGMAP_BACKUP"
-    ok "ConfigMap backed up to $CONFIGMAP_BACKUP"
-
-    # 5.2 Extract and patch properties
-    log "Patching ConfigMap with Cassandra backend properties..."
-
-    local props_file="/tmp/atlas-props-${VCLUSTER}-${TIMESTAMP}.txt"
-    local props_clean="/tmp/atlas-props-clean-${VCLUSTER}-${TIMESTAMP}.txt"
-
-    kubectl get configmap atlas-config -n "$NAMESPACE" -o jsonpath='{.data.atlas-application\.properties}' > "$props_file"
-
-    # Remove any existing Zero Graph lines
-    grep -v \
-        -e '^atlas\.graphdb\.backend=' \
-        -e '^atlas\.graph\.index\.search\.es\.prefix=' \
-        -e '^atlas\.cassandra\.graph\.' \
-        -e '^atlas\.graph\.id\.strategy=' \
-        -e '^atlas\.graph\.claim\.enabled=' \
-        -e '^# === Zero Graph' \
-        -e '^# ---- Zero Graph' \
-        -e '^# ---- Reverted to JanusGraph' \
-        -e '^# ---- Temporarily reverted' \
-        "$props_file" > "$props_clean" || true
-
-    # Fix 2: Read Cassandra hostname from current config
-    local cass_hostname
-    cass_hostname=$(grep '^atlas.graph.storage.hostname=' "$props_file" | cut -d= -f2 | head -1 || echo "")
-    if [ -z "$cass_hostname" ]; then
-        cass_hostname=$(grep '^atlas.cassandra.graph.hostname=' "$props_file" | cut -d= -f2 | head -1 || echo "atlas-cassandra")
-    fi
-
-    # Fix 2: Read datacenter from current config (try multiple keys, fallback to datacenter1)
-    local cass_dc
-    cass_dc=$(grep '^atlas.cassandra.graph.datacenter=' "$props_file" | cut -d= -f2 | head -1 || echo "")
-    if [ -z "$cass_dc" ]; then
-        cass_dc=$(grep '^atlas.graph.storage.cql.local-datacenter=' "$props_file" | cut -d= -f2 | head -1 || echo "")
-    fi
-    if [ -z "$cass_dc" ]; then
-        cass_dc="datacenter1"
-        warn "Could not read Cassandra datacenter from config — using default: $cass_dc"
-    fi
-    log "  Cassandra host: $cass_hostname, datacenter: $cass_dc"
-
-    # Fix 2: Append new properties using user's flags (not hardcoded)
-    cat >> "$props_clean" << EOF
-
-# === Zero Graph Backend (Cassandra + ES direct) ===
-atlas.graphdb.backend=cassandra
-atlas.graph.index.search.es.prefix=atlas_graph_
-atlas.cassandra.graph.hostname=${cass_hostname}
-atlas.cassandra.graph.port=9042
-atlas.cassandra.graph.keyspace=atlas_graph
-atlas.cassandra.graph.datacenter=${cass_dc}
-atlas.graph.id.strategy=${ID_STRATEGY}
-atlas.graph.claim.enabled=${CLAIM_ENABLED}
-EOF
-
-    # Fix 5: Apply patched ConfigMap preserving other keys
-    patch_configmap_properties "$props_clean"
-    ok "ConfigMap patched"
-
-    # Cleanup temp files
-    rm -f "$props_file" "$props_clean"
-
-    # 5.3 Verify the ConfigMap was patched correctly
-    log "Verifying ConfigMap after patch..."
-    local verify_props
-    verify_props=$(kubectl get configmap atlas-config -n "$NAMESPACE" -o jsonpath='{.data.atlas-application\.properties}')
-
-    local verify_ok="true"
-    local verify_backend
-    verify_backend=$(echo "$verify_props" | grep '^atlas.graphdb.backend=' | cut -d= -f2 | head -1 || echo "")
-    if [ "$verify_backend" = "cassandra" ]; then
-        ok "  atlas.graphdb.backend=cassandra"
-    else
-        warn "  atlas.graphdb.backend='$verify_backend' (expected 'cassandra')"
-        verify_ok="false"
-    fi
-
-    local verify_prefix
-    verify_prefix=$(echo "$verify_props" | grep '^atlas.graph.index.search.es.prefix=' | cut -d= -f2 | head -1 || echo "")
-    if [ -n "$verify_prefix" ]; then
-        ok "  atlas.graph.index.search.es.prefix=$verify_prefix"
-    else
-        warn "  atlas.graph.index.search.es.prefix not found"
-        verify_ok="false"
-    fi
-
-    local verify_ks
-    verify_ks=$(echo "$verify_props" | grep '^atlas.cassandra.graph.keyspace=' | cut -d= -f2 | head -1 || echo "")
-    if [ -n "$verify_ks" ]; then
-        ok "  atlas.cassandra.graph.keyspace=$verify_ks"
-    else
-        warn "  atlas.cassandra.graph.keyspace not found"
-        verify_ok="false"
-    fi
-
-    local verify_id
-    verify_id=$(echo "$verify_props" | grep '^atlas.graph.id.strategy=' | cut -d= -f2 | head -1 || echo "")
-    if [ -n "$verify_id" ]; then
-        ok "  atlas.graph.id.strategy=$verify_id"
-    else
-        warn "  atlas.graph.id.strategy not found"
-        verify_ok="false"
-    fi
-
-    if [ "$verify_ok" = "true" ]; then
-        ok "ConfigMap verification passed"
-    else
-        warn "ConfigMap verification had issues — review manually before restarting pod"
-    fi
+    # 5.1 Seed static configs via API (persisted in Cassandra, take effect on restart)
+    #     Only 2 keys needed — connection properties are already in atlas-application.properties.
+    #     No ConfigMap patching — Argo would revert it.
+    log "Seeding static configs via API..."
+    seed_static_config "atlas.graphdb.backend" "cassandra"
+    # Always seed deterministic — migration runs with legacy IDs, but runtime uses deterministic
+    seed_static_config "atlas.graph.id.strategy" "deterministic"
+    ok "Static configs seeded (will take effect after restart)"
 
     # 5.4 Trigger rolling restart of Atlas StatefulSet
     log "Triggering rolling restart of Atlas StatefulSet..."
@@ -1501,8 +1557,7 @@ EOF
     log "Waiting for all pods to pick up new config (timeout: 600s)..."
     if ! kubectl rollout status statefulset/atlas -n "$NAMESPACE" --timeout=600s; then
         record_phase "Phase 5: Backend Switch" "FAIL (rollout timeout)"
-        warn "ConfigMap backup available at: $CONFIGMAP_BACKUP"
-        die "StatefulSet rollout did not complete within 600s. ConfigMap backup: $CONFIGMAP_BACKUP" "$EXIT_SWITCH"
+        die "StatefulSet rollout did not complete within 600s." "$EXIT_SWITCH"
     fi
     ok "All pods updated"
 
@@ -1532,13 +1587,40 @@ EOF
         fi
     done
 
-    warn "ConfigMap backup available at: $CONFIGMAP_BACKUP"
-
     if [ "$all_active" = "true" ]; then
         ok "All pods are ACTIVE on Cassandra backend"
-        record_phase "Phase 5: Backend Switch" "PASS"
     else
         warn "Some pods did not reach ACTIVE state — check manually"
+    fi
+
+    # 5.7 Verify backend actually switched to cassandra after restart
+    log "Verifying backend is cassandra after restart (10s settle)..."
+    sleep 10
+    KEYCLOAK_TOKEN=""
+    if acquire_token; then
+        local loaded_backend="unknown"
+        for verify_attempt in $(seq 1 3); do
+            loaded_backend=$(kexec_quiet curl -s \
+                -H "Authorization: Bearer ${KEYCLOAK_TOKEN}" \
+                "localhost:21000/api/atlas/v2/static-configs/atlas.graphdb.backend" 2>/dev/null | \
+                py_extract "import sys,json; print(json.load(sys.stdin).get('currentValue','unknown'))" || echo "unknown")
+            if [ "$loaded_backend" = "cassandra" ]; then
+                break
+            fi
+            sleep 5
+        done
+        if [ "$loaded_backend" = "cassandra" ]; then
+            ok "Verified: backend is cassandra after restart"
+        else
+            warn "Backend after restart: $loaded_backend (expected cassandra) — verify manually"
+        fi
+    else
+        warn "Could not acquire token for post-restart backend verification"
+    fi
+
+    if [ "$all_active" = "true" ]; then
+        record_phase "Phase 5: Backend Switch" "PASS"
+    else
         record_phase "Phase 5: Backend Switch" "WARN (not all pods ACTIVE)"
     fi
 }
@@ -1559,14 +1641,22 @@ phase_maintenance_off() {
     log "Waiting ${MAINTENANCE_COOLDOWN}s cooldown before disabling maintenance mode..."
     sleep "$MAINTENANCE_COOLDOWN"
 
+    # Re-acquire token if needed (may have expired during migration)
+    if [ -z "$KEYCLOAK_TOKEN" ]; then
+        acquire_token || warn "Cannot acquire token — maintenance mode may need manual disable"
+    fi
+
     local resp
     resp=$(kexec_quiet curl -s -X PUT \
         -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${KEYCLOAK_TOKEN}" \
         -d 'false' \
         "localhost:21000/api/atlas/v2/configs/MAINTENANCE_MODE" 2>/dev/null || echo "")
 
     local mode
-    mode=$(kexec_quiet curl -s "localhost:21000/api/atlas/v2/configs/MAINTENANCE_MODE" 2>/dev/null || echo "")
+    mode=$(kexec_quiet curl -s \
+        -H "Authorization: Bearer ${KEYCLOAK_TOKEN}" \
+        "localhost:21000/api/atlas/v2/configs/MAINTENANCE_MODE" 2>/dev/null || echo "")
     if [ "$mode" = "false" ]; then
         ok "Maintenance mode disabled"
         record_phase "Phase 6: Maintenance OFF" "PASS"
@@ -1675,6 +1765,11 @@ phase_verify() {
     fi
 
     step "Phase 7: Post-Switch Verification"
+
+    # Wait for Atlas internal services to warm up after restart
+    # PolicyRefresher runs on a 30s refresh cycle but may have transient errors on first cycle
+    log "Waiting 120s for Atlas services to warm up after restart..."
+    sleep 120
 
     # Acquire token (non-fatal if it fails)
     local have_token="false"
@@ -1860,38 +1955,77 @@ else:
         warn "Could not query migration_state table (may not exist yet)"
     fi
 
-    # 7.6 PolicyRefresher
-    if [ "$have_token" = "true" ]; then
-        log "Checking PolicyRefresher..."
-        local policy_resp
-        policy_resp=$(kexec_quiet curl -s \
-            -H "Authorization: Bearer ${KEYCLOAK_TOKEN}" \
-            "localhost:21000/api/atlas/admin/refreshPolicyInfo" 2>/dev/null || echo "")
+    # Refresh token before policy/typedef checks (original token may have expired)
+    KEYCLOAK_TOKEN=""
+    if acquire_token; then have_token="true"; else have_token="false"; fi
 
-        local evaluator_count
-        evaluator_count=$(echo "$policy_resp" | py_extract "import sys,json; d=json.load(sys.stdin); print(d.get('evaluatorCount', len(d.get('evaluators',[]))))" || echo "0")
-        if [ "$evaluator_count" -gt 0 ] 2>/dev/null; then
-            verify_check "PolicyRefresher" "true" "${evaluator_count} evaluators loaded"
-        else
-            verify_check "PolicyRefresher" "false" "No evaluators loaded"
+    # 7.6 Atlas policy download (unauthenticated endpoint — same as PolicyRefresher uses internally)
+    log "Checking Atlas policy download..."
+    local atlas_policy_count=0
+    for ap_attempt in 1 2 3; do
+        local atlas_policy_resp
+        atlas_policy_resp=$(kexec_quiet curl -s \
+            "localhost:21000/api/atlas/v2/auth/download/policies/atlas?pluginId=migrator-verify" 2>/dev/null || echo "")
+
+        atlas_policy_count=$(echo "$atlas_policy_resp" | py_extract "import sys,json; d=json.load(sys.stdin); print(len(d.get('policies',[])))" || echo "0")
+        if [ "$atlas_policy_count" -gt 0 ] 2>/dev/null; then
+            break
         fi
+        if [ "$ap_attempt" -lt 3 ]; then
+            log "  Atlas policies not ready (attempt $ap_attempt/3), waiting 15s..."
+            sleep 15
+        fi
+    done
+    if [ "$atlas_policy_count" -gt 0 ] 2>/dev/null; then
+        verify_check "Atlas policies" "true" "${atlas_policy_count} policies downloadable"
+    else
+        verify_check "Atlas policies" "false" "No Atlas policies returned (after 3 attempts)"
     fi
 
-    # 7.7 Heka policy download
-    if [ "$have_token" = "true" ]; then
-        log "Testing Heka policy download..."
+    # 7.7 Heka policy download (unauthenticated endpoint)
+    log "Checking Heka policy download..."
+    local heka_count=0
+    for hk_attempt in 1 2 3; do
         local heka_resp
         heka_resp=$(kexec_quiet curl -s \
-            -H "Authorization: Bearer ${KEYCLOAK_TOKEN}" \
-            "localhost:21000/api/atlas/heka/policy" 2>/dev/null || echo "")
+            "localhost:21000/api/atlas/v2/auth/download/policies/heka?pluginId=migrator-verify" 2>/dev/null || echo "")
 
-        local heka_count
-        heka_count=$(echo "$heka_resp" | py_extract "import sys,json; d=json.load(sys.stdin); print(len(d) if isinstance(d,list) else len(d.get('policies',[])))" || echo "0")
+        heka_count=$(echo "$heka_resp" | py_extract "import sys,json; d=json.load(sys.stdin); print(len(d.get('policies',[])))" || echo "0")
         if [ "$heka_count" -gt 0 ] 2>/dev/null; then
-            verify_check "Heka policies" "true" "${heka_count} policies"
-        else
-            verify_check "Heka policies" "false" "No Heka policies returned"
+            break
         fi
+        if [ "$hk_attempt" -lt 3 ]; then
+            log "  Heka policies not ready (attempt $hk_attempt/3), waiting 15s..."
+            sleep 15
+        fi
+    done
+    if [ "$heka_count" -gt 0 ] 2>/dev/null; then
+        verify_check "Heka policies" "true" "${heka_count} policies downloadable"
+    else
+        verify_check "Heka policies" "false" "No Heka policies returned (after 3 attempts)"
+    fi
+
+    # 7.7a Atlas roles download (unauthenticated endpoint)
+    log "Checking Atlas roles download..."
+    local roles_count=0
+    for rl_attempt in 1 2 3; do
+        local roles_resp
+        roles_resp=$(kexec_quiet curl -s \
+            "localhost:21000/api/atlas/v2/auth/download/roles/atlas?pluginId=migrator-verify" 2>/dev/null || echo "")
+
+        roles_count=$(echo "$roles_resp" | py_extract "import sys,json; d=json.load(sys.stdin); print(len(d.get('rangerRoles',[])))" || echo "0")
+        if [ "$roles_count" -gt 0 ] 2>/dev/null; then
+            break
+        fi
+        if [ "$rl_attempt" -lt 3 ]; then
+            log "  Atlas roles not ready (attempt $rl_attempt/3), waiting 15s..."
+            sleep 15
+        fi
+    done
+    if [ "$roles_count" -gt 0 ] 2>/dev/null; then
+        verify_check "Atlas roles" "true" "${roles_count} roles downloadable"
+    else
+        verify_check "Atlas roles" "false" "No Atlas roles returned (after 3 attempts)"
     fi
 
     # 7.8 TypeDef headers
@@ -1949,16 +2083,16 @@ print(entities[0]['guid'] if entities else '')
         fi
     fi
 
-    # 7.11 Deterministic ID check (only if ID_STRATEGY=deterministic)
-    if [ "$ID_STRATEGY" = "deterministic" ]; then
-        log "Checking deterministic ID format in Cassandra..."
-        local vertex_sample
-        vertex_sample=$(cexec cqlsh -e "SELECT vertex_id FROM atlas_graph.vertices LIMIT 5;" 2>/dev/null || echo "")
+    # 7.11 Vertex ID format check
+    # Migration always uses legacy IDs; runtime switches to deterministic for new entities.
+    # Migrated vertices will have legacy (UUID) format — that is expected.
+    log "Checking vertex ID format in Cassandra..."
+    local vertex_sample
+    vertex_sample=$(cexec cqlsh -e "SELECT vertex_id FROM atlas_graph.vertices LIMIT 5;" 2>/dev/null || echo "")
 
-        if [ -n "$vertex_sample" ]; then
-            # Check if vertex IDs are 32-char hex (no dashes) vs UUID format (36-char with dashes)
-            local has_uuid_format
-            has_uuid_format=$(echo "$vertex_sample" | py_extract "
+    if [ -n "$vertex_sample" ]; then
+        local id_format
+        id_format=$(echo "$vertex_sample" | py_extract "
 import sys
 lines = sys.stdin.read().strip().split('\n')
 uuid_count = 0
@@ -1969,30 +2103,43 @@ for line in lines:
         uuid_count += 1
     elif len(line) == 32 and all(c in '0123456789abcdef' for c in line.lower()):
         hex_count += 1
-if hex_count > 0 and uuid_count == 0:
-    print('deterministic')
-elif uuid_count > 0:
+if uuid_count > 0:
     print('legacy')
+elif hex_count > 0:
+    print('deterministic')
 else:
     print('unknown')
 " <<< "$vertex_sample")
 
-            if [ "$has_uuid_format" = "deterministic" ]; then
-                verify_check "Deterministic IDs" "true" "Vertex IDs are 32-char hex format"
-            elif [ "$has_uuid_format" = "legacy" ]; then
-                verify_check "Deterministic IDs" "false" "Vertex IDs are UUID format (legacy) — expected deterministic"
-            else
-                verify_check "Deterministic IDs" "false" "Could not determine ID format from sample"
-            fi
+        if [ "$id_format" = "legacy" ]; then
+            verify_check "Vertex ID format" "true" "Migrated vertices use legacy UUIDs (expected — runtime uses deterministic for new entities)"
+        elif [ "$id_format" = "deterministic" ]; then
+            verify_check "Vertex ID format" "true" "Vertex IDs are deterministic hex format"
         else
-            warn "Could not query Cassandra for vertex ID sample"
+            verify_check "Vertex ID format" "false" "Could not determine ID format from sample"
         fi
+    else
+        warn "Could not query Cassandra for vertex ID sample"
     fi
 
-    # 7.12 Verify running properties
+    # 7.12 Verify running properties (via static config API, not atlas-application.properties)
     log "Verifying backend properties on running pod..."
-    local running_backend
-    running_backend=$(kexec_quiet grep '^atlas.graphdb.backend=' /opt/apache-atlas/conf/atlas-application.properties 2>/dev/null | cut -d= -f2 || echo "unknown")
+    KEYCLOAK_TOKEN=""
+    acquire_token || warn "Could not acquire token for backend property check"
+    local running_backend="unknown"
+    for bp_attempt in 1 2 3; do
+        running_backend=$(kexec_quiet curl -s \
+            -H "Authorization: Bearer ${KEYCLOAK_TOKEN}" \
+            "localhost:21000/api/atlas/v2/static-configs/atlas.graphdb.backend" 2>/dev/null | \
+            py_extract "import sys,json; print(json.load(sys.stdin).get('currentValue','unknown'))" || echo "unknown")
+        if [ "$running_backend" = "cassandra" ]; then
+            break
+        fi
+        if [ "$bp_attempt" -lt 3 ]; then
+            log "  Backend property is '$running_backend' (attempt $bp_attempt/3), waiting 10s..."
+            sleep 10
+        fi
+    done
     if [ "$running_backend" = "cassandra" ]; then
         verify_check "Backend property" "true" "atlas.graphdb.backend=cassandra"
     else
@@ -2004,7 +2151,6 @@ else:
     log "  Verification: $VERIFY_PASS / $VERIFY_TOTAL passed"
     if [ "$VERIFY_FAIL" -gt 0 ]; then
         err "  Failed: $VERIFY_FAIL"
-        warn "ConfigMap backup available at: $CONFIGMAP_BACKUP"
     fi
 
     record_phase "Phase 7: Verification" "${VERIFY_PASS}/${VERIFY_TOTAL} passed"
@@ -2034,7 +2180,7 @@ phase_summary() {
     printf "  %-30s %s\n" "Start time:" "$START_TIME"
     printf "  %-30s %s\n" "End time:" "$END_TIME"
     printf "  %-30s %s\n" "Duration:" "$(( elapsed / 60 ))m $(( elapsed % 60 ))s"
-    printf "  %-30s %s\n" "ID Strategy:" "$ID_STRATEGY"
+    printf "  %-30s %s\n" "ID Strategy:" "legacy (migration) -> deterministic (runtime)"
     printf "  %-30s %s\n" "Claim Enabled:" "$CLAIM_ENABLED"
     printf "  %-30s %s\n" "Maintenance mode:" "$MAINTENANCE_MODE"
     printf "  %-30s %s\n" "Vertex count (estimate):" "${VERTEX_COUNT:-unknown}"
@@ -2054,9 +2200,14 @@ phase_summary() {
         echo "  FAILED CHECKS: ${VERIFY_FAIL}"
     fi
     echo ""
-    if [ -n "$CONFIGMAP_BACKUP" ]; then
-        echo "  Rollback: kubectl apply -f $CONFIGMAP_BACKUP && kubectl delete pod $POD -n $NAMESPACE"
-    fi
+    echo "  Rollback (revert to JanusGraph via static config API, revert ES aliases, then restart):"
+    echo "    # 1. Seed janus defaults"
+    echo "    kubectl exec $POD -n $NAMESPACE -- curl -s -X PUT -H 'Content-Type: application/json' -H 'Authorization: Bearer <TOKEN>' -d '{\"value\":\"janus\"}' localhost:21000/api/atlas/v2/static-configs/atlas.graphdb.backend"
+    echo "    kubectl exec $POD -n $NAMESPACE -- curl -s -X PUT -H 'Content-Type: application/json' -H 'Authorization: Bearer <TOKEN>' -d '{\"value\":\"legacy\"}' localhost:21000/api/atlas/v2/static-configs/atlas.graph.id.strategy"
+    echo "    # 2. Revert ES aliases from atlas_graph_vertex_index back to janusgraph_vertex_index"
+    echo "    kubectl exec $POD -n $NAMESPACE -- curl -s -X POST '$(es_url)/_aliases' -H 'Content-Type: application/json' -d '"'{"actions":[{"remove":{"index":"atlas_graph_vertex_index","alias":"atlas_vertex_index"}},{"add":{"index":"janusgraph_vertex_index","alias":"atlas_vertex_index"}}]}'"'"
+    echo "    # 3. Restart pod to pick up janus backend"
+    echo "    kubectl delete pod $POD -n $NAMESPACE"
     echo "============================================================"
 
     record_phase "Phase 8: Summary" "DONE"
@@ -2074,7 +2225,7 @@ generate_report() {
   "start_time": "${START_TIME}",
   "end_time": "${END_TIME:-}",
   "migration_mode": "${MIGRATION_MODE:-full}",
-  "id_strategy": "${ID_STRATEGY}",
+  "id_strategy": "legacy (migration) -> deterministic (runtime)",
   "claim_enabled": ${CLAIM_ENABLED},
   "maintenance_mode": ${MAINTENANCE_MODE},
   "max_retries": ${MAX_RETRIES},

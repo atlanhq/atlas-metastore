@@ -373,7 +373,10 @@ cleanup_on_exit() {
 
     if [ -n "${CONFIGMAP_BACKUP:-}" ]; then
         log "ConfigMap backup: $CONFIGMAP_BACKUP"
-        log "Rollback: kubectl apply -f $CONFIGMAP_BACKUP && kubectl rollout restart statefulset/atlas -n $NAMESPACE"
+        log "Rollback (revert static configs via API, restore ConfigMap, then restart):"
+        log "  1. Seed janus defaults: seed_static_config atlas.graphdb.backend janus && seed_static_config atlas.graph.id.strategy legacy"
+        log "  2. Restore connection props: kubectl apply -f $CONFIGMAP_BACKUP"
+        log "  3. Restart: kubectl rollout restart statefulset/atlas -n $NAMESPACE"
     fi
 }
 
@@ -405,6 +408,27 @@ print(json.dumps(content))
         kubectl create configmap atlas-config -n "$NAMESPACE" \
             --from-file=atlas-application.properties="$new_props_file" \
             --dry-run=client -o yaml | kubectl apply -f -
+    fi
+}
+
+# Seed a static config key via the external API
+seed_static_config() {
+    local key="$1" value="$2"
+    local token
+    token=$(generate_token) || die "Cannot generate token for seeding ${key}" "$EXIT_SWITCH"
+
+    local http_code
+    http_code=$(curl -s -o /dev/null -w "%{http_code}" \
+        -X PUT "https://${TENANT_FQDN}/api/meta/static-configs/${key}" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${token}" \
+        -d "{\"value\": \"${value}\"}" 2>/dev/null || echo "000")
+
+    if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ] 2>/dev/null; then
+        ok "  Seeded ${key}=${value} (HTTP ${http_code})"
+    else
+        die "Failed to seed static config ${key}=${value} (HTTP ${http_code})" "$EXIT_SWITCH"
     fi
 }
 
@@ -1034,14 +1058,17 @@ EOYAML
 phase_switch() {
     step "Phase 2: Backend Switch"
 
-    # Backup ConfigMap
-    log "Backing up ConfigMap..."
+    # 2.1 Seed static configs via API (persisted in Cassandra, take effect on restart)
+    log "Seeding static configs via API..."
+    seed_static_config "atlas.graphdb.backend" "cassandra"
+    seed_static_config "atlas.graph.id.strategy" "${ID_STRATEGY}"
+    ok "Static configs seeded (will take effect after restart)"
+
+    # 2.2 Patch ConfigMap for connection properties (not managed by StaticConfigStore)
+    log "Patching ConfigMap with Cassandra connection properties..."
+
     CONFIGMAP_BACKUP="/tmp/atlas-config-backup-${VCLUSTER}-${TIMESTAMP}.yaml"
     kubectl get configmap atlas-config -n "$NAMESPACE" -o yaml > "$CONFIGMAP_BACKUP"
-    ok "ConfigMap backed up to $CONFIGMAP_BACKUP"
-
-    # Extract and patch properties
-    log "Patching ConfigMap with Cassandra backend properties..."
 
     local props_file="/tmp/atlas-props-${VCLUSTER}-${TIMESTAMP}.txt"
     local props_clean="/tmp/atlas-props-clean-${VCLUSTER}-${TIMESTAMP}.txt"
@@ -1049,7 +1076,7 @@ phase_switch() {
     kubectl get configmap atlas-config -n "$NAMESPACE" \
         -o jsonpath='{.data.atlas-application\.properties}' > "$props_file"
 
-    # Remove existing graph backend lines
+    # Remove old backend/connection lines (clean slate for connection props)
     grep -v \
         -e '^atlas\.graphdb\.backend=' \
         -e '^atlas\.graph\.index\.search\.es\.prefix=' \
@@ -1076,33 +1103,20 @@ phase_switch() {
 
     cat >> "$props_clean" << EOF
 
-# === Zero Graph Backend (Cassandra + ES direct) ===
-atlas.graphdb.backend=cassandra
+# === Zero Graph connection properties ===
 atlas.graph.index.search.es.prefix=atlas_graph_
 atlas.cassandra.graph.hostname=${cass_hostname}
 atlas.cassandra.graph.port=9042
 atlas.cassandra.graph.keyspace=atlas_graph
 atlas.cassandra.graph.datacenter=${cass_dc}
-atlas.graph.id.strategy=${ID_STRATEGY}
 atlas.graph.claim.enabled=${CLAIM_ENABLED}
 EOF
 
     patch_configmap_properties "$props_clean"
-    ok "ConfigMap patched"
+    ok "ConfigMap patched with connection properties"
     rm -f "$props_file" "$props_clean"
 
-    # Verify
-    local verify_backend
-    verify_backend=$(kubectl get configmap atlas-config -n "$NAMESPACE" \
-        -o jsonpath='{.data.atlas-application\.properties}' | \
-        grep '^atlas.graphdb.backend=' | cut -d= -f2 | head -1 || echo "")
-    if [ "$verify_backend" = "cassandra" ]; then
-        ok "ConfigMap verified: atlas.graphdb.backend=cassandra"
-    else
-        warn "ConfigMap verification: backend='$verify_backend' (expected 'cassandra')"
-    fi
-
-    # Rolling restart
+    # 2.3 Rolling restart
     log "Triggering rolling restart..."
     if ! kubectl rollout restart statefulset/atlas -n "$NAMESPACE"; then
         warn "rollout restart failed — falling back to pod delete"
@@ -1116,7 +1130,7 @@ EOF
     fi
     ok "All pods updated"
 
-    # Verify Atlas ACTIVE on all replicas
+    # 2.4 Verify Atlas ACTIVE on all replicas
     log "Verifying Atlas is ACTIVE on all pods..."
     local replicas
     replicas=$(kubectl get statefulset atlas -n "$NAMESPACE" \
@@ -1173,11 +1187,13 @@ phase_summary() {
         printf "  %-35s %s\n" "${PHASE_NAMES[$i]}" "${PHASE_RESULTS[$i]}"
     done
     echo ""
+    echo "  Rollback (revert to JanusGraph):"
+    echo "    1. seed_static_config atlas.graphdb.backend janus"
+    echo "    2. seed_static_config atlas.graph.id.strategy legacy"
     if [ -n "${CONFIGMAP_BACKUP:-}" ]; then
-        echo "  Rollback:"
-        echo "    kubectl apply -f $CONFIGMAP_BACKUP"
-        echo "    kubectl rollout restart statefulset/atlas -n $NAMESPACE"
+        echo "    3. kubectl apply -f $CONFIGMAP_BACKUP"
     fi
+    echo "    4. kubectl rollout restart statefulset/atlas -n $NAMESPACE"
     echo "  Log file: ${LOG_FILE}"
     echo "============================================================"
 }

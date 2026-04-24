@@ -57,6 +57,7 @@ import org.elasticsearch.action.admin.indices.alias.IndicesAliasesRequest;
 import org.elasticsearch.action.admin.indices.alias.get.GetAliasesRequest;
 import org.elasticsearch.xcontent.XContentType;
 import org.slf4j.Logger;
+import org.apache.atlas.service.config.StaticConfigStore;
 import org.slf4j.LoggerFactory;
 import org.slf4j.bridge.SLF4JBridgeHandler;
 
@@ -150,6 +151,11 @@ public final class Atlas {
 
         setApplicationHome();
         Configuration configuration = ApplicationProperties.get();
+
+        // Overlay static configs from Cassandra before anything reads graphdb.backend.
+        // This ensures Constants.java and AtlasGraphProvider pick up the correct backend.
+        StaticConfigStore.earlyOverlay();
+
         final String enableTLSFlag = configuration.getString(SecurityProperties.TLS_ENABLED);
         final String appHost = configuration.getString(SecurityProperties.BIND_ADDRESS, EmbeddedServer.ATLAS_DEFAULT_BIND_ADDRESS);
 
