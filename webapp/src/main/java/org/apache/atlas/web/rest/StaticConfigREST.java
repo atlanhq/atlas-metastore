@@ -19,6 +19,9 @@ package org.apache.atlas.web.rest;
 
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.annotation.Timed;
+import org.apache.atlas.authorize.AtlasAdminAccessRequest;
+import org.apache.atlas.authorizer.AtlasAuthorizationUtils;
+import org.apache.atlas.authorize.AtlasPrivilege;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.service.config.StaticConfigKey;
 import org.apache.atlas.service.config.StaticConfigStore;
@@ -167,6 +170,8 @@ public class StaticConfigREST {
             LOG.debug("==> StaticConfigREST.seedStaticConfig({}, {})", key,
                     updateRequest != null ? updateRequest.getValue() : "null");
         }
+
+        AtlasAuthorizationUtils.verifyAccess(new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_FEATURE_FLAG_CUD), "seed static config is not allowed");
 
         AtlasPerfTracer perf = null;
         try {
