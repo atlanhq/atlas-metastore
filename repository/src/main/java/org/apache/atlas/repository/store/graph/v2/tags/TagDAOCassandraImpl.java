@@ -13,11 +13,13 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.ApplicationProperties;
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.Tag;
 import org.apache.atlas.model.instance.AtlasClassification;
+import org.apache.atlas.repository.graphdb.cassandra.CassandraAsyncThrottle;
 import org.apache.atlas.repository.graphdb.cassandra.CassandraSessionProvider;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -237,7 +239,10 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
 
             // Configurable async read batch size for tag denorm flush
             this.asyncReadBatchSize = ApplicationProperties.get().getInt(ASYNC_READ_BATCH_SIZE_PROPERTY, DEFAULT_ASYNC_READ_BATCH_SIZE);
-            LOG.info("TagDAO initialized with asyncReadBatchSize={}", asyncReadBatchSize);
+            this.asyncThrottle = new CassandraAsyncThrottle(
+                    AtlasConfiguration.CASSANDRA_ASYNC_MAX_CONCURRENT.getInt());
+            LOG.info("TagDAO initialized with asyncReadBatchSize={}, asyncMaxConcurrent={}",
+                    asyncReadBatchSize, asyncThrottle.getMaxConcurrent());
 
         } catch (Exception e) {
             LOG.error("Failed to initialize TagDAO", e);
@@ -459,12 +464,12 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
         }
 
         try {
-            // Fire all queries in parallel using executeAsync
+            // Fire all queries through throttle using executeAsync
             Map<String, CompletionStage<AsyncResultSet>> futures = new LinkedHashMap<>();
             for (String vertexId : vertexIds) {
                 int bucket = calculateBucket(vertexId);
                 BoundStatement bound = findAllTagsForAssetStmt.bind(bucket, vertexId);
-                futures.put(vertexId, cassSession.executeAsync(bound));
+                futures.put(vertexId, asyncThrottle.throttle(() -> cassSession.executeAsync(bound)));
             }
 
             // Collect results from all futures
@@ -500,9 +505,10 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
         }
     }
 
-    private static final int DEFAULT_ASYNC_READ_BATCH_SIZE = 30;
+    private static final int DEFAULT_ASYNC_READ_BATCH_SIZE = 200;
     private static final String ASYNC_READ_BATCH_SIZE_PROPERTY = "atlas.tag.denorm.async.read.batch.size";
     private final int asyncReadBatchSize;
+    private final CassandraAsyncThrottle asyncThrottle;
 
     @Override
     public Map<String, List<Tag>> getAllTagsByVertexIds(Collection<String> vertexIds) throws AtlasBaseException {
@@ -524,7 +530,7 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
                 for (String vertexId : batch) {
                     int bucket = calculateBucket(vertexId);
                     BoundStatement bound = findAllTagDetailsForAssetStmt.bind(bucket, vertexId);
-                    futures.put(vertexId, cassSession.executeAsync(bound));
+                    futures.put(vertexId, asyncThrottle.throttle(() -> cassSession.executeAsync(bound)));
                 }
 
                 for (Map.Entry<String, CompletionStage<AsyncResultSet>> entry : futures.entrySet()) {

@@ -27,6 +27,11 @@ on:
       - lite_master
       - switchable-graph-provider
       - ring-*
+      - ms-635
+      - ms-884-observability-master
+      - sgp-consistency-improvements
+      - ms-864-keycloak-jwks-internal-url
+      - ms-922-staled-tag-tasks
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'

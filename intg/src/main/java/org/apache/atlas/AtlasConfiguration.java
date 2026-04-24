@@ -107,6 +107,7 @@ public enum AtlasConfiguration {
     TAG_CASSANDRA_BATCHING_CHUNK_SIZE("atlas.tags.cassandra.batch.size", 200),
     MAX_NUMBER_OF_RETRIES("atlas.tasks.graph.retry.count", 3),
     GRAPH_TRAVERSAL_PARALLELISM("atlas.graph.traverse.bucket.size",10),
+    CASSANDRA_ASYNC_MAX_CONCURRENT("atlas.cassandra.async.max.concurrent", 100),
     LINEAGE_ON_DEMAND_ENABLED("atlas.lineage.on.demand.enabled", true),
     LINEAGE_ON_DEMAND_DEFAULT_NODE_COUNT("atlas.lineage.on.demand.default.node.count", 3),
     LINEAGE_MAX_NODE_COUNT("atlas.lineage.max.node.count", 100),
