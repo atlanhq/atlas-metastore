@@ -50,7 +50,9 @@ public class EntityAuthorizer {
 
         AtlasAccessResult denyResult = isAccessAllowedInMemory(entity, action, POLICY_TYPE_DENY);
         if (denyResult.isAllowed() && denyResult.getPolicyPriority() == RangerPolicy.POLICY_PRIORITY_OVERRIDE) {
-            return new AtlasAccessResult(false, denyResult.getPolicyId(), denyResult.getPolicyPriority());
+            AtlasAccessResult flipped = new AtlasAccessResult(false, denyResult.getPolicyId(), denyResult.getPolicyPriority());
+            flipped.setPolicyName(denyResult.getPolicyName());
+            return flipped;
         }
 
         AtlasAccessResult allowResult = isAccessAllowedInMemory(entity, action, POLICY_TYPE_ALLOW);
@@ -60,7 +62,9 @@ public class EntityAuthorizer {
 
         if (denyResult.isAllowed() && !"-1".equals(denyResult.getPolicyId())) {
             // explicit deny
-            return new AtlasAccessResult(false, denyResult.getPolicyId(), denyResult.getPolicyPriority());
+            AtlasAccessResult flipped = new AtlasAccessResult(false, denyResult.getPolicyId(), denyResult.getPolicyPriority());
+            flipped.setPolicyName(denyResult.getPolicyName());
+            return flipped;
         } else {
             return allowResult;
         }
@@ -97,6 +101,7 @@ public class EntityAuthorizer {
             if (matched) {
                 // result here only means that a matching policy is found, allow and deny needs to be handled by caller
                 result = new AtlasAccessResult(true, policy.getGuid(), policy.getPolicyPriority());
+                result.setPolicyName(policy.getName());
                 if (policy.getPolicyPriority() == RangerPolicy.POLICY_PRIORITY_OVERRIDE) {
                     return result;
                 }
