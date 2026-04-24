@@ -112,9 +112,13 @@ public class StaticConfigStore {
             }
             int port = props.getInt("atlas.config.store.cassandra.port", -1);
             if (port <= 0) {
-                port = props.getInt("atlas.graph.storage.cql.port", 9042);
+                port = props.getInt("atlas.graph.storage.cql.port",
+                        props.getInt("atlas.graph.storage.port", 9042));
             }
-            String datacenter = props.getString("atlas.config.store.cassandra.datacenter", "datacenter1");
+            String datacenter = props.getString("atlas.config.store.cassandra.datacenter", null);
+            if (datacenter == null || datacenter.isEmpty()) {
+                datacenter = props.getString("atlas.graph.storage.cql.local-datacenter", "datacenter1");
+            }
             String keyspace = props.getString("atlas.config.store.cassandra.keyspace", "config_store");
             String table = props.getString("atlas.static.config.store.table", "static_configs");
             String appName = props.getString("atlas.static.config.store.app.name", "atlas_static");
@@ -236,7 +240,13 @@ public class StaticConfigStore {
 
         int port = props.getInt("atlas.config.store.cassandra.port", -1);
         if (port <= 0) {
-            port = props.getInt("atlas.graph.storage.cql.port", 9042);
+            port = props.getInt("atlas.graph.storage.cql.port",
+                    props.getInt("atlas.graph.storage.port", 9042));
+        }
+
+        String datacenter = props.getString("atlas.config.store.cassandra.datacenter", null);
+        if (datacenter == null || datacenter.isEmpty()) {
+            datacenter = props.getString("atlas.graph.storage.cql.local-datacenter", "datacenter1");
         }
 
         String dynamicAppName = props.getString("atlas.config.store.app.name", "atlas");
@@ -247,7 +257,7 @@ public class StaticConfigStore {
                 dynamicAppName,
                 hostname,
                 port,
-                props.getString("atlas.config.store.cassandra.datacenter", "datacenter1"),
+                datacenter,
                 replicationFactor,
                 props.getString("atlas.config.store.cassandra.consistency.level", "LOCAL_QUORUM")
         );
