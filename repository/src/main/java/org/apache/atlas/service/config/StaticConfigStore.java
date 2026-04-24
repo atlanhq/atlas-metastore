@@ -146,10 +146,12 @@ public class StaticConfigStore {
             port = props.getInt("atlas.graph.storage.cql.port", 9042);
         }
 
+        String dynamicAppName = props.getString("atlas.config.store.app.name", "atlas");
+
         CassandraConfigDAO.doInitialize(
                 props.getString("atlas.config.store.cassandra.keyspace", "config_store"),
                 props.getString("atlas.config.store.cassandra.table", "configs"),
-                appName,
+                dynamicAppName,
                 hostname,
                 port,
                 props.getString("atlas.config.store.cassandra.datacenter", "datacenter1"),
