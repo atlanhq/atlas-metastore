@@ -112,6 +112,7 @@ LOG_FILE=""
 # Resolved connection endpoints (populated during preflight from atlas-application.properties)
 RESOLVED_CASS_HOST=""
 RESOLVED_CASS_PORT=""
+RESOLVED_CASS_DC=""
 RESOLVED_ES_HOST=""
 RESOLVED_ES_PORT=""
 RESOLVED_ES_PROTOCOL=""
@@ -466,12 +467,16 @@ phase_preflight() {
     if [ -z "$RESOLVED_CASS_PORT" ]; then
         RESOLVED_CASS_PORT=$(kexec_quiet grep '^atlas.graph.storage.port=' /opt/apache-atlas/conf/atlas-application.properties 2>/dev/null | tail -1 | cut -d= -f2 || echo "9042")
     fi
+    RESOLVED_CASS_DC=$(kexec_quiet grep '^atlas.cassandra.graph.datacenter=' /opt/apache-atlas/conf/atlas-application.properties 2>/dev/null | tail -1 | cut -d= -f2 || echo "")
+    if [ -z "$RESOLVED_CASS_DC" ]; then
+        RESOLVED_CASS_DC=$(kexec_quiet grep '^atlas.graph.storage.cql.local-datacenter=' /opt/apache-atlas/conf/atlas-application.properties 2>/dev/null | tail -1 | cut -d= -f2 || echo "datacenter1")
+    fi
     es_raw=$(kexec_quiet grep '^atlas.graph.index.search.hostname=' /opt/apache-atlas/conf/atlas-application.properties 2>/dev/null | tail -1 | cut -d= -f2- || echo "localhost:9200")
     RESOLVED_ES_HOST=$(echo "$es_raw" | cut -d':' -f1)
     RESOLVED_ES_PORT=$(echo "$es_raw" | grep -o ':[0-9]*' | tr -d ':' || echo "9200")
     RESOLVED_ES_PORT="${RESOLVED_ES_PORT:-9200}"
     RESOLVED_ES_PROTOCOL=$(kexec_quiet grep '^atlas.graph.index.search.elasticsearch.http.protocol=' /opt/apache-atlas/conf/atlas-application.properties 2>/dev/null | tail -1 | cut -d= -f2 || echo "http")
-    log "  Resolved endpoints: Cassandra=${RESOLVED_CASS_HOST}:${RESOLVED_CASS_PORT}, ES=${RESOLVED_ES_PROTOCOL}://${RESOLVED_ES_HOST}:${RESOLVED_ES_PORT}"
+    log "  Resolved endpoints: Cassandra=${RESOLVED_CASS_HOST}:${RESOLVED_CASS_PORT} (dc=${RESOLVED_CASS_DC}), ES=${RESOLVED_ES_PROTOCOL}://${RESOLVED_ES_HOST}:${RESOLVED_ES_PORT}"
 
     # 0.6c Connectivity probes (Cassandra + ES from inside the Atlas pod)
     log "Testing Cassandra connectivity from Atlas pod..."
@@ -1538,12 +1543,19 @@ phase_switch() {
     step "Phase 5: Backend Switch"
 
     # 5.1 Seed static configs via API (persisted in Cassandra, take effect on restart)
-    #     Only 2 keys needed — connection properties are already in atlas-application.properties.
+    #     earlyOverlay() reads these from Cassandra BEFORE Spring context starts,
+    #     so CassandraGraphDatabase and Constants.java see the correct values.
     #     No ConfigMap patching — Argo would revert it.
     log "Seeding static configs via API..."
     seed_static_config "atlas.graphdb.backend" "cassandra"
     # Always seed deterministic — migration runs with legacy IDs, but runtime uses deterministic
     seed_static_config "atlas.graph.id.strategy" "deterministic"
+    # CassandraGraph connection properties — resolved during preflight from atlas-application.properties.
+    # Without these, CassandraSessionProvider defaults to localhost after the backend switch.
+    seed_static_config "atlas.cassandra.graph.hostname" "$RESOLVED_CASS_HOST"
+    seed_static_config "atlas.cassandra.graph.port" "$RESOLVED_CASS_PORT"
+    seed_static_config "atlas.cassandra.graph.keyspace" "atlas_graph"
+    seed_static_config "atlas.cassandra.graph.datacenter" "$RESOLVED_CASS_DC"
     ok "Static configs seeded (will take effect after restart)"
 
     # 5.4 Trigger rolling restart of Atlas StatefulSet

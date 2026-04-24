@@ -18,7 +18,13 @@ public enum StaticConfigKey {
 
     GRAPH_BACKEND("atlas.graphdb.backend", "janus"),
 
-    GRAPH_ID_STRATEGY("atlas.graph.id.strategy", "legacy");
+    GRAPH_ID_STRATEGY("atlas.graph.id.strategy", "legacy"),
+
+    /** CassandraGraph connection properties — seeded by the migration script. */
+    CASSANDRA_GRAPH_HOSTNAME("atlas.cassandra.graph.hostname", null),
+    CASSANDRA_GRAPH_PORT("atlas.cassandra.graph.port", null),
+    CASSANDRA_GRAPH_KEYSPACE("atlas.cassandra.graph.keyspace", null),
+    CASSANDRA_GRAPH_DATACENTER("atlas.cassandra.graph.datacenter", null);
 
     private final String key;
     private final String defaultValue;

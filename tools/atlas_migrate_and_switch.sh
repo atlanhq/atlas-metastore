@@ -1062,6 +1062,20 @@ phase_switch() {
     log "Seeding static configs via API..."
     seed_static_config "atlas.graphdb.backend" "cassandra"
     seed_static_config "atlas.graph.id.strategy" "${ID_STRATEGY}"
+
+    # CassandraGraph connection properties — read from properties file, seed into static config store.
+    # Without these, CassandraSessionProvider defaults to localhost after earlyOverlay switches backend.
+    local cass_host_seed cass_port_seed cass_dc_seed
+    cass_host_seed=$(kubectl exec "$POD" -n "$NAMESPACE" -c "$CONTAINER" -- \
+        grep '^atlas.graph.storage.hostname=' /opt/apache-atlas/conf/atlas-application.properties 2>/dev/null | cut -d= -f2 | head -1 || echo "atlas-cassandra")
+    cass_port_seed=$(kubectl exec "$POD" -n "$NAMESPACE" -c "$CONTAINER" -- \
+        grep '^atlas.graph.storage.port=' /opt/apache-atlas/conf/atlas-application.properties 2>/dev/null | cut -d= -f2 | head -1 || echo "9042")
+    cass_dc_seed=$(kubectl exec "$POD" -n "$NAMESPACE" -c "$CONTAINER" -- \
+        grep '^atlas.graph.storage.cql.local-datacenter=' /opt/apache-atlas/conf/atlas-application.properties 2>/dev/null | cut -d= -f2 | head -1 || echo "datacenter1")
+    seed_static_config "atlas.cassandra.graph.hostname" "${cass_host_seed:-atlas-cassandra}"
+    seed_static_config "atlas.cassandra.graph.port" "${cass_port_seed:-9042}"
+    seed_static_config "atlas.cassandra.graph.keyspace" "atlas_graph"
+    seed_static_config "atlas.cassandra.graph.datacenter" "${cass_dc_seed:-datacenter1}"
     ok "Static configs seeded (will take effect after restart)"
 
     # 2.2 Patch ConfigMap for connection properties (not managed by StaticConfigStore)
