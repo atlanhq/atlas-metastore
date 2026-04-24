@@ -26,6 +26,7 @@ public class AtlasAccessResult {
 
     private boolean isAllowed = false;
     private String  policyId  = "-1";
+    private String  policyName = null;
     private int  policyPriority = -1;
     private boolean explicitDeny = false;
     private String enforcer = "abac_auth";
@@ -72,6 +73,14 @@ public class AtlasAccessResult {
 
     public void setPolicyId(String policyId) {
         this.policyId = policyId;
+    }
+
+    public String getPolicyName() {
+        return policyName;
+    }
+
+    public void setPolicyName(String policyName) {
+        this.policyName = policyName;
     }
 
     public void setPolicyPriority(int policyPriority) {
