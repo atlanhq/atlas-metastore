@@ -21,6 +21,7 @@ import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.model.searchlog.SearchRequestLogData;
 import org.apache.atlas.service.Service;
+import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.type.AtlasType;
 import org.apache.commons.lang.StringUtils;
 import org.apache.http.HttpEntity;
@@ -59,7 +60,7 @@ public class ESSearchLogger implements SearchLogger, Service {
     @Override
     public void log(SearchRequestLogData searchRequestLogData) {
         // MS-1017: shadow mode suppresses search_logs index writes.
-        if (AtlasConfiguration.SHADOW_MODE_ENABLED.getBoolean()) {
+        if (DynamicConfigStore.isShadowModeEnabled()) {
             LOG.debug("Shadow mode: suppressed search_log write");
             return;
         }

@@ -21,8 +21,8 @@ import org.apache.atlas.repository.store.graph.v2.EntityMutationService;
 import org.apache.atlas.repository.store.bootstrap.AtlasTypeDefStoreInitializer;
 import org.apache.atlas.service.config.ConfigKey;
 import org.apache.atlas.service.config.DynamicConfigStore;
-import org.apache.atlas.service.config.StaticConfigKey;
-import org.apache.atlas.service.config.StaticConfigStore;
+import org.apache.atlas.service.config.ConfigKey;
+import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.service.redis.RedisService;
 import org.apache.atlas.store.AtlasTypeDefStore;
 import org.apache.atlas.type.AtlasEntityType;
@@ -72,11 +72,12 @@ import java.util.concurrent.atomic.AtomicLong;
  * </ul>
  */
 @Service
-// Guarantees StaticConfigStore's @PostConstruct (which overlays Cassandra-sourced
-// values onto ApplicationProperties) completes BEFORE this bean's init() runs.
-// Without this, the shadow-mode gate read in init() may see the raw application.properties
-// default and skip consumer startup even when mothership seeded shadow=true in Cassandra.
-@DependsOn("staticConfigStore")
+// Guarantees DynamicConfigStore's @PostConstruct (which loads Cassandra config rows
+// into the in-memory cache) completes BEFORE this bean's init() runs. Without this,
+// the shadow-mode gate read in init() may see the ConfigKey default ("false") and
+// skip consumer startup even when mothership has set ATLAS_SHADOW_MODE_ENABLED=true
+// dynamically.
+@DependsOn("dynamicConfigStore")
 public class AsyncIngestionConsumerService {
 
     private static final Logger LOG = LoggerFactory.getLogger(AsyncIngestionConsumerService.class);
@@ -85,12 +86,15 @@ public class AsyncIngestionConsumerService {
     // ── Configuration ────────────────────────────────────────────────────
     private String bootstrapServers;
 
-    // Consumer auto-start is gated by the shadow-mode static config. When
-    // mothership flips atlas.shadow.mode.enabled=true (via the static-config
-    // admin API) and restarts the pod, init() starts the consumer automatically
-    // so WAL replay into JG begins. When shadow mode is off, the consumer is
-    // idle and side-effect paths (CDC, audits, Keycloak, search logs) run
-    // normally. Ops can still force-start via POST /async-ingestion/consumer/start.
+    // Consumer auto-start is gated by the shadow-mode dynamic config. Mothership
+    // flips ATLAS_SHADOW_MODE_ENABLED=true (via PUT /api/atlas/v2/configs/) BEFORE
+    // restarting the pod for the cassandra→janus cutover. After restart, init()
+    // reads the dynamic value, sees true, and starts the consumer so WAL replay
+    // into JG begins. When mothership flips shadow off post-replay (no restart
+    // required — that's the whole point of being dynamic), the consumer keeps
+    // running but there's nothing left to replay; side-effect paths (CDC, audits,
+    // Keycloak, search logs) immediately stop suppressing. Ops can still force
+    // start via POST /async-ingestion/consumer/start.
     @Value("${atlas.async.ingestion.consumer.topic:ATLAS_ASYNC_ENTITIES}")
     private String topic;
 
@@ -226,15 +230,12 @@ public class AsyncIngestionConsumerService {
     @PostConstruct
     public void init() {
         // Single source of truth: shadow mode governs whether the WAL consumer runs.
-        // Using StaticConfigStore.getConfigAsBoolean ensures we pick up the value
-        // that mothership seeded via /api/atlas/v2/static-configs, which was
-        // overlaid onto ApplicationProperties during StaticConfigStore init.
-        boolean shadowEnabled = StaticConfigStore.getConfigAsBoolean(
-                StaticConfigKey.ATLAS_SHADOW_MODE_ENABLED.getKey());
-
-        if (!shadowEnabled) {
+        // Read via DynamicConfigStore.isShadowModeEnabled() — picks up the dynamic
+        // value mothership set via PUT /api/atlas/v2/configs/ before the restart,
+        // with a configmap fallback when the dynamic store is disabled (tests).
+        if (!DynamicConfigStore.isShadowModeEnabled()) {
             LOG.info("AsyncIngestionConsumer not started — {}=false. WAL consumer runs only in shadow mode.",
-                    StaticConfigKey.ATLAS_SHADOW_MODE_ENABLED.getKey());
+                    ConfigKey.ATLAS_SHADOW_MODE_ENABLED.getKey());
             return;
         }
 

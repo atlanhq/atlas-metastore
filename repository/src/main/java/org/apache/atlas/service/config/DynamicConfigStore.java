@@ -362,6 +362,26 @@ public class DynamicConfigStore implements ApplicationContextAware {
     }
 
     /**
+     * Check if shadow mode is enabled.
+     *
+     * Shadow mode (MS-1017) suppresses CDC notifications, entity_audits writes, search
+     * logs, and Keycloak role mutations. Used during the rollback flow's WAL replay
+     * so downstream systems don't see duplicate events.
+     *
+     * Reads from DynamicConfigStore when activated so mothership can toggle the flag
+     * without restarting Atlas; falls back to AtlasConfiguration (configmap) on older
+     * clusters or in tests where the dynamic store is disabled.
+     *
+     * @return true if shadow mode is enabled, false otherwise
+     */
+    public static boolean isShadowModeEnabled() {
+        if (isActivated()) {
+            return getConfigAsBoolean(ConfigKey.ATLAS_SHADOW_MODE_ENABLED.getKey());
+        }
+        return AtlasConfiguration.SHADOW_MODE_ENABLED.getBoolean();
+    }
+
+    /**
      * Check if persona hierarchy filter is enabled.
      *
      * @return true if enabled, false otherwise
