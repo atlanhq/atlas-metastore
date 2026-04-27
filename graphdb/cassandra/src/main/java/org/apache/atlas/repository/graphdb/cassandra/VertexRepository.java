@@ -48,9 +48,14 @@ public class VertexRepository {
         String state    = props.containsKey("__state") ? String.valueOf(props.get("__state")) : "ACTIVE";
         Instant now     = Instant.now();
 
+        String propsJson = AtlasType.toJson(props);
+        if (PropertyCompression.shouldCompress(typeName)) {
+            propsJson = PropertyCompression.compress(propsJson);
+        }
+
         session.execute(insertVertexStmt.bind(
             vertex.getIdString(),
-            AtlasType.toJson(props),
+            propsJson,
             vertex.getVertexLabel(),
             typeName,
             state,
@@ -154,9 +159,14 @@ public class VertexRepository {
         String state    = props.containsKey("__state") ? String.valueOf(props.get("__state")) : "ACTIVE";
         Instant now     = Instant.now();
 
+        String propsJson = AtlasType.toJson(props);
+        if (PropertyCompression.shouldCompress(typeName)) {
+            propsJson = PropertyCompression.compress(propsJson);
+        }
+
         return insertVertexStmt.bind(
             vertex.getIdString(),
-            AtlasType.toJson(props),
+            propsJson,
             vertex.getVertexLabel(),
             typeName,
             state,
@@ -173,6 +183,7 @@ public class VertexRepository {
 
         Map<String, Object> props = new LinkedHashMap<>();
         if (propsJson != null && !propsJson.isEmpty()) {
+            propsJson = PropertyCompression.decompressIfNeeded(propsJson);
             Map<String, Object> rawProps = AtlasType.fromJson(propsJson, Map.class);
             if (rawProps != null) {
                 // Normalize property names: strip JanusGraph type-qualified prefixes.

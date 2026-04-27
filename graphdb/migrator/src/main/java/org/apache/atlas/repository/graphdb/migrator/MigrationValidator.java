@@ -514,6 +514,7 @@ public class MigrationValidator {
                 String propsJson = row.getString("properties");
 
                 try {
+                    propsJson = PropertyCompression.decompressIfNeeded(propsJson);
                     @SuppressWarnings("unchecked")
                     Map<String, Object> props = MAPPER.readValue(propsJson, Map.class);
                     String guid = getStringProp(props, "__guid");
@@ -638,6 +639,7 @@ public class MigrationValidator {
                 // Sub-check A: JSON well-formedness
                 Map<String, Object> props;
                 try {
+                    propsJson = PropertyCompression.decompressIfNeeded(propsJson);
                     @SuppressWarnings("unchecked")
                     Map<String, Object> parsed = MAPPER.readValue(propsJson, Map.class);
                     props = parsed;
@@ -853,6 +855,7 @@ public class MigrationValidator {
                 if (propsJson == null) continue;
 
                 try {
+                    propsJson = PropertyCompression.decompressIfNeeded(propsJson);
                     @SuppressWarnings("unchecked")
                     Map<String, Object> props = MAPPER.readValue(propsJson, Map.class);
                     for (String key : props.keySet()) {
@@ -953,6 +956,7 @@ public class MigrationValidator {
 
                 Map<String, Object> props;
                 try {
+                    propsJson = PropertyCompression.decompressIfNeeded(propsJson);
                     props = MAPPER.readValue(propsJson, Map.class);
                 } catch (Exception e) {
                     jsonErrors++;

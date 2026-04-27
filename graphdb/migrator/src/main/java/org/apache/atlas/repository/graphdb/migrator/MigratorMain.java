@@ -516,9 +516,10 @@ public class MigratorMain {
             LOG.info("=== Retry attempt {}/{}: {} failed token ranges ===", attempt, maxRetries, failed);
             LOG.info("========================================");
 
-            // Clear FAILED status so they will be re-scanned (resume mode skips COMPLETED only)
-            // The scanner.scanAll with resume=true will pick up non-COMPLETED ranges
+            // Reset writer state (thread pool was terminated after awaitCompletion) and re-scan
+            // failed ranges. Resume mode skips COMPLETED ranges, so only FAILED ones are re-scanned.
             try {
+                writer.resetForRetry();
                 writer.startWriters();
                 scanner.scanAll(
                     item -> writer.enqueue(item),

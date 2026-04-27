@@ -55,7 +55,7 @@ public class CassandraTargetWriter implements AutoCloseable {
 
     // Pipeline: scanner threads enqueue, writer threads dequeue
     private final BlockingQueue<QueueItem> queue;
-    private final ExecutorService writerPool;
+    private ExecutorService writerPool;
     private volatile boolean scanningComplete = false;
 
     // Diagnostic counters
@@ -299,6 +299,23 @@ public class CassandraTargetWriter implements AutoCloseable {
     }
 
     /**
+     * Reset writer state so it can be restarted for retry passes.
+     * Must be called after awaitCompletion() and before startWriters().
+     * Creates a fresh thread pool (the old one is terminated after shutdown).
+     */
+    public void resetForRetry() {
+        this.scanningComplete = false;
+        this.queue.clear();
+        this.writerPool = Executors.newFixedThreadPool(config.getWriterThreads(), r -> {
+            Thread t = new Thread(r);
+            t.setName("writer-retry-" + t.getId());
+            t.setDaemon(true);
+            return t;
+        });
+        LOG.info("Writer reset for retry (new thread pool created)");
+    }
+
+    /**
      * Writer loop: drains items from the queue and fires individual async statements,
      * using a Semaphore cap on in-flight requests per thread.
      *
@@ -518,6 +535,13 @@ public class CassandraTargetWriter implements AutoCloseable {
         } catch (Exception e) {
             propsJson = "{}";
             LOG.warn("Failed to serialize properties for vertex {}", vertexId, e);
+        }
+
+        if (PropertyCompression.shouldCompress(vertex.getTypeName())) {
+            int originalBytes = propsJson.length();
+            propsJson = PropertyCompression.compress(propsJson);
+            LOG.info("Compressed __AtlasAuditEntry vertex {}: {} bytes -> {} bytes",
+                     vertexId, String.format("%,d", originalBytes), String.format("%,d", propsJson.length()));
         }
 
         int propsBytes = propsJson.length();

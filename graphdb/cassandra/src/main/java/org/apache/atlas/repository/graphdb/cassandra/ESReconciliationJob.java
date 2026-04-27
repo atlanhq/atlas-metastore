@@ -194,6 +194,7 @@ public class ESReconciliationJob implements Runnable {
     @SuppressWarnings("unchecked")
     private String extractGuid(String propsJson) {
         try {
+            propsJson = PropertyCompression.decompressIfNeeded(propsJson);
             Map<String, Object> props = AtlasType.fromJson(propsJson, Map.class);
             if (props == null) return null;
             Object guid = props.get("__guid");
@@ -215,6 +216,7 @@ public class ESReconciliationJob implements Runnable {
     @SuppressWarnings("unchecked")
     private boolean isEntityVertex(String propsJson) {
         try {
+            propsJson = PropertyCompression.decompressIfNeeded(propsJson);
             Map<String, Object> props = AtlasType.fromJson(propsJson, Map.class);
             if (props == null) return false;
             Object typeName = props.get("__typeName");
@@ -227,6 +229,7 @@ public class ESReconciliationJob implements Runnable {
     @SuppressWarnings("unchecked")
     private boolean isDeleted(String propsJson) {
         try {
+            propsJson = PropertyCompression.decompressIfNeeded(propsJson);
             if (!propsJson.contains("DELETED")) return false;
             Map<String, Object> props = AtlasType.fromJson(propsJson, Map.class);
             if (props == null) return false;
