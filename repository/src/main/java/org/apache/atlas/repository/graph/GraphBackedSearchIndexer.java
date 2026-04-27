@@ -252,7 +252,9 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
             }
 
             //resolve index fields names for the new entity attributes.
-            resolveIndexFieldNames(management, changedTypeDefs);
+            // isBootstrap=false: this path runs on Cedar typedef push (after Atlas is up).
+            // The MIN_FIELD_KEYS_FOR_SELF_HEALING guard remains active here.
+            resolveIndexFieldNames(management, changedTypeDefs, false);
 
             createEdgeLabels(management, changedTypeDefs.getCreatedTypeDefs());
             createEdgeLabels(management, changedTypeDefs.getUpdatedTypeDefs());
@@ -300,7 +302,11 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
             }
 
             //resolve index fields names
-            resolveIndexFieldNames(management, changedTypeDefs);
+            // MS-1120: isBootstrap=true here. Bypasses MIN_FIELD_KEYS_FOR_SELF_HEALING guard
+            // because (a) by this point updateIndexForTypeDef has been called for every typedef
+            // so any missing key is a bug, not a loading state, and (b) fresh-tenant ES races
+            // surface here — exactly when we need self-heal to run.
+            resolveIndexFieldNames(management, changedTypeDefs, true);
 
             //Commit indexes
             commit(management);
@@ -614,43 +620,43 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
         }
     }
 
-    private void resolveIndexFieldNames(AtlasGraphManagement managementSystem, ChangedTypeDefs changedTypeDefs) {
+    private void resolveIndexFieldNames(AtlasGraphManagement managementSystem, ChangedTypeDefs changedTypeDefs, boolean isBootstrap) {
         List<? extends AtlasBaseTypeDef> createdTypeDefs = changedTypeDefs.getCreatedTypeDefs();
 
         if(createdTypeDefs != null) {
-            resolveIndexFieldNames(managementSystem, createdTypeDefs);
+            resolveIndexFieldNames(managementSystem, createdTypeDefs, isBootstrap);
         }
 
         List<? extends AtlasBaseTypeDef> updatedTypeDefs = changedTypeDefs.getUpdatedTypeDefs();
 
         if(updatedTypeDefs != null) {
-            resolveIndexFieldNames(managementSystem, updatedTypeDefs);
+            resolveIndexFieldNames(managementSystem, updatedTypeDefs, isBootstrap);
         }
     }
 
-    private void resolveIndexFieldNames(AtlasGraphManagement managementSystem, List<? extends AtlasBaseTypeDef> typeDefs) {
+    private void resolveIndexFieldNames(AtlasGraphManagement managementSystem, List<? extends AtlasBaseTypeDef> typeDefs, boolean isBootstrap) {
         for(AtlasBaseTypeDef baseTypeDef: typeDefs) {
             if(TypeCategory.ENTITY.equals(baseTypeDef.getCategory())) {
                 AtlasEntityType entityType = typeRegistry.getEntityTypeByName(baseTypeDef.getName());
 
-                resolveIndexFieldNames(managementSystem, entityType);
+                resolveIndexFieldNames(managementSystem, entityType, isBootstrap);
             } else if(TypeCategory.BUSINESS_METADATA.equals(baseTypeDef.getCategory())) {
                 AtlasBusinessMetadataType businessMetadataType = typeRegistry.getBusinessMetadataTypeByName(baseTypeDef.getName());
 
-                resolveIndexFieldNames(managementSystem, businessMetadataType);
+                resolveIndexFieldNames(managementSystem, businessMetadataType, isBootstrap);
             } else {
                 LOG.debug("Ignoring type definition {}", baseTypeDef.getName());
             }
         }
     }
 
-    private void resolveIndexFieldNames(AtlasGraphManagement managementSystem, AtlasStructType structType) {
+    private void resolveIndexFieldNames(AtlasGraphManagement managementSystem, AtlasStructType structType, boolean isBootstrap) {
         for(AtlasAttribute attribute: structType.getAllAttributes().values()) {
-            resolveIndexFieldName(managementSystem, attribute);
+            resolveIndexFieldName(managementSystem, attribute, isBootstrap);
         }
     }
 
-    private void resolveIndexFieldName(AtlasGraphManagement managementSystem, AtlasAttribute attribute) {
+    private void resolveIndexFieldName(AtlasGraphManagement managementSystem, AtlasAttribute attribute, boolean isBootstrap) {
         try {
             if (attribute.getIndexFieldName() != null) {
                 return;
@@ -676,7 +682,20 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
             } else if (isIndexApplicable(primitiveClass, toAtlasCardinality(attribute.getAttributeDef().getCardinality()))) {
                     AtlasPropertyKey propertyKey = managementSystem.getPropertyKey(attribute.getVertexPropertyName());
                     boolean isStringField = AtlasAttributeDef.IndexType.STRING.equals(attribute.getIndexType());
+
+                    // MS-1120: detect "half-registered" property keys — present in JG schema
+                    // but missing from the VERTEX_INDEX mixed index. Symptom: GUID lookups +
+                    // Gremlin queries return data, but ES queries on the field return 0.
+                    // Fresh-tenant ES races can produce this state when addMixedIndex's
+                    // backend-registration call silently no-ops while the JG-side schema
+                    // mutation succeeds.
+                    boolean halfRegistered = false;
                     if (propertyKey != null) {
+                        AtlasGraphIndex vertexIdxCheck = managementSystem.getGraphIndex(Constants.VERTEX_INDEX);
+                        halfRegistered = vertexIdxCheck != null && !vertexIdxCheck.getFieldKeys().contains(propertyKey);
+                    }
+
+                    if (propertyKey != null && !halfRegistered) {
                         String indexFieldName = managementSystem.getIndexFieldName(Constants.VERTEX_INDEX, propertyKey, isStringField);
 
                         attribute.setIndexFieldName(indexFieldName);
@@ -691,27 +710,39 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                             LOG.debug("Property {} is mapped to index field name {}", attribute.getQualifiedName(), attribute.getIndexFieldName());
                         }
                     } else {
-                        // SELF-HEALING: property key is missing from the mixed index.
-                        // This happens when typedef seeding (Cedar push) partially fails —
-                        // the typedef is persisted but the property key was never registered.
-                        // createVertexIndex() is idempotent: it checks getPropertyKey() first,
-                        // creates only if missing, and checks getFieldKeys().contains() before
-                        // adding to the mixed index.
+                        // SELF-HEALING entry point. Two conditions reach here:
+                        //   (a) propertyKey == null — typedef seeding (Cedar push) partial
+                        //       failure: the typedef is persisted but the property key was
+                        //       never registered.
+                        //   (b) MS-1120: propertyKey is present in JG schema but missing
+                        //       from VERTEX_INDEX mixed index (half-registered). Common on
+                        //       fresh tenants when ES is still warming during pod boot and
+                        //       addMixedIndex's ES-backend registration silently no-ops.
                         //
-                        // Guard: only self-heal on established schemas where null property key
-                        // indicates a Cedar push failure, not fresh typedef loading.
+                        // createVertexIndex() is idempotent: getPropertyKey() reuses the
+                        // existing key (if any), and getFieldKeys().contains() gates the
+                        // addMixedIndex call. So calling it for either condition is safe.
+                        String repairReason = (propertyKey == null) ? "propertyKey is null"
+                                : "propertyKey present in JG but missing from VERTEX_INDEX (half-registered)";
+
                         AtlasGraphIndex vertexIdx = managementSystem.getGraphIndex(Constants.VERTEX_INDEX);
                         int fieldKeyCount = (vertexIdx != null) ? vertexIdx.getFieldKeys().size() : 0;
 
-                        if (fieldKeyCount < MIN_FIELD_KEYS_FOR_SELF_HEALING) {
-                            LOG.warn("resolveIndexFieldName(attribute={}): propertyKey is null for vertexPropertyName={}. "
-                                    + "Skipping self-healing (schema has {} field keys, threshold: {})",
-                                    attribute.getQualifiedName(), attribute.getVertexPropertyName(),
+                        // MS-1120: skip the field-key-count guard when invoked from
+                        // onLoadCompletion (isBootstrap=true). By that point every typedef
+                        // has been processed by updateIndexForTypeDef, so a missing key is
+                        // a bug, not a still-loading state — and bootstrap is precisely
+                        // when fresh-tenant ES races produce these failures. Guard remains
+                        // active for onChange (Cedar push) to preserve existing behavior.
+                        if (!isBootstrap && fieldKeyCount < MIN_FIELD_KEYS_FOR_SELF_HEALING) {
+                            LOG.warn("resolveIndexFieldName(attribute={}): {} for vertexPropertyName={}. "
+                                    + "Skipping self-healing (schema has {} field keys, threshold: {}, isBootstrap=false)",
+                                    attribute.getQualifiedName(), repairReason, attribute.getVertexPropertyName(),
                                     fieldKeyCount, MIN_FIELD_KEYS_FOR_SELF_HEALING);
                         } else {
-                        LOG.warn("resolveIndexFieldName(attribute={}): propertyKey is null — "
-                                + "attempting auto-repair for vertexPropertyName={}",
-                                attribute.getQualifiedName(), attribute.getVertexPropertyName());
+                        LOG.warn("resolveIndexFieldName(attribute={}): {} — "
+                                + "attempting auto-repair for vertexPropertyName={} (isBootstrap={})",
+                                attribute.getQualifiedName(), repairReason, attribute.getVertexPropertyName(), isBootstrap);
                         try {
                             AtlasCardinality cardinality = toAtlasCardinality(attribute.getAttributeDef().getCardinality());
                             // Match createIndexForAttribute logic: isStringField only true
@@ -792,7 +823,9 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                                     attribute.getQualifiedName(), repairEx);
                         }
                         } // end self-healing guard
-                        if (loggedNullPropertyKeyWarnings.add(attribute.getVertexPropertyName())) {
+                        // Dedup-warn only for the original null-propertyKey case;
+                        // half-registered repairs already log via the AUTO-REPAIR warn above.
+                        if (propertyKey == null && loggedNullPropertyKeyWarnings.add(attribute.getVertexPropertyName())) {
                             LOG.warn("resolveIndexFieldName(attribute={}): propertyKey is null for vertextPropertyName={}", attribute.getQualifiedName(), attribute.getVertexPropertyName());
                         }
                     }
