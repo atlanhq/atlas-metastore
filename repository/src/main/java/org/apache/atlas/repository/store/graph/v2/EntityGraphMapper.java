@@ -409,6 +409,88 @@ public class EntityGraphMapper {
                 reqContext.cacheDifferentialEntity(diffEntity);
 
                 resp.addEntity(UPDATE, restoredEntity);
+
+                /**
+                 * MS-1099: On restore, notify BOTH endpoints of the restored entity's ACTIVE
+                 * lineage edges (PROCESS_INPUTS/PROCESS_OUTPUTS).
+                 *
+                 * For Process/ColumnProcess, soft delete marks the vertex as DELETED but leaves
+                 * edges ACTIVE. On restore (DELETED -> ACTIVE), those edges remain unchanged,
+                 * so downstream Columns never receive a notification that their upstream
+                 * Process is back. This causes the Lakehouse state to remain stale.
+                 *
+                 * Explicit notification here closes that gap.
+                 *
+                 * Scope & safety:
+                 *   - Limited to PROCESS_EDGE_LABELS (input/output lineage). No broad scan.
+                 *   - Skip self, deleted entities, and other restored entities (to avoid
+                 *     duplicate notifications if the counterpart is also being restored in
+                 *     the same transaction).
+                 *   - O(edges) per restored vertex.
+                 *       ColumnProcess: typically 1 input + 1 output.
+                 *       Standard Process: small fan-in/out.
+                 *   - No recursion.
+                 */
+                try {
+                    AtlasVertex restoredVertex = context.getVertex(restoredEntity.getGuid());
+                    if (restoredVertex == null) {
+                        restoredVertex = AtlasGraphUtilsV2.findByGuid(graph, restoredEntity.getGuid());
+                    }
+                    if (restoredVertex != null) {
+                        String vGuid = restoredEntity.getGuid();
+                        /**
+                         * Iterate BOTH directions. Don't filter by edge label — custom
+                         * relationship types (e.g. process_outputs, r:process_outputs,
+                         * dataset_process_inputs) vary by tenant typedef but all represent
+                         * lineage or hierarchy. isRelationshipEdge + status=ACTIVE is the
+                         * safe filter for "a live relationship that consumers should refresh".
+                         * Note on edge state: soft-delete of a Process may leave OUT edges
+                         * (e.g. process_outputs) ACTIVE while IN edges (e.g. process_inputs)
+                         * become DELETED. We only notify endpoints of ACTIVE edges — these
+                         * represent relationships that are still live and whose endpoints
+                         * need to be informed that their counterpart came back.
+                         */
+                        // Super-vertex protection: bound both-direction scans by edge count +
+                        // wall-clock deadline. The deadline spans the whole restore-notification
+                        // scan for this vertex (both directions share a budget).
+                        final int maxEdges = AtlasConfiguration.MAX_EDGES_SUPER_VERTEX.getInt();
+                        final long deadlineNanos = System.nanoTime()
+                                + AtlasConfiguration.MIN_TIMEOUT_SUPER_VERTEX.getLong() * 1_000_000_000L;
+
+                        for (AtlasEdgeDirection direction : new AtlasEdgeDirection[]{AtlasEdgeDirection.OUT, AtlasEdgeDirection.IN}) {
+                            int examined = 0;
+                            boolean truncated = false;
+                            Iterable<AtlasEdge> edges = restoredVertex.getEdges(direction);
+                            for (AtlasEdge edge : edges) {
+                                if (examined++ >= maxEdges || System.nanoTime() > deadlineNanos) {
+                                    truncated = true;
+                                    break;
+                                }
+                                if (!isRelationshipEdge(edge)) continue;
+                                if (getStatus(edge) != AtlasEntity.Status.ACTIVE) continue;
+                                AtlasVertex opposite = (direction == AtlasEdgeDirection.OUT) ? edge.getInVertex() : edge.getOutVertex();
+                                if (opposite == null) continue;
+                                String oppGuid = GraphHelper.getGuid(opposite);
+                                if (oppGuid == null
+                                        || vGuid.equals(oppGuid)
+                                        || reqContext.isDeletedEntity(oppGuid)
+                                        || reqContext.isRestoredEntity(oppGuid)) continue;
+                                reqContext.recordEntityUpdateForRelationshipChange(
+                                        entityRetriever.toAtlasEntityHeader(opposite));
+                            }
+                            if (truncated) {
+                                LOG.warn("MS-1099: super-vertex protection — edge-notification scan ({}) truncated for "
+                                        + "restored entity {} (examined={}, maxEdges={}, timeoutSec={}). Some related "
+                                        + "entities may miss ENTITY_UPDATE.",
+                                        direction, vGuid, examined, maxEdges,
+                                        AtlasConfiguration.MIN_TIMEOUT_SUPER_VERTEX.getLong());
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    LOG.warn("MS-1099: failed to record endpoint updates for restored entity {}",
+                            restoredEntity.getGuid(), e);
+                }
             }
         }
 

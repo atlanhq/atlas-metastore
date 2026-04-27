@@ -208,21 +208,72 @@ public abstract class DeleteHandlerV1 {
                 // called and parent entities never get an ENTITY_UPDATE notification.
                 // MS-701 (PR #6381) fixed this for outgoing edges in deleteEdgeReference(), but
                 // that path is only reached during hard delete edge processing.
-                // Fix: find parent vertices via incoming relationship edges and record them now,
-                // before the vertex is marked as deleted.
+                // Fix: find related vertices via BOTH incoming AND outgoing relationship edges
+                // and record them now, before the vertex is marked as deleted.
+                //
+                // MS-1099: Extended to OUT edges. On soft delete of a Process, the upstream
+                // (input-side) asset is reachable via IN edges but the downstream (output-side)
+                // asset is reachable via OUT edges. Without iterating OUT edges, the downstream
+                // asset never gets an ENTITY_UPDATE notification — downstream Columns stay stale
+                // in Lakehouse.
                 try {
+                    // Super-vertex protection: bound both direction scans by edge count + wall-clock
+                    // deadline. MAX_EDGES_SUPER_VERTEX (default 10k) is ample for any legitimate
+                    // fan-out; MIN_TIMEOUT_SUPER_VERTEX (default 2s) defends against pathological
+                    // iterators. When a bound trips we emit a WARN with the entity GUID so ops can
+                    // investigate — some related entities may miss ENTITY_UPDATE in that case.
+                    final int maxEdges = AtlasConfiguration.MAX_EDGES_SUPER_VERTEX.getInt();
+                    final long deadlineNanos = System.nanoTime()
+                            + AtlasConfiguration.MIN_TIMEOUT_SUPER_VERTEX.getLong() * 1_000_000_000L;
+
+                    int inExamined = 0;
+                    boolean inTruncated = false;
                     Iterable<AtlasEdge> inEdges = vertexInfo.getVertex().getEdges(AtlasEdgeDirection.IN);
                     for (AtlasEdge inEdge : inEdges) {
+                        if (inExamined++ >= maxEdges || System.nanoTime() > deadlineNanos) {
+                            inTruncated = true;
+                            break;
+                        }
                         if (isRelationshipEdge(inEdge) && ACTIVE.equals(getStatus(inEdge))) {
-                            AtlasVertex parentVertex = inEdge.getOutVertex();
-                            if (parentVertex != null && !requestContext.isDeletedEntity(GraphHelper.getGuid(parentVertex))) {
+                            AtlasVertex relatedVertex = inEdge.getOutVertex();
+                            if (relatedVertex != null && !requestContext.isDeletedEntity(GraphHelper.getGuid(relatedVertex))) {
                                 requestContext.recordEntityUpdateForRelationshipChange(
-                                        entityRetriever.toAtlasEntityHeader(parentVertex));
+                                        entityRetriever.toAtlasEntityHeader(relatedVertex));
                             }
                         }
                     }
+                    if (inTruncated) {
+                        LOG.warn("Super-vertex protection: edge-notification scan (IN) truncated for deleted entity {} "
+                                + "(examined={}, maxEdges={}, timeoutSec={}). Some related entities may miss ENTITY_UPDATE.",
+                                entityHeader.getGuid(), inExamined, maxEdges,
+                                AtlasConfiguration.MIN_TIMEOUT_SUPER_VERTEX.getLong());
+                    }
+
+                    // MS-1099: mirror of above for OUT edges — notify the inVertex side.
+                    int outExamined = 0;
+                    boolean outTruncated = false;
+                    Iterable<AtlasEdge> outEdges = vertexInfo.getVertex().getEdges(AtlasEdgeDirection.OUT);
+                    for (AtlasEdge outEdge : outEdges) {
+                        if (outExamined++ >= maxEdges || System.nanoTime() > deadlineNanos) {
+                            outTruncated = true;
+                            break;
+                        }
+                        if (isRelationshipEdge(outEdge) && ACTIVE.equals(getStatus(outEdge))) {
+                            AtlasVertex relatedVertex = outEdge.getInVertex();
+                            if (relatedVertex != null && !requestContext.isDeletedEntity(GraphHelper.getGuid(relatedVertex))) {
+                                requestContext.recordEntityUpdateForRelationshipChange(
+                                        entityRetriever.toAtlasEntityHeader(relatedVertex));
+                            }
+                        }
+                    }
+                    if (outTruncated) {
+                        LOG.warn("Super-vertex protection: edge-notification scan (OUT) truncated for deleted entity {} "
+                                + "(examined={}, maxEdges={}, timeoutSec={}). Some related entities may miss ENTITY_UPDATE.",
+                                entityHeader.getGuid(), outExamined, maxEdges,
+                                AtlasConfiguration.MIN_TIMEOUT_SUPER_VERTEX.getLong());
+                    }
                 } catch (Exception e) {
-                    LOG.warn("Failed to record parent entity updates for deleted entity {}",
+                    LOG.warn("Failed to record related entity updates for deleted entity {}",
                             entityHeader.getGuid(), e);
                 }
             }
