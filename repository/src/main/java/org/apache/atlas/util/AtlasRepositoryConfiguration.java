@@ -156,6 +156,7 @@ public class AtlasRepositoryConfiguration {
 
             // StaticConfigStore overlays Cassandra-backed values onto ApplicationProperties
             // at startup, so ApplicationProperties already has the correct graph backend.
+            // AtlasGraphProvider has @DependsOn("staticConfigStore") to guarantee init ordering.
             Configuration                        config            = ApplicationProperties.get();
             String                               graphDatabaseImpl = config.getString(ApplicationProperties.GRAPHDB_BACKEND_CONF);
             if (StringUtils.equals(graphDatabaseImpl, ApplicationProperties.GRAPHDB_BACKEND_CASSANDRA)) {

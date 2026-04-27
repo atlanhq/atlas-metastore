@@ -437,7 +437,7 @@ public class MigrationREST {
 
     private List<AtlasEntity> getEntitiesByIndexSearch(IndexSearchParams indexSearchParams, Boolean minExtInfo, boolean ignoreRelationships) throws AtlasBaseException {
         List<AtlasEntity> entities = new ArrayList<>();
-        String indexName = VERTEX_INDEX_NAME;
+        String indexName = getVertexIndexName();
         AtlasIndexQuery indexQuery = graph.elasticsearchQuery(indexName);
         DirectIndexQueryResult indexQueryResult = indexQuery.vertices(indexSearchParams);
         Iterator<AtlasIndexQuery.Result> iterator = indexQueryResult.getIterator();

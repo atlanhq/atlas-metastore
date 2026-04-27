@@ -22,6 +22,7 @@ import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.annotation.EnableConditional;
 import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.listener.EntityChangeListenerV2;
 import org.apache.atlas.model.ESDeferredOperation;
 import org.apache.atlas.model.glossary.AtlasGlossaryTerm;
@@ -271,7 +272,7 @@ public class EntityNotificationListenerV2 implements EntityChangeListenerV2 {
             return;
         }
         // MS-1017: shadow mode suppresses all ATLAS_ENTITIES CDC publishes.
-        if (AtlasConfiguration.SHADOW_MODE_ENABLED.getBoolean()) {
+        if (DynamicConfigStore.isShadowModeEnabled()) {
             LOG.debug("Shadow mode: suppressed CDC publish");
             return;
         }

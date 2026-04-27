@@ -18,7 +18,26 @@ public enum StaticConfigKey {
 
     GRAPH_BACKEND("atlas.graphdb.backend", "janus"),
 
-    GRAPH_ID_STRATEGY("atlas.graph.id.strategy", "legacy");
+    // NOTE: atlas.graph.index.search.es.prefix is intentionally NOT a static config.
+    // The ES index prefix is derived strictly from GRAPH_BACKEND in Constants.java
+    // ("cassandra" → "atlas_graph_", "janus" → "janusgraph_"). Allowing an explicit
+    // override caused a drift bug where backend and prefix could disagree, pointing
+    // reads at the wrong index. Flip GRAPH_BACKEND and the prefix follows.
+
+    CASSANDRA_GRAPH_HOSTNAME("atlas.cassandra.graph.hostname", "localhost"),
+
+    CASSANDRA_GRAPH_PORT("atlas.cassandra.graph.port", "9042"),
+
+    CASSANDRA_GRAPH_KEYSPACE("atlas.cassandra.graph.keyspace", "atlas_graph"),
+
+    CASSANDRA_GRAPH_DATACENTER("atlas.cassandra.graph.datacenter", "datacenter1"),
+
+    GRAPH_ID_STRATEGY("atlas.graph.id.strategy", "legacy"),
+
+    // NOTE: atlas.shadow.mode.enabled lives in ConfigKey (dynamic) so mothership's
+    // rollback flow can flip it off via PUT /api/atlas/v2/configs/... without a
+    // second pod restart. See DynamicConfigStore.isShadowModeEnabled().
+    GRAPH_CLAIM_ENABLED("atlas.graph.claim.enabled", "false");
 
     private final String key;
     private final String defaultValue;

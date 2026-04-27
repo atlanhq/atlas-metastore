@@ -23,6 +23,7 @@ import org.apache.atlas.AtlasException;
 import org.apache.atlas.model.EntityAuditEvent.EntityAuditAction;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.annotation.EnableConditional;
+import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.model.audit.EntityAuditEventV2;
 import org.apache.atlas.model.audit.EntityAuditEventV2.EntityAuditActionV2;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -108,7 +109,7 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
 
     // MS-1017: shadow mode suppresses all entity_audits writes.
     private boolean skipForShadowMode() {
-        if (AtlasConfiguration.SHADOW_MODE_ENABLED.getBoolean()) {
+        if (DynamicConfigStore.isShadowModeEnabled()) {
             LOG.debug("Shadow mode: suppressed entity_audits write");
             return true;
         }

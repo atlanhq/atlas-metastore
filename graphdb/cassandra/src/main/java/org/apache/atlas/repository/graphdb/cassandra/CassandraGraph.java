@@ -772,8 +772,8 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         // Normalize: callers may pass unprefixed names like "search_logs" but the actual
         // ES index is prefixed (e.g. "atlas_graph_search_logs"). Must match what
         // CassandraIndexQuery.normalizeIndexName() will resolve to.
-        if (!indexName.startsWith(Constants.INDEX_PREFIX) && !EXCLUDE_ES_INDEXES_PREFIXING.contains(indexName)) {
-            indexName = Constants.INDEX_PREFIX + indexName;
+        if (!indexName.startsWith(Constants.getIndexPrefix()) && !EXCLUDE_ES_INDEXES_PREFIXING.contains(indexName)) {
+            indexName = Constants.getIndexPrefix() + indexName;
         }
         if (VERIFIED_ES_INDEXES.contains(indexName)) {
             return;
@@ -1324,7 +1324,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                                              List<CassandraVertex> removedVertices) {
         long esSyncStartMs = System.currentTimeMillis();
         try {
-            String indexName = Constants.VERTEX_INDEX_NAME;
+            String indexName = Constants.getVertexIndexName();
 
             // Collect entity vertices to sync, keyed by vertex ID for retry tracking
             Map<String, CassandraVertex> vertexMap = new LinkedHashMap<>();
@@ -1853,7 +1853,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             return 0;
         }
 
-        String indexName = Constants.VERTEX_INDEX_NAME;
+        String indexName = Constants.getVertexIndexName();
         ensureESIndexExists(indexName);
 
         // Look up each GUID → vertex, filter to entity vertices

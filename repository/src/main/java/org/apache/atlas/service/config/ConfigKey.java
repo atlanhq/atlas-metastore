@@ -41,7 +41,21 @@ public enum ConfigKey {
     DELETE_BATCH_ENABLED("atlas.delete.batch.enabled", "false"),
 
     // Async ingestion flag - when enabled, write operations also publish to Kafka for shadow consumer
-    ENABLE_ASYNC_INGESTION("ENABLE_ASYNC_INGESTION", "false");
+    ENABLE_ASYNC_INGESTION("ENABLE_ASYNC_INGESTION", "false"),
+
+    // Written by the WAL consumer (AsyncIngestionConsumerService):
+    //   "true"  — consumer has observed totalLag==0 for a stable window (default 30s)
+    //   "false" — consumer is catching up (or has never drained since the process started)
+    // Consumed by mothership's rollback orchestrator to decide when to flip shadow mode off.
+    WAL_REPLAY_COMPLETE("WAL_REPLAY_COMPLETE", "false"),
+
+    // Shadow mode (MS-1017) — dynamic so mothership's rollback flow can flip it off
+    // without a second pod restart. When true, the pod still writes to the graph but
+    // suppresses ATLAS_ENTITIES CDC, entity_audits, search logs, and Keycloak role
+    // mutations. AtlasConfiguration.SHADOW_MODE_ENABLED stays as the configmap fallback
+    // when DynamicConfigStore is disabled (older clusters / tests); see
+    // DynamicConfigStore.isShadowModeEnabled().
+    ATLAS_SHADOW_MODE_ENABLED("atlas.shadow.mode.enabled", "false");
 
     private final String key;
     private final String defaultValue;

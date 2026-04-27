@@ -87,7 +87,6 @@ public class TaskRegistry {
     private static final Logger LOG = LoggerFactory.getLogger(TaskRegistry.class);
     public static final int TASK_FETCH_BATCH_SIZE = 100;
     public static final List<Map<String, Object>> SORT_ARRAY = Collections.singletonList(mapOf(Constants.TASK_CREATED_TIME, mapOf("order", "asc")));
-    public static final String JANUSGRAPH_VERTEX_INDEX = Constants.VERTEX_INDEX_NAME;
     public static final String TASK_MISMATCH_TAG = "mismatchTask";
 
     private AtlasGraph graph;
@@ -527,7 +526,7 @@ public class TaskRegistry {
                             "  ctx._source[entry.getKey()] = entry.getValue(); " +
                             "}";
 
-            UpdateRequest req = new UpdateRequest(JANUSGRAPH_VERTEX_INDEX, docId)
+            UpdateRequest req = new UpdateRequest(Constants.getVertexIndexName(), docId)
                     .script(new Script(ScriptType.INLINE, "painless", scriptSource,
                             Collections.singletonMap("fields", fieldsToUpdate)))
                     .retryOnConflict(RETRY_ON_CONFLICT)

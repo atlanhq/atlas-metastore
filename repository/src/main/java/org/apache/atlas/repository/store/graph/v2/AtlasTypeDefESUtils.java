@@ -47,7 +47,7 @@ public final class AtlasTypeDefESUtils {
      */
     public static boolean typeHasInstanceVertex(String typeName) throws AtlasBaseException {
         try {
-            String indexName = Constants.VERTEX_INDEX_NAME;
+            String indexName = Constants.getVertexIndexName();
             AtlasIndexQuery indexQuery = getGraphInstance().elasticsearchQuery(indexName);
 
             String esQuery = String.format(
@@ -83,7 +83,7 @@ public final class AtlasTypeDefESUtils {
                 LOG.debug("Checking if classification {} has references using ES", typeName);
             }
 
-            String indexName = Constants.VERTEX_INDEX_NAME;
+            String indexName = Constants.getVertexIndexName();
             AtlasIndexQuery indexQuery = getGraphInstance().elasticsearchQuery(indexName);
 
             String esQuery = buildClassificationReferenceQuery(typeName);

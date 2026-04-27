@@ -71,8 +71,8 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 
-import static org.apache.atlas.repository.Constants.INDEX_PREFIX;
 import static org.apache.atlas.repository.Constants.VERTEX_INDEX;
+import static org.apache.atlas.repository.Constants.getIndexPrefix;
 
 /**
  * Driver for running Metadata as a standalone server with embedded jetty server.
@@ -355,12 +355,12 @@ public final class Atlas {
 
         // Create the primary template for the configured index prefix (e.g., janusgraph_vertex_index).
         // This MUST succeed — Atlas cannot start without correct ES mappings/analyzers.
-        String vertexIndex = INDEX_PREFIX + VERTEX_INDEX;
+        String vertexIndex = getIndexPrefix() + VERTEX_INDEX;
         createESTemplateIfNotExists(esClient, "atlan-template", Arrays.asList(vertexIndex), settingsJson, mappingsJson, true);
 
         // Also create a template for atlas_graph_* pattern so the Cassandra graph backend
         // gets the same analyzers, normalizers, and dynamic templates when its index is created.
-        // Always invoked — regardless of current INDEX_PREFIX — so the template is present
+        // Always invoked — regardless of current index prefix — so the template is present
         // for the migrator to rely on even when Atlas boots in janus mode before a migration.
         // Best-effort — failure does not block startup.
         createESTemplateIfNotExists(esClient, "atlas-graph-template",

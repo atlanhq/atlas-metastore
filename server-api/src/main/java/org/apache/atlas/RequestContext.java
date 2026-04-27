@@ -123,6 +123,7 @@ public class RequestContext {
     private Set<String> deletedEdgesIdsForResetHasLineage = new HashSet<>(0);
     private String requestUri;
     private boolean delayTagNotifications = false;
+    private boolean skipEntityChangeNotification = false;
     private boolean skipHasLineageCalculation = false;
     private boolean isInvokedByIndexSearch = false;
     private boolean isInvokedByLineage = false;
@@ -200,6 +201,7 @@ public class RequestContext {
         this.currentTask = null;
         this.skipAuthorizationCheck = false;
         this.delayTagNotifications = false;
+        this.skipEntityChangeNotification = false;
         deletedClassificationAndVertices.clear();
         addedClassificationAndVertices.clear();
         esDeferredOperations.clear();
@@ -505,6 +507,14 @@ public class RequestContext {
 
     public void setDelayTagNotifications(boolean delayTagNotifications) {
         this.delayTagNotifications = delayTagNotifications;
+    }
+
+    public boolean isSkipEntityChangeNotification() {
+        return skipEntityChangeNotification;
+    }
+
+    public void setSkipEntityChangeNotification(boolean skipEntityChangeNotification) {
+        this.skipEntityChangeNotification = skipEntityChangeNotification;
     }
 
     public Map<AtlasClassification, Collection<Object>> getDeletedClassificationAndVertices() {

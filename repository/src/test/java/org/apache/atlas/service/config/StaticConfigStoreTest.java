@@ -24,7 +24,6 @@ import static org.mockito.Mockito.*;
  * - Cassandra unreachable -> fail-fast: System.exit called
  * - Immutability: Attempt to modify returned map -> UnsupportedOperationException
  * - Static API methods return correct values
- * - Overlay onto ApplicationProperties
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class StaticConfigStoreTest {
@@ -46,6 +45,8 @@ class StaticConfigStoreTest {
             // Application properties fallback values
             config.setProperty("atlas.graphdb.backend", "janus");
             config.setProperty("atlas.graph.id.strategy", "legacy");
+            config.setProperty("atlas.graph.claim.enabled", "false");
+            // atlas.graph.index.search.es.prefix intentionally NOT set (tests null fallback)
             ApplicationProperties.set(config);
         } catch (Exception e) {
             throw new RuntimeException("Failed to initialize test configuration", e);
@@ -61,6 +62,12 @@ class StaticConfigStoreTest {
             PropertiesConfiguration config = (PropertiesConfiguration) ApplicationProperties.get();
             config.setProperty("atlas.graphdb.backend", "janus");
             config.setProperty("atlas.graph.id.strategy", "legacy");
+            config.setProperty("atlas.graph.claim.enabled", "false");
+            config.clearProperty("atlas.graph.index.search.es.prefix");
+            config.clearProperty("atlas.cassandra.graph.hostname");
+            config.clearProperty("atlas.cassandra.graph.port");
+            config.clearProperty("atlas.cassandra.graph.keyspace");
+            config.clearProperty("atlas.cassandra.graph.datacenter");
         } catch (Exception e) {
             // ignore
         }
@@ -139,7 +146,6 @@ class StaticConfigStoreTest {
     void testPartialRows_missingKeysFallBackToApplicationProperties() throws AtlasBaseException {
         Map<String, ConfigEntry> cassandraData = new HashMap<>();
         cassandraData.put("atlas.graphdb.backend", entry("cassandra"));
-        // atlas.graph.id.strategy NOT in Cassandra -> should fall back to application.properties
 
         when(mockDAO.getAllConfigsFromTable(TEST_KEYSPACE, TEST_TABLE, TEST_APP_NAME)).thenReturn(cassandraData);
 
@@ -148,6 +154,9 @@ class StaticConfigStoreTest {
 
         assertEquals("cassandra", StaticConfigStore.getConfig("atlas.graphdb.backend"));
         assertEquals("legacy", StaticConfigStore.getConfig("atlas.graph.id.strategy"));
+        assertEquals("false", StaticConfigStore.getConfig("atlas.graph.claim.enabled"));
+        assertFalse(StaticConfigStore.getConfigAsBoolean("atlas.graph.claim.enabled"));
+        assertNull(StaticConfigStore.getConfig("atlas.graph.index.search.es.prefix"));
     }
 
     // =================== Table Creation Fails -> Fallback ===================
@@ -214,6 +223,34 @@ class StaticConfigStoreTest {
         assertEquals("legacy", StaticConfigStore.getConfig("atlas.graph.id.strategy"));
     }
 
+    // =================== getConfigAsBoolean ===================
+
+    @Test
+    void testGetConfigAsBoolean_trueString_returnsTrue() throws AtlasBaseException {
+        Map<String, ConfigEntry> cassandraData = new HashMap<>();
+        cassandraData.put("atlas.graph.claim.enabled", entry("true"));
+
+        when(mockDAO.getAllConfigsFromTable(TEST_KEYSPACE, TEST_TABLE, TEST_APP_NAME)).thenReturn(cassandraData);
+
+        StaticConfigStore store = createStore(true);
+        store.initialize();
+
+        assertTrue(StaticConfigStore.getConfigAsBoolean("atlas.graph.claim.enabled"));
+    }
+
+    @Test
+    void testGetConfigAsBoolean_falseString_returnsFalse() throws AtlasBaseException {
+        Map<String, ConfigEntry> cassandraData = new HashMap<>();
+        cassandraData.put("atlas.graph.claim.enabled", entry("false"));
+
+        when(mockDAO.getAllConfigsFromTable(TEST_KEYSPACE, TEST_TABLE, TEST_APP_NAME)).thenReturn(cassandraData);
+
+        StaticConfigStore store = createStore(true);
+        store.initialize();
+
+        assertFalse(StaticConfigStore.getConfigAsBoolean("atlas.graph.claim.enabled"));
+    }
+
     // =================== Seed Config ===================
 
     @Test
@@ -251,6 +288,8 @@ class StaticConfigStoreTest {
         Map<String, ConfigEntry> cassandraData = new HashMap<>();
         cassandraData.put("atlas.graphdb.backend", entry("cassandra"));
         cassandraData.put("atlas.graph.id.strategy", entry("nanoid"));
+        cassandraData.put("atlas.graph.claim.enabled", entry("true"));
+        cassandraData.put("atlas.cassandra.graph.keyspace", entry("custom_ks"));
 
         when(mockDAO.getAllConfigsFromTable(TEST_KEYSPACE, TEST_TABLE, TEST_APP_NAME)).thenReturn(cassandraData);
 
@@ -259,24 +298,8 @@ class StaticConfigStoreTest {
 
         assertEquals("cassandra", StaticConfigStore.getConfig("atlas.graphdb.backend"));
         assertEquals("nanoid", StaticConfigStore.getConfig("atlas.graph.id.strategy"));
-    }
-
-    // =================== Overlay onto ApplicationProperties ===================
-
-    @Test
-    void testOverlay_updatesApplicationProperties() throws Exception {
-        Map<String, ConfigEntry> cassandraData = new HashMap<>();
-        cassandraData.put("atlas.graphdb.backend", entry("cassandra"));
-        cassandraData.put("atlas.graph.id.strategy", entry("nanoid"));
-
-        when(mockDAO.getAllConfigsFromTable(TEST_KEYSPACE, TEST_TABLE, TEST_APP_NAME)).thenReturn(cassandraData);
-
-        StaticConfigStore store = createStore(true);
-        store.initialize();
-
-        // Verify ApplicationProperties was overlaid
-        assertEquals("cassandra", ApplicationProperties.get().getString("atlas.graphdb.backend"));
-        assertEquals("nanoid", ApplicationProperties.get().getString("atlas.graph.id.strategy"));
+        assertEquals("true", StaticConfigStore.getConfig("atlas.graph.claim.enabled"));
+        assertEquals("custom_ks", StaticConfigStore.getConfig("atlas.cassandra.graph.keyspace"));
     }
 
     // =================== Unknown Key ===================

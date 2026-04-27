@@ -169,7 +169,7 @@ public class ESOutboxProcessor {
                 return;
             }
 
-            String indexName = Constants.VERTEX_INDEX_NAME;
+            String indexName = Constants.getVertexIndexName();
 
             // Phase 1: Triage — separate exhausted, backing-off, poison, and valid entries
             StringBuilder bulkBody = new StringBuilder();

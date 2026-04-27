@@ -17,22 +17,38 @@
  */
 package org.apache.atlas.repository.store.graph.v2;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntitiesWithExtInfo;
-import org.apache.atlas.type.AtlasType;
 
 import java.util.HashMap;
 import java.util.Map;
 
 public class BulkRequestContext {
+
+    /**
+     * Reconstruct a BulkRequestContext from the operationMetadata JSON
+     * published by the fatgraph AsyncIngestionProducer.
+     */
+    public static BulkRequestContext fromOperationMetadata(JsonNode opMeta) {
+        return new Builder()
+                .setReplaceClassifications(opMeta.path("replaceClassifications").asBoolean(false))
+                .setReplaceTags(opMeta.path("replaceTags").asBoolean(false))
+                .setAppendTags(opMeta.path("appendTags").asBoolean(false))
+                .setReplaceBusinessAttributes(opMeta.path("replaceBusinessAttributes").asBoolean(false))
+                .setOverwriteBusinessAttributes(opMeta.path("overwriteBusinessAttributes").asBoolean(false))
+                .setSkipProcessEdgeRestoration(opMeta.path("skipProcessEdgeRestoration").asBoolean(false))
+                .build();
+    }
+
     private boolean replaceClassifications;
     private boolean replaceTags;
     private boolean appendTags;
 
     private boolean replaceBusinessAttributes;
     private boolean isOverwriteBusinessAttributes;
+    private boolean skipProcessEdgeRestoration;
 
     private AtlasEntitiesWithExtInfo originalEntities;  // for async ingestion Kafka publish
-    private boolean skipProcessEdgeRestoration;         // query param from REST
 
     public boolean isReplaceClassifications() {
         return replaceClassifications;
@@ -148,7 +164,12 @@ public class BulkRequestContext {
         }
 
         public Builder setOriginalEntities(AtlasEntitiesWithExtInfo originalEntities) {
-            this.originalEntities = AtlasType.fromJson(AtlasType.toJson(originalEntities), AtlasEntitiesWithExtInfo.class);
+            // Store by reference, not a pre-write clone. The store layer mutates these
+            // entities in-place to assign real GUIDs (EntityMutationContext.mapAssignedGuid)
+            // and final qualifiedNames (preprocessors). By the time publishAsyncIngestionEvent
+            // runs in the finally block, the reference reflects post-write state — which is
+            // what the WAL consumer needs to pin JG GUIDs/QNs to ZG's assignments.
+            this.originalEntities = originalEntities;
             return this;
         }
 

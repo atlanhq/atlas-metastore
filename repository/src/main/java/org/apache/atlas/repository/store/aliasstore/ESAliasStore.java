@@ -48,7 +48,7 @@ import static org.apache.atlas.repository.Constants.PERSONA_ENTITY_TYPE;
 import static org.apache.atlas.repository.Constants.PROPAGATED_TRAIT_NAMES_PROPERTY_KEY;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 import static org.apache.atlas.repository.Constants.TRAIT_NAMES_PROPERTY_KEY;
-import static org.apache.atlas.repository.Constants.VERTEX_INDEX_NAME;
+import static org.apache.atlas.repository.Constants.getVertexIndexName;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME_HIERARCHY_PROPERTY_KEY;
 import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_DOMAIN;
 import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_METADATA;
@@ -103,9 +103,9 @@ public class ESAliasStore implements IndexAliasStore {
         ESAliasRequestBuilder requestBuilder = new ESAliasRequestBuilder();
 
         if (PERSONA_ENTITY_TYPE.equals(entity.getTypeName())) {
-            requestBuilder.addAction(ADD, new AliasAction(getIndexNameFromAliasIfExists(VERTEX_INDEX_NAME), aliasName, getFilterForPersona(null, null)));
+            requestBuilder.addAction(ADD, new AliasAction(getIndexNameFromAliasIfExists(getVertexIndexName()), aliasName, getFilterForPersona(null, null)));
         } else {
-            requestBuilder.addAction(ADD, new AliasAction(getIndexNameFromAliasIfExists(VERTEX_INDEX_NAME), aliasName, getFilterForPurpose(entity)));
+            requestBuilder.addAction(ADD, new AliasAction(getIndexNameFromAliasIfExists(getVertexIndexName()), aliasName, getFilterForPurpose(entity)));
         }
 
         graph.createOrUpdateESAlias(requestBuilder);
@@ -150,7 +150,7 @@ public class ESAliasStore implements IndexAliasStore {
         }
 
         ESAliasRequestBuilder requestBuilder = new ESAliasRequestBuilder();
-        requestBuilder.addAction(ADD, new AliasAction(getIndexNameFromAliasIfExists(VERTEX_INDEX_NAME), aliasName, filter));
+        requestBuilder.addAction(ADD, new AliasAction(getIndexNameFromAliasIfExists(getVertexIndexName()), aliasName, filter));
 
         graph.createOrUpdateESAlias(requestBuilder);
 
@@ -159,7 +159,7 @@ public class ESAliasStore implements IndexAliasStore {
 
     @Override
     public boolean deleteAlias(String aliasName) throws AtlasBaseException {
-        graph.deleteESAlias(getIndexNameFromAliasIfExists(VERTEX_INDEX_NAME), aliasName);
+        graph.deleteESAlias(getIndexNameFromAliasIfExists(getVertexIndexName()), aliasName);
         return true;
     }
 

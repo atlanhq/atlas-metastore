@@ -119,7 +119,7 @@ public class AtlasJanusGraphIndexClient implements AtlasGraphIndexClient {
 
     private boolean isElasticsearchHealthy() throws ElasticsearchException, IOException {
         RestHighLevelClient client = AtlasElasticsearchDatabase.getClient();
-        ClusterHealthRequest request = new ClusterHealthRequest(Constants.INDEX_PREFIX + Constants.VERTEX_INDEX);
+        ClusterHealthRequest request = new ClusterHealthRequest(Constants.getIndexPrefix() + Constants.VERTEX_INDEX);
         ClusterHealthResponse response = client.cluster().health(request, RequestOptions.DEFAULT);
         RestStatus restStatus = response.status();
         if (restStatus.toString().equals(ELASTICSEARCH_REST_STATUS_OK)){

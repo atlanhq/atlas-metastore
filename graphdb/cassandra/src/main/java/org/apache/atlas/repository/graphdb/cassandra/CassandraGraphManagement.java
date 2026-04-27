@@ -123,7 +123,7 @@ public class CassandraGraphManagement implements AtlasGraphManagement {
         }
         graph.getGraphIndexesMap().put(name, index);
         // Use prefixed name (e.g., "atlas_graph_vertex_index") matching what query callers expect
-        String esIndexName = Constants.INDEX_PREFIX + name;
+        String esIndexName = Constants.getIndexPrefix() + name;
         ensureESIndexExists(esIndexName);
         LOG.info("Created vertex mixed index: {} (ES index: {}, backing: {})", name, esIndexName, backingIndex);
     }
@@ -136,7 +136,7 @@ public class CassandraGraphManagement implements AtlasGraphManagement {
         }
         graph.getGraphIndexesMap().put(indexName, index);
         // Use prefixed name matching what query callers expect
-        String esIndexName = Constants.INDEX_PREFIX + indexName;
+        String esIndexName = Constants.getIndexPrefix() + indexName;
         ensureESIndexExists(esIndexName);
         LOG.info("Created edge mixed index: {} (ES index: {}, backing: {})", indexName, esIndexName, backingIndex);
     }
@@ -164,7 +164,7 @@ public class CassandraGraphManagement implements AtlasGraphManagement {
             index.addFieldKey(propertyKey);
         }
         // Update ES mapping so queries (sort, filter) work even before any documents are indexed
-        String esIndexName = Constants.INDEX_PREFIX + vertexIndex;
+        String esIndexName = Constants.getIndexPrefix() + vertexIndex;
         Class<?> propClass = (propertyKey instanceof CassandraPropertyKey)
                 ? ((CassandraPropertyKey) propertyKey).getPropertyClass() : null;
         addESFieldMapping(esIndexName, propertyKey.getName(), propClass, isStringField);
@@ -181,7 +181,7 @@ public class CassandraGraphManagement implements AtlasGraphManagement {
             index.addFieldKey(propertyKey);
         }
 
-        String esIndexName = Constants.INDEX_PREFIX + vertexIndex;
+        String esIndexName = Constants.getIndexPrefix() + vertexIndex;
         Class<?> propClass = (propertyKey instanceof CassandraPropertyKey)
                 ? ((CassandraPropertyKey) propertyKey).getPropertyClass() : null;
 

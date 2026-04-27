@@ -58,8 +58,8 @@ public class CassandraGraphDatabase implements GraphDatabase<CassandraVertex, Ca
             return;
         }
         try {
-            CassandraGraph.ensureESIndexExists(Constants.VERTEX_INDEX_NAME);
-            CassandraGraph.ensureESIndexExists(Constants.EDGE_INDEX_NAME);
+            CassandraGraph.ensureESIndexExists(Constants.getVertexIndexName());
+            CassandraGraph.ensureESIndexExists(Constants.getEdgeIndexName());
             esIndexesVerified = true;
         } catch (Throwable t) {
             // ES client may not be ready yet; will retry on next call

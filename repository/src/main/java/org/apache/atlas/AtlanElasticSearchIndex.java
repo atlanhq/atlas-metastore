@@ -90,7 +90,7 @@ public class AtlanElasticSearchIndex {
                 for (final Map.Entry<String, Map<String, List<IndexEntry>>> stores : documents.entrySet()) {
                     final List<ElasticSearchMutation> requestByStore = new ArrayList<>();
                     final String store = stores.getKey();
-                    final String indexStoreName = Constants.VERTEX_INDEX_NAME;
+                    final String indexStoreName = Constants.getVertexIndexName();
                     for (final Map.Entry<String, List<IndexEntry>> entry : stores.getValue().entrySet()) {
                         final String docID = entry.getKey();
                         final List<IndexEntry> content = entry.getValue();
