@@ -206,10 +206,7 @@ public class ElasticsearchReindexer implements AutoCloseable {
      * text fields which break sort/aggregation queries on __guid, __typeName, etc.
      */
     private static final String DEFAULT_MAPPINGS_JSON =
-        "{\"properties\":{" +
-        "\"nestedColumnOrder\":{\"type\":\"nested\",\"properties\":" +
-        "{\"version\":{\"type\":\"version\"},\"order\":{\"type\":\"keyword\"}}}," +
-        "\"relationshipList\":{\"type\":\"nested\",\"properties\":" +
+        "{\"properties\":{\"relationshipList\":{\"type\":\"nested\",\"properties\":" +
         "{\"typeName\":{\"type\":\"keyword\"},\"guid\":{\"type\":\"keyword\"}," +
         "\"provenanceType\":{\"type\":\"integer\"},\"endName\":{\"type\":\"keyword\"}," +
         "\"endGuid\":{\"type\":\"keyword\"},\"endTypeName\":{\"type\":\"keyword\"}," +
