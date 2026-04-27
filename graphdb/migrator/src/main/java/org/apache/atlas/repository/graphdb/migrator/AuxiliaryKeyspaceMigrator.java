@@ -1,9 +1,6 @@
 package org.apache.atlas.repository.graphdb.migrator;
 
 import com.datastax.oss.driver.api.core.CqlSession;
-import com.datastax.oss.driver.api.core.cql.BatchStatement;
-import com.datastax.oss.driver.api.core.cql.BatchType;
-import com.datastax.oss.driver.api.core.cql.BatchableStatement;
 import com.datastax.oss.driver.api.core.cql.PreparedStatement;
 import com.datastax.oss.driver.api.core.cql.ResultSet;
 import com.datastax.oss.driver.api.core.cql.Row;
@@ -11,8 +8,7 @@ import com.datastax.oss.driver.api.core.cql.SimpleStatement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.concurrent.Semaphore;
 
 /**
  * Migrates auxiliary Cassandra keyspaces (config_store, tags) from source to target.
@@ -35,7 +31,7 @@ public class AuxiliaryKeyspaceMigrator {
     private static final String TAGS_BY_ID_TABLE           = "tags_by_id";
     private static final String PROPAGATED_TAGS_TABLE      = "propagated_tags_by_source";
 
-    private static final int BATCH_SIZE = 100;
+    private static final int MAX_INFLIGHT = 50;
 
     private final CqlSession sourceSession;
     private final CqlSession targetSession;
@@ -110,24 +106,33 @@ public class AuxiliaryKeyspaceMigrator {
                 .build());
 
         long count = 0;
-        List<BatchableStatement<?>> batch = new ArrayList<>();
+        Semaphore inflight = new Semaphore(MAX_INFLIGHT);
         for (Row row : rs) {
-            batch.add(insertStmt.bind(
+            try {
+                inflight.acquire();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("config_store migration interrupted", e);
+            }
+            targetSession.executeAsync(insertStmt.bind(
                 row.getString("app_name"),
                 row.getString("config_key"),
                 row.getString("config_value"),
                 row.getString("updated_by"),
-                row.getInstant("last_updated")));
-
-            if (batch.size() >= BATCH_SIZE) {
-                targetSession.execute(BatchStatement.newInstance(BatchType.UNLOGGED, batch));
-                count += batch.size();
-                batch.clear();
-            }
+                row.getInstant("last_updated"))).whenComplete((result, error) -> {
+                    inflight.release();
+                    if (error != null) {
+                        LOG.error("Async write failed for config_store: {}", error.getMessage());
+                    }
+                });
+            count++;
         }
-        if (!batch.isEmpty()) {
-            targetSession.execute(BatchStatement.newInstance(BatchType.UNLOGGED, batch));
-            count += batch.size();
+        // Drain: wait for all in-flight writes to complete
+        try {
+            inflight.acquire(MAX_INFLIGHT);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("config_store migration interrupted during drain", e);
         }
 
         LOG.info("config_store migration complete: {} config entries migrated", count);

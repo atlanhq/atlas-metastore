@@ -26,7 +26,7 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * Enhanced post-migration validation.
  *
- * Runs 17 correctness checks against the target Cassandra (and optionally ES).
+ * Runs 19 correctness checks against the target Cassandra (and optionally ES).
  * Returns a structured {@link ValidationReport} with per-check results, per-type
  * statistics, super vertex detection, and source baseline comparison.
  *
@@ -36,6 +36,16 @@ public class MigrationValidator {
 
     private static final Logger LOG = LoggerFactory.getLogger(MigrationValidator.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /** Properties that MUST exist on every entity vertex. Missing any → FAIL. */
+    private static final Set<String> REQUIRED_ENTITY_PROPERTIES = new LinkedHashSet<>(Arrays.asList(
+        "__guid", "__typeName", "__state", "qualifiedName"
+    ));
+
+    /** Properties expected on entity vertices. Missing on >5% of entities → WARN. */
+    private static final Set<String> EXPECTED_ENTITY_PROPERTIES = new LinkedHashSet<>(Arrays.asList(
+        "__createdBy", "__modifiedBy", "__timestamp", "__modificationTimestamp"
+    ));
 
     /**
      * The product's connector aggregation query. Sent to the target ES index to verify
@@ -185,14 +195,13 @@ public class MigrationValidator {
 
         // --- Check 11 (run early): Super vertex detection ---
         // Runs before edge consistency checks so actual row counts from full scan
-        // can be used instead of unreliable system.size_estimates.
+        // can be reused (avoiding a second scan in edge consistency checks).
         if (!config.isSkipSuperVertexDetection()) {
             runSuperVertexDetection(ks, report);
         } else {
             // Even when super vertex detection is skipped, we still need accurate
             // edge counts for validation. Run count-only pass (Pass 1 only) to get
-            // exact row counts from edges_out/in/by_id instead of falling back to
-            // unreliable system.size_estimates (8-30% inaccurate after bulk writes).
+            // exact row counts from edges_out/in/by_id.
             runEdgeCountOnlyPass(ks, report);
         }
 
@@ -214,9 +223,19 @@ public class MigrationValidator {
         // --- Check 8: Property corruption detection ---
         runPropertyCorruptionCheck(ks, report);
 
+        // --- Check 19: Required properties validation (full scan) ---
+        if (!config.isSkipRequiredPropertiesCheck()) {
+            runRequiredPropertiesCheck(ks, report);
+        }
+
         // --- Check 9: ES document count comparison ---
         if (!config.isSkipEsCountValidation()) {
             runEsCountCheck(report);
+        }
+
+        // --- Check 18: ES field explosion detection ---
+        if (!config.isSkipEsCountValidation()) {
+            runEsFieldExplosionCheck(report);
         }
 
         // --- Check 10: Orphan edge detection ---
@@ -369,8 +388,8 @@ public class MigrationValidator {
     // ========================================================================
 
     private void runEdgeConsistencyChecks(String ks, ValidationReport report) {
-        // Use actual row counts from super vertex detection full scan when available.
-        // Falls back to system.size_estimates which are unreliable after bulk writes.
+        // Use row counts from super vertex detection full scan when available.
+        // Falls back to exact paginated scan via countTable().
         SuperVertexReport svReport = report.getSuperVertexReport();
         boolean usingActualCounts = svReport != null;
 
@@ -378,24 +397,24 @@ public class MigrationValidator {
         if (usingActualCounts) {
             edgeOutCount = svReport.getEdgesOutRowCount();
             edgeInCount  = svReport.getEdgesInRowCount();
-            LOG.info("Edge consistency: using actual counts from super vertex full scan " +
+            LOG.info("Edge consistency: using counts from super vertex full scan " +
                      "(edges_out={}, edges_in={})", String.format("%,d", edgeOutCount),
                      String.format("%,d", edgeInCount));
         } else {
             edgeOutCount = countTable(ks + ".edges_out");
             edgeInCount  = countTable(ks + ".edges_in");
-            LOG.info("Edge consistency: using estimated counts from size_estimates " +
+            LOG.info("Edge consistency: using exact counts from paginated scan " +
                      "(edges_out={}, edges_in={})", String.format("%,d", edgeOutCount),
                      String.format("%,d", edgeInCount));
         }
         long edgeByIdCount;
         if (usingActualCounts) {
             edgeByIdCount = svReport.getEdgesByIdRowCount();
-            LOG.info("Edge consistency: edges_by_id={} (actual full scan)",
+            LOG.info("Edge consistency: edges_by_id={} (full scan)",
                      String.format("%,d", edgeByIdCount));
         } else {
             edgeByIdCount = countTable(ks + ".edges_by_id");
-            LOG.info("Edge consistency: edges_by_id={} (estimated from size_estimates)",
+            LOG.info("Edge consistency: edges_by_id={} (exact paginated scan)",
                      String.format("%,d", edgeByIdCount));
         }
 
@@ -403,7 +422,7 @@ public class MigrationValidator {
         report.setEdgeInCount(edgeInCount);
         report.setEdgeByIdCount(edgeByIdCount);
 
-        String countSource = usingActualCounts ? "actual full scan" : "estimated, 5% tolerance";
+        String countSource = usingActualCounts ? "full scan" : "exact paginated scan";
 
         // Check: Source baseline vs target edge count
         // This catches silent edge loss during migration — if all three target tables
@@ -430,14 +449,13 @@ public class MigrationValidator {
             sourceEdgeCheck.addDetail("source_baseline_edges", sourceBaseline.totalEdges);
             sourceEdgeCheck.addDetail("target_edges_out", edgeOutCount);
             sourceEdgeCheck.addDetail("ratio", ratio);
-            sourceEdgeCheck.addDetail("count_source", usingActualCounts ? "full_scan" : "size_estimates");
+            sourceEdgeCheck.addDetail("count_source", usingActualCounts ? "full_scan" : "exact_paginated_scan");
             report.addCheck(sourceEdgeCheck);
         }
 
         // Check 2: edges_out vs edges_in
-        // With actual counts (full scan): exact match required, FAIL on mismatch (real data issue)
-        // With estimates (size_estimates): 5% tolerance, FAIL on mismatch (edge consistency is critical)
-        double outInTolerance = usingActualCounts ? 0.0 : 0.05;
+        // All counts are now exact (full scan or paginated scan), so exact match is required.
+        double outInTolerance = 0.0;
         boolean outInMatch = isWithinTolerance(edgeOutCount, edgeInCount, outInTolerance);
         ValidationCheckResult outInCheck = new ValidationCheckResult(
             "edge_out_in_consistency",
@@ -447,25 +465,23 @@ public class MigrationValidator {
                           edgeOutCount, edgeInCount, Math.abs(edgeOutCount - edgeInCount), countSource));
         outInCheck.addDetail("edges_out_count", edgeOutCount);
         outInCheck.addDetail("edges_in_count", edgeInCount);
-        outInCheck.addDetail("count_source", usingActualCounts ? "full_scan" : "size_estimates");
+        outInCheck.addDetail("count_source", usingActualCounts ? "full_scan" : "exact_paginated_scan");
         report.addCheck(outInCheck);
 
         // Check 3: edges_by_id vs edges_out
-        // With actual counts (full scan): exact match required, FAIL on mismatch
-        // With estimates (size_estimates): 5% tolerance, WARN on mismatch
-        double byIdTolerance = usingActualCounts ? 0.0 : 0.05;
+        // All counts are now exact, so exact match is required.
+        double byIdTolerance = 0.0;
         boolean byIdMatch = isWithinTolerance(edgeByIdCount, edgeOutCount, byIdTolerance);
-        String byIdSource = usingActualCounts ? "actual full scan" : "estimated, 5% tolerance";
+        String byIdSource = usingActualCounts ? "full scan" : "exact paginated scan";
         ValidationCheckResult byIdCheck = new ValidationCheckResult(
             "edge_by_id_consistency",
             "edges_by_id count matches edges_out count (" + byIdSource + ")",
-            byIdMatch ? ValidationCheckResult.Severity.PASS :
-                (usingActualCounts ? ValidationCheckResult.Severity.FAIL : ValidationCheckResult.Severity.WARN),
+            byIdMatch ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.FAIL,
             String.format("edges_by_id=%d, edges_out=%d, diff=%d (source: %s)",
                           edgeByIdCount, edgeOutCount, Math.abs(edgeByIdCount - edgeOutCount), byIdSource));
         byIdCheck.addDetail("edges_by_id_count", edgeByIdCount);
         byIdCheck.addDetail("edges_out_count", edgeOutCount);
-        byIdCheck.addDetail("count_source", usingActualCounts ? "full_scan" : "size_estimates");
+        byIdCheck.addDetail("count_source", usingActualCounts ? "full_scan" : "exact_paginated_scan");
         report.addCheck(byIdCheck);
     }
 
@@ -498,6 +514,7 @@ public class MigrationValidator {
                 String propsJson = row.getString("properties");
 
                 try {
+                    propsJson = PropertyCompression.decompressIfNeeded(propsJson);
                     @SuppressWarnings("unchecked")
                     Map<String, Object> props = MAPPER.readValue(propsJson, Map.class);
                     String guid = getStringProp(props, "__guid");
@@ -543,8 +560,8 @@ public class MigrationValidator {
     // ========================================================================
 
     private void runTypeDefConsistencyCheck(String ks, ValidationReport report) {
-        long typeDefCount      = scanTableCount(ks + ".type_definitions");
-        long typeDefByCatCount = scanTableCount(ks + ".type_definitions_by_category");
+        long typeDefCount      = countTable(ks + ".type_definitions");
+        long typeDefByCatCount = countTable(ks + ".type_definitions_by_category");
 
         report.setTypeDefCount(typeDefCount);
         report.setTypeDefByCategoryCount(typeDefByCatCount);
@@ -622,6 +639,7 @@ public class MigrationValidator {
                 // Sub-check A: JSON well-formedness
                 Map<String, Object> props;
                 try {
+                    propsJson = PropertyCompression.decompressIfNeeded(propsJson);
                     @SuppressWarnings("unchecked")
                     Map<String, Object> parsed = MAPPER.readValue(propsJson, Map.class);
                     props = parsed;
@@ -837,6 +855,7 @@ public class MigrationValidator {
                 if (propsJson == null) continue;
 
                 try {
+                    propsJson = PropertyCompression.decompressIfNeeded(propsJson);
                     @SuppressWarnings("unchecked")
                     Map<String, Object> props = MAPPER.readValue(propsJson, Map.class);
                     for (String key : props.keySet()) {
@@ -862,6 +881,305 @@ public class MigrationValidator {
         result.addDetail("corrupted", corrupted);
         for (String f : sampleFailures) result.addSampleFailure(f);
         report.addCheck(result);
+    }
+
+    // ========================================================================
+    // Check 19: Required properties validation (full scan)
+    // ========================================================================
+
+    @SuppressWarnings("unchecked")
+    private void runRequiredPropertiesCheck(String ks, ValidationReport report) {
+        LOG.info("Required properties check: full scan of {}.vertices ...", ks);
+
+        long entityCount = 0;       // true entities: have __guid or qualifiedName
+        long auxiliaryCount = 0;    // typed vertices with neither __guid nor qualifiedName (PopularityInsights, etc.)
+        long systemCount = 0;       // no type_name at all
+        long classificationCount = 0; // have __entityGuid
+        long jsonErrors = 0;
+
+        // Per-property violation tracking (REQUIRED) — only for true entities
+        Map<String, Long> requiredMissingCounts = new LinkedHashMap<>();
+        Map<String, List<String>> requiredMissingSamples = new LinkedHashMap<>();
+        for (String prop : REQUIRED_ENTITY_PROPERTIES) {
+            requiredMissingCounts.put(prop, 0L);
+            requiredMissingSamples.put(prop, new ArrayList<>());
+        }
+
+        // Track auxiliary vertex types (for diagnostic visibility)
+        Map<String, Long> auxiliaryByType = new LinkedHashMap<>();
+
+        // Track which entity types are missing required properties
+        Map<String, Long> missingGuidByType = new LinkedHashMap<>();
+
+        // Per-property violation tracking (EXPECTED) — only for true entities
+        Map<String, Long> expectedMissingCounts = new LinkedHashMap<>();
+        for (String prop : EXPECTED_ENTITY_PROPERTIES) {
+            expectedMissingCounts.put(prop, 0L);
+        }
+
+        // Denormalization consistency
+        long typeNameMismatch = 0;
+        long stateMismatch = 0;
+        List<String> denormSamples = new ArrayList<>();
+
+        try {
+            ResultSet rs = targetSession.execute(
+                SimpleStatement.builder(
+                    "SELECT vertex_id, type_name, state, properties FROM " + ks + ".vertices")
+                    .setPageSize(5000)
+                    .setTimeout(java.time.Duration.ofMinutes(30))
+                    .build());
+
+            for (Row row : rs) {
+                String typeName = row.getString("type_name");
+
+                // Skip system vertices (no type_name = not an entity)
+                if (typeName == null || typeName.isEmpty()) {
+                    systemCount++;
+                    continue;
+                }
+
+                String propsJson = row.getString("properties");
+                if (propsJson == null || propsJson.isEmpty()) {
+                    // No properties at all — genuinely broken, count as entity violation
+                    entityCount++;
+                    for (String prop : REQUIRED_ENTITY_PROPERTIES) {
+                        requiredMissingCounts.merge(prop, 1L, Long::sum);
+                        addSampleViolation(requiredMissingSamples.get(prop), row.getString("vertex_id"));
+                    }
+                    for (String prop : EXPECTED_ENTITY_PROPERTIES) {
+                        expectedMissingCounts.merge(prop, 1L, Long::sum);
+                    }
+                    missingGuidByType.merge(typeName, 1L, Long::sum);
+                    continue;
+                }
+
+                Map<String, Object> props;
+                try {
+                    propsJson = PropertyCompression.decompressIfNeeded(propsJson);
+                    props = MAPPER.readValue(propsJson, Map.class);
+                } catch (Exception e) {
+                    jsonErrors++;
+                    continue; // JSON errors are caught by Check 6
+                }
+
+                // Classification vertices have __entityGuid (the entity they're attached to)
+                // but do NOT have their own __guid or qualifiedName — this is expected.
+                if (hasNonEmpty(props, "__entityGuid")) {
+                    classificationCount++;
+                    continue;
+                }
+
+                // Determine if this is a true entity or an auxiliary typed vertex.
+                // True entities have at least __guid OR qualifiedName (from Referenceable).
+                // Auxiliary types (PopularityInsights, TagAttachment, etc.) have __typeName
+                // but never had __guid or qualifiedName — they're internal graph vertices,
+                // not first-class Atlas entities. Requiring __guid on them is a false positive.
+                boolean hasGuid = hasNonEmpty(props, "__guid");
+                boolean hasQn = hasNonEmpty(props, "qualifiedName") || hasNonEmpty(props, "Referenceable.qualifiedName");
+
+                if (!hasGuid && !hasQn) {
+                    // Neither __guid nor qualifiedName → auxiliary/internal vertex type
+                    auxiliaryCount++;
+                    auxiliaryByType.merge(typeName, 1L, Long::sum);
+                    continue;
+                }
+
+                // True entity vertex — check all required properties
+                entityCount++;
+
+                if (entityCount % 100_000 == 0) {
+                    LOG.info("  ... required properties check: {} entities scanned ({} auxiliary, {} classifications skipped)",
+                             String.format("%,d", entityCount),
+                             String.format("%,d", auxiliaryCount),
+                             String.format("%,d", classificationCount));
+                }
+
+                String vertexId = row.getString("vertex_id");
+
+                // Check REQUIRED properties
+                for (String prop : REQUIRED_ENTITY_PROPERTIES) {
+                    boolean present;
+                    if ("qualifiedName".equals(prop)) {
+                        present = hasQn;
+                    } else if ("__guid".equals(prop)) {
+                        present = hasGuid;
+                    } else {
+                        present = hasNonEmpty(props, prop);
+                    }
+                    if (!present) {
+                        requiredMissingCounts.merge(prop, 1L, Long::sum);
+                        addSampleViolation(requiredMissingSamples.get(prop), vertexId);
+                        if ("__guid".equals(prop)) {
+                            missingGuidByType.merge(typeName, 1L, Long::sum);
+                        }
+                    }
+                }
+
+                // Check EXPECTED properties
+                for (String prop : EXPECTED_ENTITY_PROPERTIES) {
+                    if (!hasNonEmpty(props, prop)) {
+                        expectedMissingCounts.merge(prop, 1L, Long::sum);
+                    }
+                }
+
+                // Denormalization consistency: type_name column vs __typeName in JSON
+                Object jsonTypeName = props.get("__typeName");
+                if (jsonTypeName != null && !typeName.equals(jsonTypeName.toString())) {
+                    typeNameMismatch++;
+                    if (denormSamples.size() < 10) {
+                        denormSamples.add(vertexId + ": column=" + typeName + " json=" + jsonTypeName);
+                    }
+                }
+
+                // Denormalization consistency: state column vs __state in JSON
+                String stateCol = row.getString("state");
+                Object jsonState = props.get("__state");
+                if (stateCol != null && jsonState != null && !stateCol.equals(jsonState.toString())) {
+                    stateMismatch++;
+                    if (denormSamples.size() < 10) {
+                        denormSamples.add(vertexId + ": state_col=" + stateCol + " json=" + jsonState);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOG.error("Required properties check failed: {}", e.getMessage(), e);
+            ValidationCheckResult result = new ValidationCheckResult(
+                "required_properties",
+                "All entity vertices have required properties (__guid, __typeName, __state, qualifiedName)",
+                ValidationCheckResult.Severity.WARN,
+                "Check failed with exception: " + e.getMessage());
+            report.addCheck(result);
+            return;
+        }
+
+        LOG.info("Required properties check complete: {} entities, {} auxiliary, {} classifications, {} system",
+                 String.format("%,d", entityCount), String.format("%,d", auxiliaryCount),
+                 String.format("%,d", classificationCount), String.format("%,d", systemCount));
+
+        // Determine severity
+        long totalRequiredViolations = 0;
+        for (long count : requiredMissingCounts.values()) {
+            totalRequiredViolations += count;
+        }
+
+        boolean anyExpectedWarning = false;
+        for (Map.Entry<String, Long> entry : expectedMissingCounts.entrySet()) {
+            if (entityCount > 0 && (double) entry.getValue() / entityCount > 0.05) {
+                anyExpectedWarning = true;
+                break;
+            }
+        }
+
+        boolean hasDenormMismatch = typeNameMismatch > 0 || stateMismatch > 0;
+
+        ValidationCheckResult.Severity severity;
+        if (totalRequiredViolations > 0) {
+            severity = ValidationCheckResult.Severity.FAIL;
+        } else if (anyExpectedWarning || hasDenormMismatch) {
+            severity = ValidationCheckResult.Severity.WARN;
+        } else {
+            severity = ValidationCheckResult.Severity.PASS;
+        }
+
+        // Build message
+        StringBuilder msg = new StringBuilder();
+        msg.append(String.format("entity_vertices=%d, auxiliary_vertices=%d, classification_vertices=%d, system_vertices=%d",
+                                 entityCount, auxiliaryCount, classificationCount, systemCount));
+        if (totalRequiredViolations > 0) {
+            msg.append(" [FAIL: missing required properties — ");
+            List<String> parts = new ArrayList<>();
+            for (Map.Entry<String, Long> entry : requiredMissingCounts.entrySet()) {
+                if (entry.getValue() > 0) {
+                    parts.add(entry.getKey() + "=" + entry.getValue());
+                }
+            }
+            msg.append(String.join(", ", parts)).append("]");
+        }
+        if (auxiliaryCount > 0) {
+            // Show top auxiliary types for visibility
+            List<String> topAux = new ArrayList<>();
+            auxiliaryByType.entrySet().stream()
+                .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
+                .limit(5)
+                .forEach(e -> topAux.add(e.getKey() + "=" + e.getValue()));
+            msg.append(" [INFO: auxiliary typed vertices without __guid/qualifiedName: ")
+               .append(String.join(", ", topAux)).append("]");
+        }
+        if (hasDenormMismatch) {
+            msg.append(String.format(" [WARN: denormalization mismatch — type_name=%d, state=%d]",
+                                     typeNameMismatch, stateMismatch));
+        }
+
+        ValidationCheckResult result = new ValidationCheckResult(
+            "required_properties",
+            "All entity vertices have required properties (__guid, __typeName, __state, qualifiedName)",
+            severity, msg.toString());
+        result.addDetail("entity_vertices", entityCount);
+        result.addDetail("auxiliary_vertices", auxiliaryCount);
+        result.addDetail("classification_vertices", classificationCount);
+        result.addDetail("system_vertices", systemCount);
+        result.addDetail("json_errors", jsonErrors);
+
+        // Add auxiliary type breakdown
+        if (!auxiliaryByType.isEmpty()) {
+            result.addDetail("auxiliary_by_type", auxiliaryByType);
+        }
+
+        // Add type breakdown for entities missing __guid (real violations)
+        if (!missingGuidByType.isEmpty()) {
+            result.addDetail("missing_guid_by_type", missingGuidByType);
+        }
+
+        // Add required property violation details
+        for (Map.Entry<String, Long> entry : requiredMissingCounts.entrySet()) {
+            result.addDetail("missing_" + entry.getKey(), entry.getValue());
+            List<String> samples = requiredMissingSamples.get(entry.getKey());
+            if (!samples.isEmpty()) {
+                result.addDetail("missing_" + entry.getKey() + "_samples", samples);
+            }
+        }
+
+        // Add expected property missing counts
+        for (Map.Entry<String, Long> entry : expectedMissingCounts.entrySet()) {
+            if (entry.getValue() > 0) {
+                String pct = entityCount > 0 ? String.format("%.2f%%", 100.0 * entry.getValue() / entityCount) : "N/A";
+                result.addDetail("expected_missing_" + entry.getKey(), entry.getValue() + " (" + pct + ")");
+            }
+        }
+
+        // Add denormalization details
+        if (hasDenormMismatch) {
+            result.addDetail("denorm_type_name_mismatch", typeNameMismatch);
+            result.addDetail("denorm_state_mismatch", stateMismatch);
+            for (String s : denormSamples) {
+                result.addSampleFailure("denorm: " + s);
+            }
+        }
+
+        // Add sample failures for required violations
+        for (Map.Entry<String, List<String>> entry : requiredMissingSamples.entrySet()) {
+            for (String sample : entry.getValue()) {
+                result.addSampleFailure("missing " + entry.getKey() + ": vertex_id=" + sample);
+            }
+        }
+
+        report.addCheck(result);
+    }
+
+    /** Check if a property exists in the map and has a non-null, non-empty value. */
+    private static boolean hasNonEmpty(Map<String, Object> props, String key) {
+        Object val = props.get(key);
+        if (val == null) return false;
+        if (val instanceof String) return !((String) val).isEmpty();
+        return true; // non-null, non-string (numbers, lists, etc.) are considered present
+    }
+
+    /** Add a vertex ID to the violation samples list, capped at 10. */
+    private static void addSampleViolation(List<String> samples, String vertexId) {
+        if (samples.size() < 10) {
+            samples.add(vertexId);
+        }
     }
 
     // ========================================================================
@@ -944,6 +1262,198 @@ public class MigrationValidator {
         } catch (Exception e) {
             LOG.warn("Failed to count ES index '{}': {}", indexName, e.getMessage());
             return -1;
+        }
+    }
+
+    // ========================================================================
+    // Check 18: ES field explosion detection
+    // ========================================================================
+
+    /**
+     * Compares the mapped field count between source and target ES indexes.
+     * Detects field explosion — unexpected growth in mapped fields that can cause
+     * ES cluster instability, increased memory usage, and degraded query performance.
+     *
+     * Fails if:
+     *   - Target has net-new fields exceeding the configured growth threshold
+     *     (default 10% — configurable via validation.es.field.growth.threshold)
+     *   - Target field count exceeds the index's mapping.total_fields.limit
+     */
+    @SuppressWarnings("unchecked")
+    private void runEsFieldExplosionCheck(ValidationReport report) {
+        String sourceIndex = config.getSourceEsIndex();
+        String targetIndex = config.getTargetEsIndex();
+        double threshold   = config.getEsFieldGrowthThreshold();
+
+        LOG.info("ES field explosion check: comparing field counts between '{}' and '{}'...", sourceIndex, targetIndex);
+
+        RestClient esClient = null;
+        try {
+            esClient = createEsClient();
+
+            Set<String> sourceFields = getEsFieldNames(esClient, sourceIndex);
+            Set<String> targetFields = getEsFieldNames(esClient, targetIndex);
+
+            if (sourceFields.isEmpty() && targetFields.isEmpty()) {
+                ValidationCheckResult result = new ValidationCheckResult(
+                    "es_field_explosion",
+                    "ES field explosion detection (source vs target mapped field count)",
+                    ValidationCheckResult.Severity.WARN,
+                    "Could not retrieve field mappings from either index");
+                report.addCheck(result);
+                return;
+            }
+
+            // Compute net-new fields (in target but not in source)
+            Set<String> netNewFields = new TreeSet<>(targetFields);
+            netNewFields.removeAll(sourceFields);
+
+            // Compute removed fields (in source but not in target)
+            Set<String> removedFields = new TreeSet<>(sourceFields);
+            removedFields.removeAll(targetFields);
+
+            int sourceCount = sourceFields.size();
+            int targetCount = targetFields.size();
+            int netNewCount = netNewFields.size();
+
+            double growthRatio = sourceCount > 0
+                ? (double) (targetCount - sourceCount) / sourceCount
+                : (targetCount > 0 ? 1.0 : 0.0);
+
+            LOG.info("ES field counts: source({})={}, target({})={}, net_new={}, removed={}, growth={}%",
+                     sourceIndex, sourceCount, targetIndex, targetCount,
+                     netNewCount, removedFields.size(), String.format("%.1f", growthRatio * 100));
+
+            // Determine severity
+            ValidationCheckResult.Severity severity;
+            String message;
+
+            if (sourceCount == 0) {
+                // No source index to compare — pass if target looks reasonable
+                severity = targetCount > 0
+                    ? ValidationCheckResult.Severity.PASS
+                    : ValidationCheckResult.Severity.WARN;
+                message = String.format(
+                    "source_fields=0 (index '%s' not found or empty), target_fields=%d — no baseline for comparison",
+                    sourceIndex, targetCount);
+            } else if (growthRatio > threshold) {
+                severity = ValidationCheckResult.Severity.FAIL;
+                message = String.format(
+                    "FIELD EXPLOSION DETECTED: source=%d, target=%d, growth=%.1f%% (threshold=%.0f%%), net_new=%d fields",
+                    sourceCount, targetCount, growthRatio * 100, threshold * 100, netNewCount);
+            } else if (netNewCount > 0) {
+                severity = ValidationCheckResult.Severity.WARN;
+                message = String.format(
+                    "source=%d, target=%d, growth=%.1f%% (within %.0f%% threshold), net_new=%d fields",
+                    sourceCount, targetCount, growthRatio * 100, threshold * 100, netNewCount);
+            } else {
+                severity = ValidationCheckResult.Severity.PASS;
+                message = String.format(
+                    "source=%d, target=%d, growth=%.1f%% — no field explosion detected",
+                    sourceCount, targetCount, growthRatio * 100);
+            }
+
+            ValidationCheckResult result = new ValidationCheckResult(
+                "es_field_explosion",
+                "ES field explosion detection (source vs target mapped field count)",
+                severity, message);
+            result.addDetail("source_index", sourceIndex);
+            result.addDetail("source_field_count", sourceCount);
+            result.addDetail("target_index", targetIndex);
+            result.addDetail("target_field_count", targetCount);
+            result.addDetail("net_new_field_count", netNewCount);
+            result.addDetail("removed_field_count", removedFields.size());
+            result.addDetail("growth_pct", String.format("%.1f", growthRatio * 100));
+            result.addDetail("threshold_pct", String.format("%.0f", threshold * 100));
+
+            // Log and attach net-new fields (capped at 50 for readability)
+            if (!netNewFields.isEmpty()) {
+                int logLimit = Math.min(netNewFields.size(), 50);
+                List<String> sample = new ArrayList<>(netNewFields).subList(0, logLimit);
+                result.addDetail("net_new_fields_sample", sample);
+                LOG.info("Net-new fields in target (showing {}/{}): {}",
+                         logLimit, netNewCount, sample);
+                for (String f : sample) {
+                    result.addSampleFailure("net_new: " + f);
+                }
+            }
+
+            if (!removedFields.isEmpty() && removedFields.size() <= 20) {
+                result.addDetail("removed_fields", new ArrayList<>(removedFields));
+            }
+
+            report.addCheck(result);
+        } catch (Exception e) {
+            LOG.warn("ES field explosion check failed: {}", e.getMessage());
+            ValidationCheckResult result = new ValidationCheckResult(
+                "es_field_explosion",
+                "ES field explosion detection (source vs target mapped field count)",
+                ValidationCheckResult.Severity.WARN,
+                "Check failed: " + e.getMessage());
+            report.addCheck(result);
+        } finally {
+            if (esClient != null) {
+                try { esClient.close(); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    /**
+     * Extracts all mapped field names from an ES index via the _mapping API.
+     * Recursively walks the mapping tree to collect leaf field paths
+     * (e.g., "qualifiedName", "relationshipList.guid", "__superTypeNames.keyword").
+     */
+    @SuppressWarnings("unchecked")
+    private Set<String> getEsFieldNames(RestClient esClient, String indexName) {
+        Set<String> fields = new TreeSet<>();
+        try {
+            Request req = new Request("GET", "/" + indexName + "/_mapping");
+            Response resp = esClient.performRequest(req);
+            if (resp.getStatusLine().getStatusCode() != 200) {
+                return fields;
+            }
+            String body = EntityUtils.toString(resp.getEntity());
+            Map<String, Object> parsed = MAPPER.readValue(body, Map.class);
+            // Response: { "indexName": { "mappings": { "properties": { ... } } } }
+            Map<String, Object> indexData = (Map<String, Object>) parsed.values().iterator().next();
+            Map<String, Object> mappings = (Map<String, Object>) indexData.get("mappings");
+            if (mappings == null) return fields;
+            Map<String, Object> properties = (Map<String, Object>) mappings.get("properties");
+            if (properties == null) return fields;
+
+            collectFieldNames(properties, "", fields);
+        } catch (ResponseException e) {
+            // Index doesn't exist — return empty set (handled by caller)
+            LOG.debug("Index '{}' not found for field mapping: {}", indexName, e.getMessage());
+        } catch (Exception e) {
+            LOG.warn("Failed to get field mappings for '{}': {}", indexName, e.getMessage());
+        }
+        return fields;
+    }
+
+    /**
+     * Recursively collects field paths from an ES mapping "properties" object.
+     * Produces dotted paths like "relationshipList.guid", "__superTypeNames.keyword".
+     */
+    @SuppressWarnings("unchecked")
+    private void collectFieldNames(Map<String, Object> properties, String prefix, Set<String> fields) {
+        for (Map.Entry<String, Object> entry : properties.entrySet()) {
+            String fieldName = prefix.isEmpty() ? entry.getKey() : prefix + "." + entry.getKey();
+            fields.add(fieldName);
+
+            if (entry.getValue() instanceof Map) {
+                Map<String, Object> fieldDef = (Map<String, Object>) entry.getValue();
+                // Recurse into nested properties
+                Map<String, Object> subProperties = (Map<String, Object>) fieldDef.get("properties");
+                if (subProperties != null) {
+                    collectFieldNames(subProperties, fieldName, fields);
+                }
+                // Also recurse into multi-fields (fields → keyword, text, etc.)
+                Map<String, Object> multiFields = (Map<String, Object>) fieldDef.get("fields");
+                if (multiFields != null) {
+                    collectFieldNames(multiFields, fieldName, fields);
+                }
+            }
         }
     }
 
@@ -1213,14 +1723,14 @@ public class MigrationValidator {
         long edgeOutCount = report.getEdgeOutCount();
         boolean passed = edgeIndexCount > 0 || edgeOutCount == 0;
 
-        String message = String.format("edge_index=%d (estimated), edges_out=%d (estimated)", edgeIndexCount, edgeOutCount);
+        String message = String.format("edge_index=%d, edges_out=%d", edgeIndexCount, edgeOutCount);
         if (edgeOutCount > 0 && edgeIndexCount == 0) {
             message += " [FAIL: edge_index is empty but edges exist — relationship GUID lookups will fail]";
         }
 
         ValidationCheckResult result = new ValidationCheckResult(
             "edge_index_count",
-            "Edge index table populated for relationship GUID lookups (estimated via size_estimates)",
+            "Edge index table populated for relationship GUID lookups (exact count)",
             passed ? ValidationCheckResult.Severity.PASS : ValidationCheckResult.Severity.FAIL,
             message);
         result.addDetail("edge_index_count", edgeIndexCount);
@@ -1263,11 +1773,11 @@ public class MigrationValidator {
                     esEdgeIndex, edgeByIdCount);
             } else if (edgeByIdCount > 0) {
                 double ratio = (double) esEdgeCount / edgeByIdCount;
-                // Allow some tolerance since size_estimates for edges_by_id may be inaccurate
-                severity = ratio >= 0.90 ? ValidationCheckResult.Severity.PASS :
-                           ratio >= 0.50 ? ValidationCheckResult.Severity.WARN :
+                // Cassandra count is now exact; ES count from _count API is also exact.
+                severity = ratio >= 0.99 ? ValidationCheckResult.Severity.PASS :
+                           ratio >= 0.90 ? ValidationCheckResult.Severity.WARN :
                                            ValidationCheckResult.Severity.FAIL;
-                message = String.format("es_edge_index(%s)=%d, edges_by_id=%d (estimated), ratio=%.2f%%",
+                message = String.format("es_edge_index(%s)=%d, edges_by_id=%d, ratio=%.2f%%",
                     esEdgeIndex, esEdgeCount, edgeByIdCount, ratio * 100);
             } else {
                 severity = ValidationCheckResult.Severity.PASS;
@@ -1541,8 +2051,8 @@ public class MigrationValidator {
 
         // Check Cassandra disk space via system keyspace
         try {
-            // Query system.local for data_file_directories info
-            // Use size_estimates as a proxy for Cassandra data size
+            // Use size_estimates as a proxy for Cassandra data size (bytes, not row counts)
+            // This is appropriate here: disk size estimation, not row counting accuracy
             String ks = config.getTargetCassandraKeyspace();
             ResultSet rs = targetSession.execute(
                 "SELECT mean_partition_size, partitions_count FROM system.size_estimates " +
@@ -1609,25 +2119,14 @@ public class MigrationValidator {
         String sourceKs = config.getSourceCassandraKeyspace();
         String edgestoreTable = config.getSourceEdgestoreTable();
 
-        // Estimate source edgestore rows via system.size_estimates (instant, ~95% accurate)
+        // Exact source edgestore row count via paginated scan of partition key column
         long sourceEdgestoreCount = -1;
         try {
-            ResultSet rs = sourceSession.execute(
-                SimpleStatement.builder(
-                    "SELECT partitions_count FROM system.size_estimates " +
-                    "WHERE keyspace_name = ? AND table_name = ?")
-                    .addPositionalValue(sourceKs)
-                    .addPositionalValue(edgestoreTable)
-                    .setTimeout(java.time.Duration.ofSeconds(30))
-                    .build());
-            for (Row row : rs) {
-                sourceEdgestoreCount = (sourceEdgestoreCount < 0 ? 0 : sourceEdgestoreCount)
-                                       + row.getLong("partitions_count");
-            }
-            LOG.info("Source edgestore estimated rows ({}.{}): {}", sourceKs, edgestoreTable,
+            sourceEdgestoreCount = countTableWithSession(sourceSession, sourceKs + "." + edgestoreTable);
+            LOG.info("Source edgestore exact rows ({}.{}): {}", sourceKs, edgestoreTable,
                      String.format("%,d", sourceEdgestoreCount));
         } catch (Exception e) {
-            LOG.warn("Failed to estimate source edgestore ({}.{}): {}",
+            LOG.warn("Failed to count source edgestore ({}.{}): {}",
                      sourceKs, edgestoreTable, e.getMessage());
         }
         report.setSourceEdgestoreCount(sourceEdgestoreCount);
@@ -1656,69 +2155,91 @@ public class MigrationValidator {
     // ========================================================================
 
     /**
-     * Estimate table row count using system.size_estimates.
-     * This is instant even for tables with millions of rows, unlike SELECT count(*).
-     * <p>
-     * WARNING: Accuracy is only ~95% in steady state — immediately after bulk writes
-     * (e.g. migration), estimates can be wildly inaccurate (8-30% of actual) because
-     * data in memtables or un-compacted SSTables is underrepresented.
-     * Prefer actual counts from SuperVertexDetector full scans when available.
+     * Exact table row count via paginated scan of partition key columns only.
+     * Iterates all rows counting client-side — avoids coordinator-level count(*)
+     * which can timeout on large tables (millions of rows).
+     *
+     * Selects only the partition key column(s) to minimize data transfer — for edge
+     * tables with JSON properties, this is 100x less data than SELECT *.
+     *
+     * Logs progress every 500K rows for large tables.
      */
     private long countTable(String fullyQualifiedTable) {
-        // Parse "keyspace.table" format
-        int dot = fullyQualifiedTable.indexOf('.');
-        if (dot < 0) {
-            LOG.warn("Invalid table name (expected keyspace.table): {}", fullyQualifiedTable);
-            return -1;
-        }
-        String keyspace = fullyQualifiedTable.substring(0, dot);
-        String table    = fullyQualifiedTable.substring(dot + 1);
-
+        String selectColumn = resolvePartitionKeyColumn(fullyQualifiedTable);
+        String cql = "SELECT " + selectColumn + " FROM " + fullyQualifiedTable;
         try {
+            long count = 0;
             ResultSet rs = targetSession.execute(
-                SimpleStatement.builder(
-                    "SELECT partitions_count FROM system.size_estimates " +
-                    "WHERE keyspace_name = ? AND table_name = ?")
-                    .addPositionalValue(keyspace)
-                    .addPositionalValue(table)
-                    .setTimeout(java.time.Duration.ofSeconds(30))
+                SimpleStatement.builder(cql)
+                    .setPageSize(10000)
+                    .setTimeout(java.time.Duration.ofMinutes(30))
                     .build());
-
-            long totalPartitions = 0;
             for (Row row : rs) {
-                totalPartitions += row.getLong("partitions_count");
+                count++;
+                if (count % 500_000 == 0) {
+                    LOG.info("  ... counting {}: {} rows so far", fullyQualifiedTable,
+                             String.format("%,d", count));
+                }
             }
-
-            LOG.info("Estimated row count for {}: {} (via system.size_estimates)", fullyQualifiedTable,
-                     String.format("%,d", totalPartitions));
-            return totalPartitions;
+            LOG.info("Exact row count for {}: {}", fullyQualifiedTable, String.format("%,d", count));
+            return count;
         } catch (Exception e) {
-            LOG.warn("Failed to estimate count for {} via size_estimates: {}", fullyQualifiedTable, e.getMessage());
+            LOG.warn("Failed to count {}: {}", fullyQualifiedTable, e.getMessage());
             return -1;
         }
     }
 
     /**
-     * Exact table row count via paginated scan.
-     * Iterates all rows counting client-side — avoids coordinator-level count(*)
-     * which can timeout on some Cassandra configurations.
-     * Fast for small tables (type_definitions ~hundreds of rows).
+     * Exact table row count via paginated scan, using a specific CqlSession.
+     * Used for source-side counting (different Cassandra cluster/session).
      */
-    private long scanTableCount(String fullyQualifiedTable) {
+    private long countTableWithSession(CqlSession session, String fullyQualifiedTable) {
+        String selectColumn = resolvePartitionKeyColumn(fullyQualifiedTable);
+        String cql = "SELECT " + selectColumn + " FROM " + fullyQualifiedTable;
         try {
             long count = 0;
-            ResultSet rs = targetSession.execute(
-                SimpleStatement.builder("SELECT * FROM " + fullyQualifiedTable)
-                    .setPageSize(5000)
+            ResultSet rs = session.execute(
+                SimpleStatement.builder(cql)
+                    .setPageSize(10000)
+                    .setTimeout(java.time.Duration.ofMinutes(30))
                     .build());
             for (Row row : rs) {
                 count++;
+                if (count % 500_000 == 0) {
+                    LOG.info("  ... counting {}: {} rows so far", fullyQualifiedTable,
+                             String.format("%,d", count));
+                }
             }
-            LOG.info("Scanned row count for {}: {}", fullyQualifiedTable, String.format("%,d", count));
+            LOG.info("Exact row count for {}: {}", fullyQualifiedTable, String.format("%,d", count));
             return count;
         } catch (Exception e) {
-            LOG.warn("Failed to scan-count {}: {}", fullyQualifiedTable, e.getMessage());
+            LOG.warn("Failed to count {}: {}", fullyQualifiedTable, e.getMessage());
             return -1;
+        }
+    }
+
+    /**
+     * Returns the lightest column to SELECT for row counting purposes.
+     * Selects only partition key column(s) to avoid reading large properties/JSON fields.
+     */
+    private static String resolvePartitionKeyColumn(String fullyQualifiedTable) {
+        String table = fullyQualifiedTable.contains(".")
+            ? fullyQualifiedTable.substring(fullyQualifiedTable.indexOf('.') + 1)
+            : fullyQualifiedTable;
+        switch (table) {
+            case "vertices":                    return "vertex_id";
+            case "edges_out":                   return "out_vertex_id";
+            case "edges_in":                    return "in_vertex_id";
+            case "edges_by_id":                 return "edge_id";
+            case "vertex_index":                return "index_name";
+            case "vertex_property_index":       return "index_name";
+            case "edge_index":                  return "index_name";
+            case "entity_claims":               return "identity_key";
+            case "type_definitions":            return "type_name";
+            case "type_definitions_by_category":return "type_category";
+            case "schema_registry":             return "property_name";
+            case "edgestore":                   return "key";  // JanusGraph source table
+            default:                            return "*";    // fallback: read all columns
         }
     }
 

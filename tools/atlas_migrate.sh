@@ -25,6 +25,7 @@ set -euo pipefail
 ATLAS_HOME="${ATLAS_HOME:-/opt/apache-atlas}"
 ATLAS_CONF="${ATLAS_HOME}/conf/atlas-application.properties"
 MIGRATOR_JAR=""
+MIGRATOR_JAR_IS_OVERRIDE="false"
 PROPERTIES_FILE="/tmp/migrator.properties"
 LOG_DIR="${ATLAS_HOME}/logs"
 LOG_FILE="${LOG_DIR}/migrator-$(date +%Y%m%d-%H%M%S).log"
@@ -104,12 +105,22 @@ read_prop() {
 find_migrator_jar() {
     local LIB_DIR="${ATLAS_HOME}/server/webapp/atlas/WEB-INF/lib"
 
+    # Check for local JAR override first (uploaded via kubectl cp from --local-jar).
+    # Override JAR is a thin JAR (classes only, no shaded deps) — must run via -cp mode
+    # with the image's fat JAR providing dependencies.
+    local OVERRIDE_JAR="/opt/jar-overrides/atlas-graphdb-migrator-3.0.0-SNAPSHOT.jar"
+    if [ -f "$OVERRIDE_JAR" ]; then
+        log "Found local JAR override at $OVERRIDE_JAR"
+        MIGRATOR_JAR="$OVERRIDE_JAR"
+        MIGRATOR_JAR_IS_OVERRIDE="true"
+        return
+    fi
+
     # Search in standard locations (priority order)
     local candidates=(
         "${ATLAS_HOME}/tools/atlas-graphdb-migrator.jar"
         "${LIB_DIR}/atlas-graphdb-migrator-3.0.0-SNAPSHOT.jar"
         "${ATLAS_HOME}/libext/atlas-graphdb-migrator-3.0.0-SNAPSHOT.jar"
-        "/opt/jar-overrides/atlas-graphdb-migrator-3.0.0-SNAPSHOT.jar"
     )
 
     for candidate in "${candidates[@]}"; do
@@ -121,7 +132,7 @@ find_migrator_jar() {
 
     # Glob search in WEB-INF/lib
     local found
-    found=$(find "${ATLAS_HOME}/tools" "$LIB_DIR" "${ATLAS_HOME}/libext" /opt/jar-overrides \
+    found=$(find "${ATLAS_HOME}/tools" "$LIB_DIR" "${ATLAS_HOME}/libext" \
             -name "atlas-graphdb-migrator*.jar" -not -name "original-*" 2>/dev/null | head -1)
     if [ -n "$found" ]; then
         MIGRATOR_JAR="$found"
@@ -356,13 +367,38 @@ run() {
 
     # Use pipefail + PIPESTATUS to capture the JAR's exit code through tee
     set +e
-    java \
-        -Xmx${MIGRATOR_JVM_HEAP:-4g} -Xms${MIGRATOR_JVM_MIN_HEAP:-2g} \
-        --add-opens java.base/java.lang=ALL-UNNAMED \
-        -jar "$MIGRATOR_JAR" \
-        "$PROPERTIES_FILE" \
-        $extra_args \
-        2>&1 | tee "$LOG_FILE"
+    if [ "$MIGRATOR_JAR_IS_OVERRIDE" = "true" ]; then
+        # Override JAR is a thin JAR (classes only). Run with -cp: override first,
+        # then the image's fat JAR for all shaded dependencies.
+        local LIB_DIR="${ATLAS_HOME}/server/webapp/atlas/WEB-INF/lib"
+        local fat_jar=""
+        for f in "${ATLAS_HOME}/tools/atlas-graphdb-migrator.jar" \
+                 "${LIB_DIR}/atlas-graphdb-migrator-3.0.0-SNAPSHOT.jar" \
+                 "${ATLAS_HOME}/libext/atlas-graphdb-migrator-3.0.0-SNAPSHOT.jar"; do
+            if [ -f "$f" ]; then fat_jar="$f"; break; fi
+        done
+        if [ -z "$fat_jar" ]; then
+            fat_jar=$(find "${ATLAS_HOME}" -name "atlas-graphdb-migrator*.jar" \
+                      -not -name "original-*" -not -path "*/jar-overrides/*" 2>/dev/null | head -1)
+        fi
+        log "Using thin JAR override with classpath: $MIGRATOR_JAR + $fat_jar"
+        java \
+            -Xmx${MIGRATOR_JVM_HEAP:-4g} -Xms${MIGRATOR_JVM_MIN_HEAP:-2g} \
+            --add-opens java.base/java.lang=ALL-UNNAMED \
+            -cp "${MIGRATOR_JAR}:${fat_jar}" \
+            org.apache.atlas.repository.graphdb.migrator.MigratorMain \
+            "$PROPERTIES_FILE" \
+            $extra_args \
+            2>&1 | tee "$LOG_FILE"
+    else
+        java \
+            -Xmx${MIGRATOR_JVM_HEAP:-4g} -Xms${MIGRATOR_JVM_MIN_HEAP:-2g} \
+            --add-opens java.base/java.lang=ALL-UNNAMED \
+            -jar "$MIGRATOR_JAR" \
+            "$PROPERTIES_FILE" \
+            $extra_args \
+            2>&1 | tee "$LOG_FILE"
+    fi
     local jar_exit=${PIPESTATUS[0]}
     set -e
 

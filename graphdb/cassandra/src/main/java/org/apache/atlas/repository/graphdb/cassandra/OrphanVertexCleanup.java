@@ -96,6 +96,7 @@ public class OrphanVertexCleanup implements Runnable {
                 if (propsJson == null || propsJson.isEmpty()) continue;
 
                 try {
+                    propsJson = PropertyCompression.decompressIfNeeded(propsJson);
                     @SuppressWarnings("unchecked")
                     Map<String, Object> props = AtlasType.fromJson(propsJson, Map.class);
                     if (props == null) continue;

@@ -16,6 +16,11 @@ public class MigrationMetrics {
     private final AtomicLong verticesScanned  = new AtomicLong(0);
     private final AtomicLong verticesSkipped  = new AtomicLong(0);
     private final AtomicLong verticesWritten  = new AtomicLong(0);
+
+    // Per-reason skip counters
+    private final AtomicLong skippedClassifications = new AtomicLong(0);
+    private final AtomicLong skippedAllTasks        = new AtomicLong(0);
+    private final AtomicLong skippedCompletedTasks  = new AtomicLong(0);
     private final AtomicLong edgesWritten     = new AtomicLong(0);
     private final AtomicLong indexesWritten   = new AtomicLong(0);
     private final AtomicLong typeDefsWritten  = new AtomicLong(0);
@@ -48,6 +53,9 @@ public class MigrationMetrics {
     public void incrVerticesScanned()           { verticesScanned.incrementAndGet(); }
     public void incrVerticesSkipped()            { verticesSkipped.incrementAndGet(); }
     public void incrVerticesWritten()            { verticesWritten.incrementAndGet(); }
+    public void incrSkippedClassifications()     { skippedClassifications.incrementAndGet(); }
+    public void incrSkippedAllTasks()            { skippedAllTasks.incrementAndGet(); }
+    public void incrSkippedCompletedTasks()      { skippedCompletedTasks.incrementAndGet(); }
     public void incrEdgesWritten(long count)     { edgesWritten.addAndGet(count); }
     public void incrIndexesWritten(long count)   { indexesWritten.addAndGet(count); }
     public void incrTypeDefsWritten()            { typeDefsWritten.incrementAndGet(); }
@@ -120,6 +128,14 @@ public class MigrationMetrics {
             LOG.info("  Vertices: scanned={}, written={}, skipped={} (current: {}/s, avg: {}/s)",
                      format(verticesScanned.get()), format(curVerticesWritten), format(skipped),
                      format((long) vertexRate), format((long) avgVertexRate));
+            // Show skip breakdown if any reason-specific counters are non-zero
+            long skipClassif = skippedClassifications.get();
+            long skipAllTask = skippedAllTasks.get();
+            long skipCompTask = skippedCompletedTasks.get();
+            if (skipClassif > 0 || skipAllTask > 0 || skipCompTask > 0) {
+                LOG.info("  Skip breakdown: classifications={}, all-tasks={}, completed-tasks={}",
+                         format(skipClassif), format(skipAllTask), format(skipCompTask));
+            }
         } else {
             LOG.info("  Vertices: scanned={}, written={} (current: {}/s, avg: {}/s)",
                      format(verticesScanned.get()), format(curVerticesWritten),
@@ -151,7 +167,17 @@ public class MigrationMetrics {
         double elapsed = getElapsedSeconds();
         double vertexRate = elapsed > 0 ? verticesWritten.get() / elapsed : 0;
         long skipped = verticesSkipped.get();
-        String skipSuffix = skipped > 0 ? String.format(", Skipped: %s", format(skipped)) : "";
+        String skipDetail = "";
+        if (skipped > 0) {
+            long skipClassif = skippedClassifications.get();
+            long skipAllTask = skippedAllTasks.get();
+            long skipCompTask = skippedCompletedTasks.get();
+            if (skipClassif > 0 || skipAllTask > 0 || skipCompTask > 0) {
+                skipDetail = String.format(" (classifications=%s, all-tasks=%s, completed-tasks=%s)",
+                    format(skipClassif), format(skipAllTask), format(skipCompTask));
+            }
+        }
+        String skipSuffix = skipped > 0 ? String.format(", Skipped: %s%s", format(skipped), skipDetail) : "";
         return String.format(
             "Migration complete in %s — Vertices: %s%s, Edges: %s, Indexes: %s, TypeDefs: %s, " +
             "ES docs: %s (vertices) + %s (edges) | " +

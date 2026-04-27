@@ -1094,7 +1094,23 @@ EOYAML
             # Pod still running (in post-sleep phase)
             migration_passed="true"
             ok "Migration attempt $attempt: PASSED (pod in post-completion sleep)"
+        elif [ "$exit_code" = "2" ]; then
+            # Exit 2 = data migration succeeded but validation failed.
+            # Retrying won't help — need to investigate validation failures.
+            warn "Migration data written but VALIDATION FAILED (exit code 2)"
+            warn "Do not retry — investigate validation report in logs, or re-run with --fresh after fixing"
+            break
         else
+            # Before retrying, check if the failure was a validation failure (exit 1 from older JARs).
+            # If validation failed, data was written but is not safe — retrying would mask the failure
+            # (resume scans 0 rows, exits 0, and script would proceed to switch with bad validation).
+            local pod_logs
+            pod_logs=$(kubectl logs "$job_pod" -n "$NAMESPACE" --tail=50 2>/dev/null || echo "")
+            if echo "$pod_logs" | grep -q "VALIDATION FAILED\|NOT safe for cutover" 2>/dev/null; then
+                warn "Migration logs indicate VALIDATION FAILED (exit code: $exit_code)"
+                warn "Data was written but is NOT safe for cutover — do not retry"
+                break
+            fi
             warn "Migration attempt $attempt failed (pod status: $job_status, exit code: $exit_code)"
             if [ "$attempt" -lt "$MAX_RETRIES" ]; then
                 log "Retrying... (migration is resumable, will pick up from failed token ranges)"
@@ -2134,6 +2150,20 @@ main() {
         phase_alias              # Phase 4: ES alias creation
 
         if should_switch; then
+            # Pre-switch safety gate: verify target ES index has data before switching backend.
+            # This prevents switching to an empty/broken target if migration silently failed
+            # (e.g. retry masking a validation failure — resume scans 0 rows, exits 0).
+            log "Pre-switch safety check: verifying target ES index has data..."
+            local target_doc_count
+            target_doc_count=$(kexec_quiet curl -s "$(es_url)/atlas_graph_vertex_index/_count" 2>/dev/null | \
+                py_extract "import sys,json; print(json.load(sys.stdin).get('count',0))" || echo "0")
+            if [ "$target_doc_count" -gt 0 ] 2>/dev/null; then
+                ok "Target ES index has ${target_doc_count} documents — safe to switch"
+            else
+                record_phase "Phase 5: Backend Switch" "FAIL (target ES index empty)"
+                die "Pre-switch safety check FAILED: atlas_graph_vertex_index has 0 documents. Migration data may be missing — do NOT switch backend." "$EXIT_MIGRATION"
+            fi
+
             phase_switch         # Phase 5: Backend switch
         fi
 

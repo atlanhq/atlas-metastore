@@ -1,9 +1,6 @@
 package org.apache.atlas.repository.graphdb.migrator;
 
 import com.datastax.oss.driver.api.core.CqlSession;
-import com.datastax.oss.driver.api.core.cql.BatchStatement;
-import com.datastax.oss.driver.api.core.cql.BatchType;
-import com.datastax.oss.driver.api.core.cql.BatchableStatement;
 import com.datastax.oss.driver.api.core.cql.BoundStatement;
 import com.datastax.oss.driver.api.core.cql.PreparedStatement;
 import com.datastax.oss.driver.api.core.cql.ResultSet;
@@ -27,8 +24,14 @@ import java.util.concurrent.atomic.AtomicLong;
  * Parallel migrator for the tags keyspace tables (tags_by_id and propagated_tags_by_source).
  *
  * Splits each table's Murmur3 token range into N segments (one per scanner thread),
- * scans each segment in parallel, and writes to the target using async UNLOGGED batches
- * with Semaphore-bounded backpressure. Supports resume via MigrationStateStore.
+ * scans each segment in parallel, and writes to the target using individual async
+ * statements with Semaphore-bounded backpressure. Supports resume via MigrationStateStore.
+ *
+ * Each row is written as a separate async statement (no cross-partition batching)
+ * because tags_by_id has PK (bucket, id) and propagated_tags_by_source has
+ * PK (source_id, tag_type_name) — every row targets a different partition,
+ * making UNLOGGED batches counterproductive (Cassandra warns on batches
+ * spanning &gt;10 partitions).
  *
  * Each scanner thread does its own writing (no separate queue/writer pool needed)
  * because tags migration is a pure row copy with no decoding or transformation.
@@ -44,7 +47,6 @@ public class ParallelTagsMigrator {
     static final String PHASE_TAGS_BY_ID      = "tags_by_id";
     static final String PHASE_TAGS_PROPAGATED = "tags_propagated";
 
-    private static final int  BATCH_SIZE   = 200;     // rows per UNLOGGED batch
     private static final int  PAGE_SIZE    = 5000;    // CQL page size for scans
     private static final long LOG_INTERVAL = 100_000; // log every 100K rows per thread
 
@@ -111,9 +113,9 @@ public class ParallelTagsMigrator {
 
     /**
      * Generic parallel table migrator. Splits the source table's token range,
-     * assigns one range per scanner thread. Each thread scans its range,
-     * batches rows into UNLOGGED batches, and fires async writes with
-     * Semaphore bounding. Supports resume via MigrationStateStore.
+     * assigns one range per scanner thread. Each thread scans its range
+     * and fires individual async writes with Semaphore bounding.
+     * Supports resume via MigrationStateStore.
      */
     private long migrateTable(String tableName, String phase,
                                String scanCql, String insertCql,
@@ -183,8 +185,8 @@ public class ParallelTagsMigrator {
     }
 
     /**
-     * Scan a single token range from the source table, batch rows, and
-     * write them to the target asynchronously with Semaphore bounding.
+     * Scan a single token range from the source table and write each row
+     * individually to the target using async statements with Semaphore bounding.
      */
     private long scanAndWriteRange(PreparedStatement scanStmt, PreparedStatement insertStmt,
                                     RowBinder rowBinder, long rangeStart, long rangeEnd,
@@ -195,29 +197,18 @@ public class ParallelTagsMigrator {
             scanStmt.bind(rangeStart, rangeEnd).setPageSize(PAGE_SIZE));
 
         Semaphore inflight = new Semaphore(config.getMaxInflightPerThread());
-        List<BatchableStatement<?>> batch = new ArrayList<>(BATCH_SIZE);
         long rangeRows = 0;
 
         for (Row row : rs) {
-            batch.add(rowBinder.bind(insertStmt, row));
+            BoundStatement stmt = rowBinder.bind(insertStmt, row);
+            fireAsyncStatement(stmt, inflight, tableName);
+            rangeRows++;
 
-            if (batch.size() >= BATCH_SIZE) {
-                fireAsyncBatch(batch, inflight, tableName);
-                rangeRows += batch.size();
-                batch = new ArrayList<>(BATCH_SIZE);
-
-                if (rangeRows % LOG_INTERVAL == 0) {
-                    LOG.info("  {} range [{}, {}]: {} rows migrated so far...",
-                             tableName, rangeStart, rangeEnd,
-                             String.format("%,d", rangeRows));
-                }
+            if (rangeRows % LOG_INTERVAL == 0) {
+                LOG.info("  {} range [{}, {}]: {} rows migrated so far...",
+                         tableName, rangeStart, rangeEnd,
+                         String.format("%,d", rangeRows));
             }
-        }
-
-        // Flush remaining rows
-        if (!batch.isEmpty()) {
-            fireAsyncBatch(batch, inflight, tableName);
-            rangeRows += batch.size();
         }
 
         // Drain: wait for all in-flight async writes to complete
@@ -231,19 +222,17 @@ public class ParallelTagsMigrator {
     }
 
     /**
-     * Fire an UNLOGGED batch asynchronously, using the Semaphore to bound
+     * Fire a single statement asynchronously, using the Semaphore to bound
      * in-flight writes. Releases the permit on completion or error.
      */
-    private void fireAsyncBatch(List<BatchableStatement<?>> stmts, Semaphore inflight,
-                                 String tableName) throws InterruptedException {
-        BatchStatement batch = BatchStatement.newInstance(BatchType.UNLOGGED, stmts);
-
+    private void fireAsyncStatement(BoundStatement stmt, Semaphore inflight,
+                                     String tableName) throws InterruptedException {
         inflight.acquire();
 
-        targetSession.executeAsync(batch).whenComplete((result, error) -> {
+        targetSession.executeAsync(stmt).whenComplete((result, error) -> {
             inflight.release();
             if (error != null) {
-                LOG.error("Async batch write failed for {}: {}", tableName, error.getMessage());
+                LOG.error("Async write failed for {}: {}", tableName, error.getMessage());
             }
         });
     }

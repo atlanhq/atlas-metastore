@@ -159,14 +159,15 @@ public class MigratorMain {
                  config.getTargetCassandraPort(), config.getTargetCassandraKeyspace());
         LOG.info("Target ES: {}://{}:{}/{}", config.getTargetEsProtocol(),
                  config.getTargetEsHostname(), config.getTargetEsPort(), config.getTargetEsIndex());
-        LOG.info("Scanner threads: {}, Writer threads: {}, Batch size: {}",
-                 config.getScannerThreads(), config.getWriterThreads(), config.getWriterBatchSize());
-        LOG.info("Async writes: maxInflight/thread={}, edgesOutOnly={}, maxEdges/batch={}",
-                 config.getMaxInflightPerThread(), config.isEdgesOutOnly(), config.getMaxEdgesPerBatch());
+        LOG.info("Scanner threads: {}, Writer threads: {}",
+                 config.getScannerThreads(), config.getWriterThreads());
+        LOG.info("Async writes: maxInflight/thread={}, edgesOutOnly={}",
+                 config.getMaxInflightPerThread(), config.isEdgesOutOnly());
         LOG.info("Resume: {}", config.isResume());
         LOG.info("ID strategy: {}, claim enabled: {}", config.getIdStrategy(), config.isClaimEnabled());
-        LOG.info("Skip flags: esReindex={}, classifications={}, tasks={}",
-                 config.isSkipEsReindex(), config.isSkipClassifications(), config.isSkipTasks());
+        LOG.info("Skip flags: esReindex={}, classifications={}, tasks={}, completedTasks={}",
+                 config.isSkipEsReindex(), config.isSkipClassifications(),
+                 config.isSkipTasks(), config.isSkipCompletedTasks());
         LOG.info("ES field limit: {}, Max retries: {}, ES parallel: {}", config.getEsFieldLimit(), config.getMaxRetries(), config.isEsParallel());
         LOG.info("ES edge index: {}, Super vertex chunk size: {}", config.getTargetEsEdgeIndex(), config.getSuperVertexEdgeChunkSize());
         LOG.info("Auxiliary migration: configStore={}, tags={}, sameCluster={}",
@@ -515,9 +516,10 @@ public class MigratorMain {
             LOG.info("=== Retry attempt {}/{}: {} failed token ranges ===", attempt, maxRetries, failed);
             LOG.info("========================================");
 
-            // Clear FAILED status so they will be re-scanned (resume mode skips COMPLETED only)
-            // The scanner.scanAll with resume=true will pick up non-COMPLETED ranges
+            // Reset writer state (thread pool was terminated after awaitCompletion) and re-scan
+            // failed ranges. Resume mode skips COMPLETED ranges, so only FAILED ones are re-scanned.
             try {
+                writer.resetForRetry();
                 writer.startWriters();
                 scanner.scanAll(
                     item -> writer.enqueue(item),
@@ -716,10 +718,10 @@ public class MigratorMain {
         var configBuilder = DriverConfigLoader.programmaticBuilder();
 
         // Suppress noisy driver request logging:
-        // REQUEST_LOG_WARNINGS: don't log server-side warning text (unlogged batch spanning partitions)
+        // REQUEST_LOG_WARNINGS: don't log server-side warning text (tombstone thresholds, slow queries)
         // REQUEST_LOGGER_SUCCESS_ENABLED: don't log successful request details
         // REQUEST_LOGGER_SLOW_ENABLED: don't log slow request details
-        // REQUEST_LOGGER_VALUES: don't log bound parameter values (huge for batch writes)
+        // REQUEST_LOGGER_VALUES: don't log bound parameter values (huge for vertex property writes)
         configBuilder.withString(DefaultDriverOption.REQUEST_LOG_WARNINGS, "false");
         configBuilder.withBoolean(DefaultDriverOption.REQUEST_LOGGER_SUCCESS_ENABLED, false);
         configBuilder.withBoolean(DefaultDriverOption.REQUEST_LOGGER_SLOW_ENABLED, false);

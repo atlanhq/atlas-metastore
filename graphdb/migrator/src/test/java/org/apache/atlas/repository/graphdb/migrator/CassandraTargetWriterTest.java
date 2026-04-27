@@ -58,7 +58,6 @@ public class CassandraTargetWriterTest {
         when(mockSession.prepare(anyString())).thenReturn(mockPreparedStmt);
         when(mockPreparedStmt.bind(any())).thenReturn(mockBoundStmt);
         when(mockSession.execute(any(BoundStatement.class))).thenReturn(mockResultSet);
-        when(mockSession.execute(any(com.datastax.oss.driver.api.core.cql.BatchStatement.class))).thenReturn(mockResultSet);
     }
 
     @AfterMethod
@@ -146,9 +145,8 @@ public class CassandraTargetWriterTest {
         writer.awaitCompletion();
         writer.close();
 
-        // Should have written vertex + edge batch + indexes
+        // Should have written vertex + edges (individual statements) + indexes
         verify(mockSession, atLeastOnce()).execute(any(BoundStatement.class));
-        verify(mockSession, atLeastOnce()).execute(any(com.datastax.oss.driver.api.core.cql.BatchStatement.class));
     }
 
     @Test

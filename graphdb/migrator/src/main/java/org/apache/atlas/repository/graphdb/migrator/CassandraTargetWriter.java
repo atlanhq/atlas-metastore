@@ -1,9 +1,6 @@
 package org.apache.atlas.repository.graphdb.migrator;
 
 import com.datastax.oss.driver.api.core.CqlSession;
-import com.datastax.oss.driver.api.core.cql.BatchStatement;
-import com.datastax.oss.driver.api.core.cql.BatchType;
-import com.datastax.oss.driver.api.core.cql.BatchableStatement;
 import com.datastax.oss.driver.api.core.cql.BoundStatement;
 import com.datastax.oss.driver.api.core.cql.PreparedStatement;
 import com.datastax.oss.driver.api.core.cql.ResultSet;
@@ -23,12 +20,16 @@ import java.util.concurrent.atomic.AtomicLong;
  * Thread-safe: accepts vertices from the scanner pipeline via a BlockingQueue,
  * processes them with a configurable writer thread pool.
  *
- * Write strategy (optimized):
- *   - All mutations for a vertex (vertex row + indexes + edges) are collected
- *     into a single UNLOGGED batch → 1 network roundtrip instead of ~6.
- *   - Batches are fired asynchronously with a Semaphore cap per thread,
+ * Write strategy:
+ *   - All mutations (vertex row, indexes, edges) are fired as individual
+ *     async statements — no cross-partition batching.
+ *   - Each edge writes to 3 tables (edges_out, edges_in, edges_by_id) with
+ *     different partition keys, making batches counterproductive (Cassandra
+ *     warns on unlogged batches spanning >10 partitions, and logged batches
+ *     add batchlog overhead for no benefit).
+ *   - Statements are fired asynchronously with a Semaphore cap per thread,
  *     allowing pipelining without overwhelming the coordinator.
- *   - High-edge vertices (>maxEdgesPerBatch) are split into multiple batches.
+ *   - Atomicity is ensured by idempotent writes + token-range resume on failure.
  */
 public class CassandraTargetWriter implements AutoCloseable {
 
@@ -54,7 +55,7 @@ public class CassandraTargetWriter implements AutoCloseable {
 
     // Pipeline: scanner threads enqueue, writer threads dequeue
     private final BlockingQueue<QueueItem> queue;
-    private final ExecutorService writerPool;
+    private ExecutorService writerPool;
     private volatile boolean scanningComplete = false;
 
     // Diagnostic counters
@@ -280,9 +281,9 @@ public class CassandraTargetWriter implements AutoCloseable {
         for (int i = 0; i < config.getWriterThreads(); i++) {
             writerPool.submit(this::writerLoop);
         }
-        LOG.info("Started {} writer threads (queue capacity: {}, maxInflight/thread: {}, maxEdges/batch: {})",
+        LOG.info("Started {} writer threads (queue capacity: {}, maxInflight/thread: {})",
                  config.getWriterThreads(), config.getQueueCapacity(),
-                 config.getMaxInflightPerThread(), config.getMaxEdgesPerBatch());
+                 config.getMaxInflightPerThread());
     }
 
     public void signalScanComplete() {
@@ -298,8 +299,25 @@ public class CassandraTargetWriter implements AutoCloseable {
     }
 
     /**
-     * Writer loop: drains items from the queue, builds UNLOGGED batches,
-     * and fires them asynchronously with a Semaphore cap on in-flight requests.
+     * Reset writer state so it can be restarted for retry passes.
+     * Must be called after awaitCompletion() and before startWriters().
+     * Creates a fresh thread pool (the old one is terminated after shutdown).
+     */
+    public void resetForRetry() {
+        this.scanningComplete = false;
+        this.queue.clear();
+        this.writerPool = Executors.newFixedThreadPool(config.getWriterThreads(), r -> {
+            Thread t = new Thread(r);
+            t.setName("writer-retry-" + t.getId());
+            t.setDaemon(true);
+            return t;
+        });
+        LOG.info("Writer reset for retry (new thread pool created)");
+    }
+
+    /**
+     * Writer loop: drains items from the queue and fires individual async statements,
+     * using a Semaphore cap on in-flight requests per thread.
      *
      * Dispatches based on item type:
      *   - DecodedVertex → full vertex + indexes + edges
@@ -347,21 +365,16 @@ public class CassandraTargetWriter implements AutoCloseable {
 
     /**
      * Write a vertex to target Cassandra asynchronously.
-     * Vertex + index statements are written as individual async statements (not batched)
-     * to avoid Cassandra's batch_size_fail_threshold for vertices with large propsJson.
-     * Edges are written in small UNLOGGED batches.
+     * All statements (vertex, indexes, edges) are fired individually — no cross-partition
+     * batching. Each edge writes to edges_out, edges_in, edges_by_id (3 different partition
+     * keys), so batching them would span many partitions with no atomicity benefit.
+     * Idempotent writes + token-range resume handle partial failures.
      */
     private void writeVertexAsync(DecodedVertex vertex, Semaphore inflight) throws InterruptedException {
-        VertexWritePlan plan = buildVertexWritePlan(vertex);
+        List<BoundStatement> allStatements = buildVertexStatements(vertex);
 
-        // Write vertex + index as individual statements (no batch — avoids batch_size_fail_threshold)
-        for (BoundStatement stmt : plan.individualStatements) {
+        for (BoundStatement stmt : allStatements) {
             fireAsyncStatement(stmt, inflight, vertex.getVertexId());
-        }
-
-        // Write edges in small UNLOGGED batches
-        for (BatchStatement batch : plan.edgeBatches) {
-            fireAsyncStatement(batch, inflight, vertex.getVertexId());
         }
 
         // Count metrics optimistically — async writes to local Cassandra nearly always succeed
@@ -389,38 +402,19 @@ public class CassandraTargetWriter implements AutoCloseable {
     /**
      * Write an edge chunk (from a super vertex that was split during scanning).
      * Only writes edge table INSERTs — no vertex row or indexes.
+     * Each edge's 3 table inserts are fired individually (no cross-partition batching).
      */
     private void writeEdgeChunkAsync(EdgeChunk chunk, Semaphore inflight) throws InterruptedException {
         List<DecodedEdge> edges = chunk.getEdges();
         Instant now = Instant.now();
-        int maxEdges = config.getMaxEdgesPerBatch();
 
-        // Build and dispatch edge batches one at a time (writer-side streaming)
-        for (int i = 0; i < edges.size(); i += maxEdges) {
-            int end = Math.min(i + maxEdges, edges.size());
+        for (DecodedEdge edge : edges) {
             List<BoundStatement> edgeStmts = new ArrayList<>();
+            buildEdgeStatementsWithResolvedOutVertex(edge, now, edgeStmts, chunk.getResolvedVertexId());
 
-            for (int j = i; j < end; j++) {
-                buildEdgeStatementsWithResolvedOutVertex(edges.get(j), now, edgeStmts, chunk.getResolvedVertexId());
+            for (BoundStatement stmt : edgeStmts) {
+                fireAsyncStatement(stmt, inflight, chunk.getResolvedVertexId());
             }
-
-            BatchStatement batch = BatchStatement.newInstance(BatchType.UNLOGGED,
-                edgeStmts.toArray(new BatchableStatement[0]));
-
-            inflight.acquire();
-            writeAttempts.incrementAndGet();
-
-            targetSession.executeAsync(batch).whenComplete((result, error) -> {
-                inflight.release();
-                if (error != null) {
-                    metrics.incrWriteErrors();
-                    long errCount = writeErrors.incrementAndGet();
-                    if (errCount <= WRITE_SAMPLE_LOG_LIMIT) {
-                        LOG.error("Async edge chunk write failed for vertex {}: {}",
-                                  chunk.getResolvedVertexId(), error.toString());
-                    }
-                }
-            });
         }
 
         metrics.incrEdgesWritten(edges.size());
@@ -516,32 +510,20 @@ public class CassandraTargetWriter implements AutoCloseable {
     }
 
     /**
-     * Holds the write plan for a single vertex: individual statements for vertex + index rows
-     * (which can be large and must NOT be batched to avoid batch_size_fail_threshold),
-     * and small UNLOGGED batches for edges.
-     */
-    private static class VertexWritePlan {
-        final List<BoundStatement> individualStatements;
-        final List<BatchStatement> edgeBatches;
-
-        VertexWritePlan(List<BoundStatement> individualStatements, List<BatchStatement> edgeBatches) {
-            this.individualStatements = individualStatements;
-            this.edgeBatches = edgeBatches;
-        }
-    }
-
-    /**
-     * Build the write plan for a vertex.
+     * Build a flat list of all statements for a vertex: vertex INSERT, index INSERTs,
+     * typedef INSERTs, and edge INSERTs. All fired as individual async statements —
+     * no cross-partition batching.
      *
-     * Vertex INSERT + index/typedef statements are returned as individual statements
-     * (not batched) because vertices with many properties can have propsJson > 50KB,
-     * which exceeds Cassandra's batch_size_fail_threshold when batched.
-     * Individual (non-batch) statements have no size limit.
+     * Each edge writes to edges_out (partition: out_vertex_id), edges_in (partition:
+     * in_vertex_id), and edges_by_id (partition: edge_id) — 3 different partition keys.
+     * Batching these would span 30+ partitions for a typical vertex, triggering Cassandra
+     * warnings and providing no atomicity benefit (UNLOGGED batches across partitions
+     * are just grouped network calls with no failure guarantees).
      *
-     * Edges are grouped into small UNLOGGED batches (maxEdgesPerBatch) since each
-     * edge is small (~200 bytes) and batching reduces roundtrips.
+     * Atomicity is handled at a higher level: writes are idempotent (Cassandra INSERT
+     * is an upsert), and the token-range resume mechanism re-processes failed ranges.
      */
-    private VertexWritePlan buildVertexWritePlan(DecodedVertex vertex) {
+    private List<BoundStatement> buildVertexStatements(DecodedVertex vertex) {
         String vertexId = resolveVertexId(vertex);
         Instant now = Instant.now();
 
@@ -555,6 +537,13 @@ public class CassandraTargetWriter implements AutoCloseable {
             LOG.warn("Failed to serialize properties for vertex {}", vertexId, e);
         }
 
+        if (PropertyCompression.shouldCompress(vertex.getTypeName())) {
+            int originalBytes = propsJson.length();
+            propsJson = PropertyCompression.compress(propsJson);
+            LOG.info("Compressed __AtlasAuditEntry vertex {}: {} bytes -> {} bytes",
+                     vertexId, String.format("%,d", originalBytes), String.format("%,d", propsJson.length()));
+        }
+
         int propsBytes = propsJson.length();
         if (propsBytes > 50_000) {
             LOG.debug("Large vertex detected: jgId={} vertexId={} typeName={} propsJsonBytes={} propCount={} edgeCount={}",
@@ -562,16 +551,15 @@ public class CassandraTargetWriter implements AutoCloseable {
                       String.format("%,d", propsBytes), props.size(), vertex.getOutEdges().size());
         }
 
-        // --- Individual statements (vertex + indexes + typedefs) ---
-        List<BoundStatement> individualStmts = new ArrayList<>();
+        List<BoundStatement> stmts = new ArrayList<>();
 
         // 1. Vertex INSERT
-        individualStmts.add(insertVertexStmt.bind(
+        stmts.add(insertVertexStmt.bind(
             vertexId, propsJson, vertex.getVertexLabel(),
             vertex.getTypeName(), vertex.getState(), now, now));
 
         // 2. Index INSERTs
-        int indexCount = buildIndexStatements(vertex, individualStmts);
+        int indexCount = buildIndexStatements(vertex, stmts);
         metrics.incrIndexesWritten(indexCount);
 
         // 3. TypeDef table INSERTs (if this is a TypeDef vertex)
@@ -579,35 +567,22 @@ public class CassandraTargetWriter implements AutoCloseable {
         Object rawCategory = props.get("__type_category");
         String typeCategory = rawCategory != null ? String.valueOf(rawCategory) : null;
         if ("typeSystem".equals(vertex.getVertexLabel()) && typeName != null && typeCategory != null) {
-            individualStmts.add(insertTypeDefStmt.bind(typeName, typeCategory, vertexId, now, now));
-            individualStmts.add(insertTypeDefByCategoryStmt.bind(typeCategory, typeName, vertexId));
+            stmts.add(insertTypeDefStmt.bind(typeName, typeCategory, vertexId, now, now));
+            stmts.add(insertTypeDefByCategoryStmt.bind(typeCategory, typeName, vertexId));
             metrics.incrTypeDefsWritten();
         }
 
-        // --- Edge batches ---
-        List<DecodedEdge> edges = vertex.getOutEdges();
-        List<BatchStatement> edgeBatches = new ArrayList<>();
-
-        if (!edges.isEmpty()) {
-            int maxEdges = config.getMaxEdgesPerBatch();
-            for (int i = 0; i < edges.size(); i += maxEdges) {
-                List<BoundStatement> edgeStmts = new ArrayList<>();
-                int end = Math.min(i + maxEdges, edges.size());
-                for (int j = i; j < end; j++) {
-                    buildEdgeStatements(edges.get(j), now, edgeStmts);
-                }
-                edgeBatches.add(BatchStatement.newInstance(BatchType.UNLOGGED,
-                    edgeStmts.toArray(new BatchableStatement[0])));
-            }
+        // 4. Edge INSERTs (individual statements, not batched)
+        for (DecodedEdge edge : vertex.getOutEdges()) {
+            buildEdgeStatements(edge, now, stmts);
         }
 
-        return new VertexWritePlan(individualStmts, edgeBatches);
+        return stmts;
     }
 
     /**
-     * Fire a single statement (BoundStatement or BatchStatement) asynchronously,
-     * respecting the per-thread inflight semaphore.
-     * Retries up to maxRetries times with exponential backoff on failure.
+     * Fire a single BoundStatement asynchronously, respecting the per-thread
+     * inflight semaphore. Retries up to maxRetries times with exponential backoff on failure.
      */
     private void fireAsyncStatement(com.datastax.oss.driver.api.core.cql.Statement<?> stmt,
                                       Semaphore inflight, String vertexId) throws InterruptedException {
