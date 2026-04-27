@@ -67,6 +67,9 @@ New nodes are filled green; existing nodes that change behavior are amber; exist
 
 ![Rollback orchestration](images/zerograph-rollback-with-tags.png)
 
+<details>
+<summary>Mermaid source (click to expand — re-render this when the flow changes)</summary>
+
 ```mermaid
 flowchart TD
     intake[intake] --> mm[enable_maintenance_mode<br/>MAINTENANCE_MODE=true]
@@ -102,6 +105,8 @@ flowchart TD
     class tsq decision
 ```
 
+</details>
+
 **Key changes vs today's flow:**
 - One rolling restart instead of two (`disable_shadow_mode` is a dynamic config flip — see PR #6592).
 - New nodes set/unset `WAL_REPLAY_SKIP_TAG_EVENTS` (consumer-side filter).
@@ -113,6 +118,9 @@ flowchart TD
 ### Diagram 2 — Patcher internals (delta-from-audits)
 
 ![Patcher internals](images/tags-patch-internals-diagram.png)
+
+<details>
+<summary>Mermaid source (click to expand — re-render this when the patcher changes)</summary>
 
 ```mermaid
 flowchart TD
@@ -208,6 +216,8 @@ flowchart TD
     class abort bad
 ```
 
+</details>
+
 **Reading guide:**
 - 🔵 inputs: `entity_audits` ES (the delta source), `vid_lookup` Cassandra side table (built by consumer), `atlas_graph_vertex_index` ES (denorm copy source), pre-migration `tags_jg` baseline (from `restore_tags`).
 - 🟡 patcher steps: stream audits in timestamp asc, dispatch by action, resolve vid, apply, copy denorm.
@@ -220,6 +230,9 @@ flowchart TD
 How `vid_lookup` gets built (no separate scan pass — it's a consumer side-effect).
 
 ![Vid-lookup sequence](images/tags-rollback-sequence-diagram.png)
+
+<details>
+<summary>Mermaid source (click to expand — re-render this when the producer/consumer envelope changes)</summary>
 
 ```mermaid
 sequenceDiagram
@@ -243,6 +256,8 @@ sequenceDiagram
 
     Note over Producer,Lookup: After WAL_REPLAY_COMPLETE=true,<br/>vid_lookup is fully populated
 ```
+
+</details>
 
 The producer change is small: add `zg_vid` to the envelope alongside the existing `guid` + `qn`. The consumer change: after `entitiesStore.createOrUpdate(...)` returns with the new JG entity, write a row into `atlas_graph.vid_lookup`.
 
