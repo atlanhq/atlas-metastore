@@ -27,6 +27,20 @@ on:
       - lite_master
       - switchable-graph-provider
       - ring-*
+      - ms-635
+      - ms-884-observability-master
+      - sgp-consistency-improvements
+      - switchable_graph_bug_fixes
+      - ms-664-fix-audit-search
+      - hotfix-reindex-refresh
+      - nb-switchable-graph-provider
+      - ms-864-keycloak-jwks-internal-url
+      - ms-911-add-observability
+      - ms-610-ranges-policy-cache
+      - ms-901-hidelineage
+      - ms-894-override-classification
+      - small-tenant-migrate-bug-fix
+      - config-store-ring-dev
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'

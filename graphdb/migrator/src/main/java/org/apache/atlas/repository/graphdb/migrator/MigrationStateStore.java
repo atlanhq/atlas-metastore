@@ -9,6 +9,8 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -23,8 +25,9 @@ public class MigrationStateStore {
     private final String keyspace;
 
     private PreparedStatement insertStmt;
-    private PreparedStatement selectCompletedStmt;
     private PreparedStatement selectPhaseStmt;
+    private PreparedStatement insertBlobStmt;
+    private PreparedStatement selectBlobStmt;
 
     public MigrationStateStore(CqlSession session, String keyspace) {
         this.session  = session;
@@ -44,18 +47,27 @@ public class MigrationStateStore {
             "  PRIMARY KEY ((phase), token_range_start)" +
             ")");
 
+        session.execute(
+            "CREATE TABLE IF NOT EXISTS " + keyspace + ".migration_metadata (" +
+            "  key text PRIMARY KEY," +
+            "  value text," +
+            "  last_updated timestamp" +
+            ")");
+
         insertStmt = session.prepare(
             "INSERT INTO " + keyspace + ".migration_state " +
             "(phase, token_range_start, token_range_end, status, vertices_processed, edges_processed, last_updated) " +
             "VALUES (?, ?, ?, ?, ?, ?, ?)");
 
-        selectCompletedStmt = session.prepare(
-            "SELECT token_range_start FROM " + keyspace + ".migration_state " +
-            "WHERE phase = ? AND status = 'COMPLETED' ALLOW FILTERING");
-
         selectPhaseStmt = session.prepare(
             "SELECT token_range_start, status, vertices_processed, edges_processed " +
             "FROM " + keyspace + ".migration_state WHERE phase = ?");
+
+        insertBlobStmt = session.prepare(
+            "INSERT INTO " + keyspace + ".migration_metadata (key, value, last_updated) VALUES (?, ?, ?)");
+
+        selectBlobStmt = session.prepare(
+            "SELECT value FROM " + keyspace + ".migration_metadata WHERE key = ?");
     }
 
     public void markRangeCompleted(String phase, long rangeStart, long rangeEnd,
@@ -83,9 +95,11 @@ public class MigrationStateStore {
      */
     public Set<Long> getCompletedRanges(String phase) {
         Set<Long> completed = new HashSet<>();
-        ResultSet rs = session.execute(selectCompletedStmt.bind(phase));
+        ResultSet rs = session.execute(selectPhaseStmt.bind(phase));
         for (Row row : rs) {
-            completed.add(row.getLong("token_range_start"));
+            if ("COMPLETED".equals(row.getString("status"))) {
+                completed.add(row.getLong("token_range_start"));
+            }
         }
         LOG.info("Phase '{}': found {} completed token ranges from previous run", phase, completed.size());
         return completed;
@@ -105,6 +119,32 @@ public class MigrationStateStore {
             }
         }
         return new long[]{completedRanges, totalVertices, totalEdges};
+    }
+
+    /**
+     * Returns a map of status → count for all token ranges in a given phase.
+     * Used by validation to check that all ranges are COMPLETED.
+     */
+    public Map<String, Long> getStatusCounts(String phase) {
+        Map<String, Long> counts = new LinkedHashMap<>();
+        ResultSet rs = session.execute(selectPhaseStmt.bind(phase));
+        for (Row row : rs) {
+            String status = row.getString("status");
+            counts.merge(status, 1L, Long::sum);
+        }
+        return counts;
+    }
+
+    /** Save a JSON blob by key */
+    public void saveMetadata(String key, String json) {
+        session.execute(insertBlobStmt.bind(key, json, Instant.now()));
+    }
+
+    /** Load a JSON blob by key. Returns null if not found. */
+    public String loadMetadata(String key) {
+        ResultSet rs = session.execute(selectBlobStmt.bind(key));
+        Row row = rs.one();
+        return row != null ? row.getString("value") : null;
     }
 
     /** Clear state for a fresh migration */

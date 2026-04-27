@@ -295,11 +295,12 @@ public final class Constants {
 
     static {
         String prefix;
+        String backend = "unknown";
         try {
             Configuration config = ApplicationProperties.get();
 
             // Derive default prefix from the graphdb backend
-            String backend = config.getString(ApplicationProperties.GRAPHDB_BACKEND_CONF,
+            backend = config.getString(ApplicationProperties.GRAPHDB_BACKEND_CONF,
                                               ApplicationProperties.DEFAULT_GRAPHDB_BACKEND);
             String backendDefault = ApplicationProperties.GRAPHDB_BACKEND_CASSANDRA.equalsIgnoreCase(backend)
                                     ? "atlas_graph_" : "janusgraph_";
@@ -313,7 +314,8 @@ public final class Constants {
         INDEX_PREFIX = prefix;
         VERTEX_INDEX_NAME = INDEX_PREFIX + VERTEX_INDEX;
         EDGE_INDEX_NAME   = INDEX_PREFIX + EDGE_INDEX;
-        LOG.info("ES index prefix: '{}', vertex_index: '{}', edge_index: '{}'", INDEX_PREFIX, VERTEX_INDEX_NAME, EDGE_INDEX_NAME);
+        LOG.info("Constants static init: backend='{}', ES index prefix='{}', vertex_index='{}', edge_index='{}'",
+                backend, INDEX_PREFIX, VERTEX_INDEX_NAME, EDGE_INDEX_NAME);
     }
 
     public static final String NAME                                    = "name";

@@ -1,6 +1,7 @@
 package org.apache.atlas.repository.graphdb.cassandra;
 
 import com.datastax.oss.driver.api.core.CqlSession;
+import org.apache.commons.configuration.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,12 +14,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Schedules background repair jobs for CassandraGraph consistency.
  *
  * Currently schedules:
- * 1. ES Reconciliation (every 6 hours) — sample-based audit of Cassandra↔ES consistency
+ * 1. ES Reconciliation — sample-based audit of Cassandra↔ES consistency
  *
- * Orphan vertex/edge cleanup is NOT scheduled here. The atomic vertex+index batch
- * in CassandraGraph.commit() eliminates the W2 failure window that caused orphans.
- * OrphanVertexCleanup and OrphanEdgeCleanup are retained as on-demand tools for
- * post-migration or post-incident repair, not as continuous background loops.
+ * Configurable via atlas-application.properties:
+ *   atlas.cassandra.graph.reconciliation.interval.hours=6  (default)
+ *   atlas.cassandra.graph.reconciliation.initial.delay.minutes=10  (default)
  *
  * All jobs are lease-guarded via {@link JobLeaseManager} — only one pod executes each job
  * at a time. Crashed pods auto-release leases via TTL expiry.
@@ -29,15 +29,23 @@ public class RepairJobScheduler {
 
     private static final Logger LOG = LoggerFactory.getLogger(RepairJobScheduler.class);
 
-    private static final long ES_RECONCILIATION_INTERVAL_HOURS = 6;
-    private static final long ES_RECONCILIATION_INITIAL_DELAY_MINUTES = 10;
+    private static final String CONF_RECONCILIATION_INTERVAL_HOURS =
+            "atlas.cassandra.graph.reconciliation.interval.hours";
+    private static final String CONF_RECONCILIATION_INITIAL_DELAY_MINUTES =
+            "atlas.cassandra.graph.reconciliation.initial.delay.minutes";
+
+    private static final long DEFAULT_INTERVAL_HOURS = 6;
+    private static final long DEFAULT_INITIAL_DELAY_MINUTES = 10;
 
     private final ScheduledExecutorService scheduler;
     private final ESReconciliationJob esReconciliationJob;
     private final AtomicBoolean running = new AtomicBoolean(false);
+    private final long intervalHours;
+    private final long initialDelayMinutes;
 
     public RepairJobScheduler(CqlSession session, CassandraGraph graph,
-                               JobLeaseManager leaseManager, ESOutboxRepository outboxRepository) {
+                               JobLeaseManager leaseManager, ESOutboxRepository outboxRepository,
+                               Configuration configuration) {
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "repair-scheduler");
             t.setDaemon(true);
@@ -45,18 +53,23 @@ public class RepairJobScheduler {
         });
 
         this.esReconciliationJob = new ESReconciliationJob(session, graph, leaseManager, outboxRepository);
+        this.intervalHours = configuration != null
+                ? configuration.getLong(CONF_RECONCILIATION_INTERVAL_HOURS, DEFAULT_INTERVAL_HOURS)
+                : DEFAULT_INTERVAL_HOURS;
+        this.initialDelayMinutes = configuration != null
+                ? configuration.getLong(CONF_RECONCILIATION_INITIAL_DELAY_MINUTES, DEFAULT_INITIAL_DELAY_MINUTES)
+                : DEFAULT_INITIAL_DELAY_MINUTES;
     }
 
     public void start() {
         if (running.compareAndSet(false, true)) {
-            // ES reconciliation: every 6 hours, starting after 10 minutes
             scheduler.scheduleWithFixedDelay(
                     wrapWithErrorHandling("ESReconciliationJob", esReconciliationJob),
-                    ES_RECONCILIATION_INITIAL_DELAY_MINUTES, ES_RECONCILIATION_INTERVAL_HOURS * 60,
+                    initialDelayMinutes, intervalHours * 60,
                     TimeUnit.MINUTES);
 
-            LOG.info("RepairJobScheduler started — ES reconciliation every {}h (lease-guarded)",
-                    ES_RECONCILIATION_INTERVAL_HOURS);
+            LOG.info("RepairJobScheduler started — ES reconciliation every {}h, initial delay {}min (lease-guarded)",
+                    intervalHours, initialDelayMinutes);
         }
     }
 
@@ -75,11 +88,6 @@ public class RepairJobScheduler {
         }
     }
 
-    /**
-     * Wraps a Runnable to catch and log any unexpected exceptions, preventing
-     * ScheduledExecutorService from silently swallowing errors and stopping
-     * future executions.
-     */
     private Runnable wrapWithErrorHandling(String jobName, Runnable job) {
         return () -> {
             try {

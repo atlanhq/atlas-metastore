@@ -1239,10 +1239,6 @@ public class EntityGraphMapper {
         }
     }
 
-    private static boolean hasExplicitValue(AtlasStruct struct, String attrName) {
-        return struct != null && struct.hasAttribute(attrName) && struct.getAttribute(attrName) != null;
-    }
-
     /**
      * MS-1044: For restored entities, read SINGLE-cardinality relationship attributes from the
      * graph and add them to the diffEntity. This ensures downstream consumers of ENTITY_UPDATE
@@ -1320,6 +1316,10 @@ public class EntityGraphMapper {
                 }
             }
         }
+    }
+
+    private static boolean hasExplicitValue(AtlasStruct struct, String attrName) {
+        return struct != null && struct.hasAttribute(attrName) && struct.getAttribute(attrName) != null;
     }
 
     private void mapRelationshipAttributes(AtlasEntity entity, AtlasEntityType entityType, AtlasVertex vertex, EntityOperation op,
@@ -7273,10 +7273,57 @@ public class EntityGraphMapper {
             LOG.warn("Asset with GUID {} not found", assetGuid);
             return null;
         }
-        vertex.setProperty(assetAttributeInfo.getAttributeName(), assetAttributeInfo.getValue());
+        String vertexTypeName = AtlasGraphUtilsV2.getTypeName(vertex);
+        Object typedValue = coerceAttributeValue(vertexTypeName, assetAttributeInfo.getAttributeName(), assetAttributeInfo.getValue());
+        vertex.setProperty(assetAttributeInfo.getAttributeName(), typedValue);
         updateModificationMetadata(vertex);
         cacheDifferentialEntityAttributeUpdate(vertex, assetAttributeInfo.getAttributeName(), assetAttributeInfo.getValue());
         return vertex;
+    }
+
+    /**
+     * Coerce a string value to the correct Java type for the attribute.
+     * JanusGraph does this implicitly via its schema-aware property keys;
+     * CassandraGraph stores properties as-is, so passing a String where a
+     * float is expected causes the wrong type to be persisted in Cassandra
+     * and ES (e.g., "42.5" instead of 42.5).
+     */
+    private Object coerceAttributeValue(String entityTypeName, String attributeName, String value) {
+        if (value == null) {
+            return null;
+        }
+
+        AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entityTypeName);
+        if (entityType == null) {
+            return value;
+        }
+
+        AtlasStructType.AtlasAttribute attribute = entityType.getAttribute(attributeName);
+        if (attribute == null) {
+            return value;
+        }
+
+        String typeName = attribute.getAttributeDef().getTypeName();
+        if (typeName == null) {
+            return value;
+        }
+
+        try {
+            switch (typeName) {
+                case "float":   return Float.parseFloat(value);
+                case "double":  return Double.parseDouble(value);
+                case "int":     return Integer.parseInt(value);
+                case "long":    return Long.parseLong(value);
+                case "boolean": return Boolean.parseBoolean(value);
+                case "short":   return Short.parseShort(value);
+                case "byte":    return Byte.parseByte(value);
+                default:        return value;
+            }
+        } catch (NumberFormatException e) {
+            LOG.warn("Failed to coerce attribute {}.{} value '{}' to type {}, storing as string",
+                     entityTypeName, attributeName, value, typeName);
+            return value;
+        }
     }
 
     private void cacheDifferentialEntityAttributeUpdate(AtlasVertex ev, String property, String value) {

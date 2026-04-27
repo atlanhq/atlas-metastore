@@ -14,6 +14,7 @@ import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.repository.graphdb.elasticsearch.AtlasElasticsearchDatabase;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
+import org.apache.http.nio.entity.NStringEntity;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.ResponseException;
@@ -36,6 +37,8 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
     /** Tracks ES indexes that have been verified/created during this JVM session. */
     private static final Set<String> VERIFIED_ES_INDEXES = ConcurrentHashMap.newKeySet();
+
+    static final Set<String> EXCLUDE_ES_INDEXES_PREFIXING = new HashSet<>(Arrays.asList("search_logs"));
 
     /**
      * Max vertices per LOGGED batch in commit(). Prevents exceeding Cassandra's
@@ -73,9 +76,9 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     private final ClaimRepository     claimRepository;
     private final ESOutboxRepository  esOutboxRepository;
     private final JobLeaseManager     leaseManager;
-    private final ESOutboxProcessor   esOutboxProcessor;
-    private final RepairJobScheduler  repairJobScheduler;
-    private final Set<String>         multiProperties;
+    private final ESOutboxProcessor        esOutboxProcessor;
+    private final RepairJobScheduler       repairJobScheduler;
+    private final Set<String>              multiProperties;
     private final RuntimeIdStrategy   idStrategy;
     private final boolean             claimEnabled;
 
@@ -95,6 +98,11 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     }
 
     public CassandraGraph(CqlSession session, RuntimeIdStrategy idStrategy, boolean claimEnabled) {
+        this(session, idStrategy, claimEnabled, null);
+    }
+
+    public CassandraGraph(CqlSession session, RuntimeIdStrategy idStrategy, boolean claimEnabled,
+                           org.apache.commons.configuration.Configuration configuration) {
         this.session             = session;
         this.vertexRepository    = new VertexRepository(session);
         this.edgeRepository      = new EdgeRepository(session);
@@ -105,14 +113,57 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         this.esOutboxRepository  = new ESOutboxRepository(session);
         this.leaseManager        = new JobLeaseManager(session);
         this.esOutboxProcessor   = new ESOutboxProcessor(esOutboxRepository, leaseManager);
-        this.repairJobScheduler  = new RepairJobScheduler(session, this, leaseManager, esOutboxRepository);
+        this.repairJobScheduler  = new RepairJobScheduler(session, this, leaseManager, esOutboxRepository, configuration);
         this.multiProperties     = ConcurrentHashMap.newKeySet();
         this.idStrategy          = idStrategy != null ? idStrategy : RuntimeIdStrategy.LEGACY;
         this.claimEnabled        = claimEnabled;
 
+        // Initialize metrics (uses global Prometheus registry)
+        initMetrics();
+
         // Start background processors
         this.esOutboxProcessor.start();
         this.repairJobScheduler.start();
+    }
+
+    private void initMetrics() {
+        try {
+            io.micrometer.core.instrument.MeterRegistry registry =
+                    org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry();
+            if (registry != null) {
+                CassandraGraphMetrics.getInstance(registry);
+                seedOutboxFailedGauge();
+            }
+        } catch (Throwable t) {
+            LOG.warn("Failed to initialize CassandraGraph metrics (non-fatal): {}", t.getMessage());
+        }
+    }
+
+    /**
+     * One-time seed of the outbox_failed gauge from Cassandra on startup.
+     * The es_outbox table is partitioned by status, so WHERE status = 'FAILED'
+     * is a single-partition read — milliseconds even with thousands of entries.
+     * Uses a 2-second timeout to avoid delaying startup if C* is slow.
+     */
+    private void seedOutboxFailedGauge() {
+        try {
+            com.datastax.oss.driver.api.core.cql.ResultSet rs = session.execute(
+                    com.datastax.oss.driver.api.core.cql.SimpleStatement.builder(
+                            "SELECT COUNT(*) FROM es_outbox WHERE status = 'FAILED'")
+                        .setTimeout(java.time.Duration.ofSeconds(2))
+                        .build());
+            com.datastax.oss.driver.api.core.cql.Row row = rs.one();
+            if (row != null) {
+                int count = (int) row.getLong(0);
+                if (count > 0) {
+                    CassandraGraphMetrics.getInstance().incrementOutboxFailed(count);
+                    LOG.info("Seeded outbox_failed gauge from C*: {}", count);
+                }
+            }
+        } catch (Exception e) {
+            LOG.info("Could not seed outbox_failed gauge (will self-correct on next reconciliation): {}",
+                    e.getMessage());
+        }
     }
 
     // ---- Vertex operations ----
@@ -299,6 +350,43 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         return result;
     }
 
+    /**
+     * Direction-aware edge fetch: each label is queried only in its specified direction
+     * (IN, OUT, or BOTH), avoiding unnecessary CQL queries to the wrong edge table.
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, List<AtlasEdge<CassandraVertex, CassandraEdge>>> getEdgesForVerticesDirectionAware(
+            Collection<String> vertexIds, Map<String, AtlasEdgeDirection> edgeLabelDirections, int limitPerLabel) {
+        if (edgeLabelDirections == null || edgeLabelDirections.isEmpty()) {
+            return getEdgesForVertices(vertexIds);
+        }
+
+        Map<String, List<CassandraEdge>> persisted =
+            edgeRepository.getEdgesForVerticesByLabelsDirectionAware(vertexIds, edgeLabelDirections, this, limitPerLabel);
+
+        Map<String, List<AtlasEdge<CassandraVertex, CassandraEdge>>> result = new LinkedHashMap<>();
+        for (String vertexId : vertexIds) {
+            List<CassandraEdge> persistedEdges = persisted.getOrDefault(vertexId, Collections.emptyList());
+
+            Map<String, CassandraEdge> merged = new LinkedHashMap<>();
+            for (CassandraEdge e : persistedEdges) {
+                if (!txBuffer.get().isEdgeRemoved(e.getIdString())) {
+                    merged.put(e.getIdString(), e);
+                }
+            }
+            // Check transaction buffer for matching labels
+            Set<String> labelSet = edgeLabelDirections.keySet();
+            List<CassandraEdge> bufferedEdges = txBuffer.get().getEdgesForVertex(vertexId, AtlasEdgeDirection.BOTH, null);
+            for (CassandraEdge e : bufferedEdges) {
+                if (labelSet.contains(e.getLabel())) {
+                    merged.put(e.getIdString(), e);
+                }
+            }
+            result.put(vertexId, (List) new ArrayList<>(merged.values()));
+        }
+        return result;
+    }
+
     @Override
     public Iterable<AtlasVertex<CassandraVertex, CassandraEdge>> getVertices(String key, Object value) {
         // Try composite index lookup first
@@ -392,16 +480,30 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         String fromId = ((CassandraVertex) fromVertex).getIdString();
         String toId   = ((CassandraVertex) toVertex).getIdString();
 
-        // O(1) lookup when using deterministic edge IDs — compute edge ID from endpoints + label
-        if (RuntimeIdStrategy.DETERMINISTIC == idStrategy) {
-            String edgeId = GraphIdUtil.deterministicEdgeId(fromId, relationshipLabel, toId);
-            return edgeRepository.getEdge(edgeId, this);
+        // 1. Check transaction buffer first — edges created in the current transaction
+        //    are not yet persisted to Cassandra but must be visible to getOrCreate checks
+        List<CassandraEdge> bufferedEdges = txBuffer.get().getEdgesForVertex(fromId, AtlasEdgeDirection.OUT, relationshipLabel);
+        for (CassandraEdge edge : bufferedEdges) {
+            if (edge.getInVertexId().equals(toId)) {
+                return edge;
+            }
         }
 
-        // Fallback: O(n) scan for LEGACY mode (UUID-based edge IDs)
+        // 2. Check persisted edges in Cassandra
+        if (RuntimeIdStrategy.DETERMINISTIC == idStrategy) {
+            // O(1) lookup — compute edge ID from endpoints + label
+            String edgeId = GraphIdUtil.deterministicEdgeId(fromId, relationshipLabel, toId);
+            CassandraEdge edge = (CassandraEdge) edgeRepository.getEdge(edgeId, this);
+            if (edge != null && !txBuffer.get().isEdgeRemoved(edge.getIdString())) {
+                return edge;
+            }
+            return null;
+        }
+
+        // Legacy: O(n) scan for UUID-based edge IDs
         List<CassandraEdge> outEdges = edgeRepository.getEdgesForVertex(fromId, AtlasEdgeDirection.OUT, relationshipLabel, this);
         for (CassandraEdge edge : outEdges) {
-            if (edge.getInVertexId().equals(toId)) {
+            if (edge.getInVertexId().equals(toId) && !txBuffer.get().isEdgeRemoved(edge.getIdString())) {
                 return edge;
             }
         }
@@ -557,14 +659,53 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
     @Override
     public void createOrUpdateESAlias(ESAliasRequestBuilder aliasRequestBuilder) throws AtlasBaseException {
-        // TODO: implement ES alias management
-        LOG.debug("createOrUpdateESAlias called - delegating to ES client");
+        String aliasRequest = aliasRequestBuilder.build();
+
+        NStringEntity entity = new NStringEntity(aliasRequest, ContentType.APPLICATION_JSON);
+        Request request = new Request("POST", Constants.ES_API_ALIASES);
+        request.setEntity(entity);
+
+        try {
+            RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
+            Response  response = client.performRequest(request);
+            int statusCode = response.getStatusLine().getStatusCode();
+
+            if (statusCode != 200) {
+                throw new AtlasBaseException(AtlasErrorCode.INDEX_ALIAS_FAILED, "creating/updating", "Status code " + statusCode);
+            }
+        } catch (AtlasBaseException e) {
+            throw e;
+        } catch (Exception e) {
+            LOG.error("Failed to create/update ES alias: {}", e.getMessage(), e);
+            throw new AtlasBaseException(AtlasErrorCode.INDEX_ALIAS_FAILED, "creating/updating", e.getMessage());
+        }
     }
 
     @Override
     public void deleteESAlias(String indexName, String aliasName) throws AtlasBaseException {
-        // TODO: implement ES alias deletion
-        LOG.debug("deleteESAlias called for index={}, alias={}", indexName, aliasName);
+        ESAliasRequestBuilder builder = new ESAliasRequestBuilder();
+        builder.addAction(ESAliasRequestBuilder.ESAliasAction.REMOVE, new ESAliasRequestBuilder.AliasAction(indexName, aliasName));
+
+        String aliasRequest = builder.build();
+
+        NStringEntity entity = new NStringEntity(aliasRequest, ContentType.APPLICATION_JSON);
+        Request request = new Request("POST", Constants.ES_API_ALIASES);
+        request.setEntity(entity);
+
+        try {
+            RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
+            Response  response = client.performRequest(request);
+            int statusCode = response.getStatusLine().getStatusCode();
+
+            if (statusCode != 200) {
+                throw new AtlasBaseException(AtlasErrorCode.INDEX_ALIAS_FAILED, "deleting", "Status code " + statusCode);
+            }
+        } catch (AtlasBaseException e) {
+            throw e;
+        } catch (Exception e) {
+            LOG.error("Failed to delete ES alias: {}", e.getMessage(), e);
+            throw new AtlasBaseException(AtlasErrorCode.INDEX_ALIAS_FAILED, "deleting", e.getMessage());
+        }
     }
 
     @Override
@@ -586,7 +727,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         // Normalize: callers may pass unprefixed names like "search_logs" but the actual
         // ES index is prefixed (e.g. "atlas_graph_search_logs"). Must match what
         // CassandraIndexQuery.normalizeIndexName() will resolve to.
-        if (!indexName.startsWith(Constants.INDEX_PREFIX)) {
+        if (!indexName.startsWith(Constants.INDEX_PREFIX) && !EXCLUDE_ES_INDEXES_PREFIXING.contains(indexName)) {
             indexName = Constants.INDEX_PREFIX + indexName;
         }
         if (VERIFIED_ES_INDEXES.contains(indexName)) {
@@ -656,6 +797,8 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     @Override
     public void commit() {
         TransactionBuffer buffer = txBuffer.get();
+        long commitStartMs = System.currentTimeMillis();
+        int totalBatchCount = 0;
 
         try {
             List<CassandraVertex> originalNewVertices = buffer.getNewVertices();
@@ -720,6 +863,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                     session.execute(atomicBatch.build());
                     batchCount++;
                 }
+                totalBatchCount += batchCount;
                 LOG.info("commit: wrote {} new vertices with their index entries in {} batch(es)", newVertices.size(), batchCount);
             }
 
@@ -738,6 +882,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                     session.execute(dirtyBatch.build());
                     dirtyBatchCount++;
                 }
+                totalBatchCount += dirtyBatchCount;
                 LOG.info("commit: updated {} dirty vertices in {} batch(es)", dirtyVertices.size(), dirtyBatchCount);
             }
 
@@ -884,16 +1029,37 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 e.markPersisted();
             }
 
+            // Record commit metrics
+            recordCommitMetrics(true, commitStartMs, newVertices.size(), dirtyVertices.size(),
+                    removedVertices.size(), newEdges.size(), removedEdges.size(),
+                    totalBatchCount, claimLostIds.size());
+
         } catch (Exception e) {
             LOG.error("CassandraGraph.commit() FAILED: {}. TypeRegistryUpdateHook will receive isSuccess=false, " +
                     "discarding any transient type registry updates. Cassandra writes that already flushed " +
                     "are NOT rolled back.", e.getMessage(), e);
+            recordCommitMetrics(false, commitStartMs, 0, 0, 0, 0, 0, totalBatchCount, 0);
             throw e;
         } finally {
             buffer.clear();
             // Clear vertex cache so the next transaction on this thread reads fresh from Cassandra.
             // Without this, a thread reused from the pool could return stale cached vertices.
             vertexCache.get().clear();
+        }
+    }
+
+    private void recordCommitMetrics(boolean success, long startMs,
+                                     int verticesCreated, int verticesUpdated, int verticesDeleted,
+                                     int edgesCreated, int edgesDeleted, int batchCount, int claimConflicts) {
+        try {
+            CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
+            if (metrics != null) {
+                metrics.recordCommit(success, System.currentTimeMillis() - startMs,
+                        verticesCreated, verticesUpdated, verticesDeleted,
+                        edgesCreated, edgesDeleted, batchCount, claimConflicts);
+            }
+        } catch (Throwable t) {
+            LOG.debug("Failed to record commit metrics: {}", t.getMessage());
         }
     }
 
@@ -1012,6 +1178,14 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                     String.valueOf(vertexType) + ":" + String.valueOf(typeDefName), vertex.getIdString()));
         }
 
+        // Index by TASK_GUID (task vertex lookup)
+        Object taskGuid = vertex.getProperty(Constants.TASK_GUID, String.class);
+        if (taskGuid != null) {
+            String taskGuidStr = String.valueOf(taskGuid);
+            uniqueEntries.add(new IndexRepository.IndexEntry(Constants.TASK_GUID + "_idx", taskGuidStr, vertex.getIdString()));
+            LOG.info("buildIndexEntries: {} [{}] -> vertexId [{}]", Constants.TASK_GUID + "_idx", taskGuidStr, vertex.getIdString());
+        }
+
         // ---- 1:N property indexes (vertex_property_index table) ----
 
         // Index by VERTEX_TYPE + TYPE_CATEGORY (for findTypeVerticesByCategory / getAll)
@@ -1021,7 +1195,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                     String.valueOf(vertexType) + ":" + String.valueOf(typeCategory), vertex.getIdString()));
         }
 
-        if (guid == null && qn == null && vertexType == null) {
+        if (guid == null && qn == null && vertexType == null && taskGuid == null) {
             LOG.warn("buildIndexEntries: vertex [{}] has no indexable properties! Keys: {}",
                     vertex.getIdString(), vertex.getPropertyKeys());
         }
@@ -1082,9 +1256,28 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     private static final int    ES_SYNC_MAX_RETRIES  = 3;
     private static final long[] ES_SYNC_RETRY_DELAYS = {100, 300, 1000}; // ms
 
+    // Painless script that sets non-null values and removes null values from ES doc.
+    // This preserves fields not in the update (like tag attributes) while allowing field removal.
+    // Used instead of doc/doc_as_upsert because ingest pipelines do NOT run on update operations,
+    // so null removal via the remove_null_fields pipeline would be skipped for partial updates.
+    private static final String UPSERT_SCRIPT =
+            "for (entry in params.updates.entrySet()) { " +
+            "if (entry.getValue() == null) { ctx._source.remove(entry.getKey()); } " +
+            "else { ctx._source[entry.getKey()] = entry.getValue(); } }";
+
+    // Tag denormalized attributes managed via ClassificationAssociator — excluded from general vertex sync
+    private static final Set<String> TAG_DENORM_ATTRIBUTES = new HashSet<>(Arrays.asList(
+            Constants.TRAIT_NAMES_PROPERTY_KEY,
+            Constants.PROPAGATED_TRAIT_NAMES_PROPERTY_KEY,
+            Constants.CLASSIFICATION_TEXT_KEY,
+            Constants.CLASSIFICATION_NAMES_KEY,
+            Constants.PROPAGATED_CLASSIFICATION_NAMES_KEY
+    ));
+
     private void syncVerticesToElasticsearch(List<CassandraVertex> newVertices,
                                              List<CassandraVertex> dirtyVertices,
                                              List<CassandraVertex> removedVertices) {
+        long esSyncStartMs = System.currentTimeMillis();
         try {
             String indexName = Constants.VERTEX_INDEX_NAME;
 
@@ -1095,9 +1288,9 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
             int skipped = 0;
             for (CassandraVertex v : newVertices) {
-                if (isEntityVertex(v)) {
+                if (shouldSyncToES(v)) {
                     vertexMap.put(v.getIdString(), v);
-                    vertexJsonMap.put(v.getIdString(), AtlasType.toJson(filterPropertiesForES(v.getProperties())));
+                    vertexJsonMap.put(v.getIdString(), buildVertexUpdateDocJson(v));
                     LOG.info("syncVerticesToElasticsearch: NEW vertex _id='{}', __typeName='{}', propCount={}",
                             v.getIdString(), v.getProperty(Constants.ENTITY_TYPE_PROPERTY_KEY, String.class),
                             v.getProperties().size());
@@ -1107,9 +1300,9 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             }
 
             for (CassandraVertex v : dirtyVertices) {
-                if (isEntityVertex(v)) {
+                if (shouldSyncToES(v)) {
                     vertexMap.put(v.getIdString(), v);
-                    vertexJsonMap.put(v.getIdString(), AtlasType.toJson(filterPropertiesForES(v.getProperties())));
+                    vertexJsonMap.put(v.getIdString(), buildVertexUpdateDocJson(v));
                     LOG.info("syncVerticesToElasticsearch: DIRTY vertex _id='{}', __typeName='{}', propCount={}",
                             v.getIdString(), v.getProperty(Constants.ENTITY_TYPE_PROPERTY_KEY, String.class),
                             v.getProperties().size());
@@ -1143,6 +1336,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             if (client == null) {
                 LOG.warn("ES client not available, {} index + {} delete operations written to outbox for background retry",
                         vertexMap.size(), deleteIds.size());
+                recordESSyncMetrics("outbox_fallback", esSyncStartMs, vertexMap.size(), deleteIds.size());
                 return;
             }
 
@@ -1156,12 +1350,13 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                     long delay = ES_SYNC_RETRY_DELAYS[Math.min(attempt - 1, ES_SYNC_RETRY_DELAYS.length - 1)];
                     LOG.warn("ES sync retry attempt {}/{} after {}ms for {} index + {} delete operations",
                             attempt, ES_SYNC_MAX_RETRIES, delay, pendingIndexIds.size(), pendingDeleteIds.size());
+                    recordESSyncRetryMetric(attempt);
                     Thread.sleep(delay);
                 }
 
                 StringBuilder bulkBody = new StringBuilder();
                 for (String vid : pendingIndexIds) {
-                    bulkBody.append("{\"index\":{\"_index\":\"").append(indexName)
+                    bulkBody.append("{\"update\":{\"_index\":\"").append(indexName)
                             .append("\",\"_id\":\"").append(vid).append("\"}}\n");
                     bulkBody.append(vertexJsonMap.get(vid)).append("\n");
                 }
@@ -1246,18 +1441,57 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                         permanentlyFailed.size(),
                         permanentlyFailed.stream().limit(50).collect(java.util.stream.Collectors.joining(", ")));
             }
+
+            // Record ES sync metrics
+            if (stillFailing.isEmpty() && permanentlyFailed.isEmpty()) {
+                recordESSyncMetrics("sync_success", esSyncStartMs, vertexMap.size(), deleteIds.size());
+            } else if (!permanentlyFailed.isEmpty()) {
+                recordESSyncMetrics("permanent_failure", esSyncStartMs, vertexMap.size(), deleteIds.size());
+            } else {
+                recordESSyncMetrics("outbox_fallback", esSyncStartMs, vertexMap.size(), deleteIds.size());
+            }
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
             LOG.warn("ES sync interrupted during retry backoff: {}", ie.getMessage());
+            recordESSyncMetrics("outbox_fallback", esSyncStartMs, 0, 0);
         } catch (Exception e) {
             LOG.error("Failed to sync vertices to ES (outbox entries preserved for background retry): {}", e.getMessage(), e);
+            recordESSyncMetrics("outbox_fallback", esSyncStartMs, 0, 0);
         }
     }
+
+    private void recordESSyncMetrics(String result, long startMs, int indexOps, int deleteOps) {
+        try {
+            CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
+            if (metrics != null) {
+                metrics.recordESSync(result, System.currentTimeMillis() - startMs, indexOps, deleteOps);
+            }
+        } catch (Throwable t) {
+            LOG.debug("Failed to record ES sync metrics: {}", t.getMessage());
+        }
+    }
+
+    private void recordESSyncRetryMetric(int attempt) {
+        try {
+            CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
+            if (metrics != null) {
+                metrics.recordESSyncRetry(attempt);
+            }
+        } catch (Throwable t) {
+            LOG.debug("Failed to record ES sync retry metric: {}", t.getMessage());
+        }
+    }
+
+    private static final int OUTBOX_WRITE_MAX_ATTEMPTS = 5;
+    private static final long OUTBOX_WRITE_BACKOFF_BASE_MS = 2000L; // 2s, 4s, 8s, 16s, 32s
 
     /**
      * Writes outbox entries to Cassandra for all vertices that need ES sync.
      * These entries act as a durable record so the background ESOutboxProcessor
      * can retry any that fail during synchronous sync.
+     *
+     * Retries each batch up to 5 times with exponential backoff (2s, 4s, 8s, 16s, 32s)
+     * to handle transient Cassandra timeouts.
      */
     private void writeOutboxEntries(Map<String, CassandraVertex> vertexMap,
                                      Map<String, String> vertexJsonMap,
@@ -1282,7 +1516,23 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 for (int j = i; j < end; j++) {
                     outboxBatch.addStatement(statements.get(j));
                 }
-                session.execute(outboxBatch.build());
+
+                for (int attempt = 0; attempt < OUTBOX_WRITE_MAX_ATTEMPTS; attempt++) {
+                    try {
+                        session.execute(outboxBatch.build());
+                        break;
+                    } catch (Exception ex) {
+                        if (attempt < OUTBOX_WRITE_MAX_ATTEMPTS - 1) {
+                            long backoff = OUTBOX_WRITE_BACKOFF_BASE_MS * (1L << attempt);
+                            LOG.warn("writeOutboxEntries: batch failed on attempt {}/{}, retrying in {}ms: {}",
+                                    attempt + 1, OUTBOX_WRITE_MAX_ATTEMPTS, backoff, ex.getMessage());
+                            Thread.sleep(backoff);
+                        } else {
+                            LOG.error("writeOutboxEntries: batch failed after {} attempts: {}",
+                                    OUTBOX_WRITE_MAX_ATTEMPTS, ex.getMessage(), ex);
+                        }
+                    }
+                }
             }
 
             LOG.info("writeOutboxEntries: wrote {} index + {} delete outbox entries",
@@ -1341,16 +1591,28 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
             LOG.info("ES bulk response: {} succeeded, {} retryable failures, {} permanent failures",
                     succeeded, retryable, permanent);
+
+            // Record per-item metrics
+            try {
+                CassandraGraphMetrics metrics = CassandraGraphMetrics.getInstance();
+                if (metrics != null) {
+                    metrics.recordESBulkItems("success", succeeded);
+                    metrics.recordESBulkItems("retryable", retryable);
+                    metrics.recordESBulkItems("permanent", permanent);
+                }
+            } catch (Throwable t) {
+                LOG.debug("Failed to record ES bulk item metrics: {}", t.getMessage());
+            }
         } catch (Exception parseEx) {
             LOG.warn("Could not parse ES bulk response for item errors: {}. Raw (truncated): {}",
                     parseEx.getMessage(), respBody.substring(0, Math.min(4000, respBody.length())));
         }
     }
 
-    private void appendESIndexAction(StringBuilder bulkBody, String indexName, CassandraVertex v) {
-        bulkBody.append("{\"index\":{\"_index\":\"").append(indexName)
+    private void appendESUpdateAction(StringBuilder bulkBody, String indexName, CassandraVertex v) {
+        bulkBody.append("{\"update\":{\"_index\":\"").append(indexName)
                 .append("\",\"_id\":\"").append(v.getIdString()).append("\"}}\n");
-        bulkBody.append(AtlasType.toJson(filterPropertiesForES(v.getProperties()))).append("\n");
+        bulkBody.append(buildVertexUpdateDocJson(v)).append("\n");
     }
 
     /**
@@ -1372,6 +1634,27 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
      * so ES receives the correct type. JSON object strings are NOT parsed (they're mapped
      * as "text" in ES — parsing them to Map causes mapper_parsing_exception).
      */
+    /**
+     * Returns true if the property key should be excluded from the ES document.
+     * Applied to both present values (in {@link #filterPropertiesForES}) and removed
+     * properties (in {@link #buildVertexUpdateDocJson}).
+     */
+    private static boolean isExcludedPropertyKey(String key) {
+        // Typedef attribute metadata — creates ~2500+ fields in ES
+        if (key.startsWith("__type_") || key.startsWith("__type.")) {
+            return true;
+        }
+        // Relationship typedef fields
+        if (key.equals("endDef1") || key.equals("endDef2") ||
+            key.equals("relationshipCategory") || key.equals("relationshipLabel") ||
+            key.equals("tagPropagation")) {
+            return true;
+        }
+        // Tag denormalized attributes — managed separately via ClassificationAssociator
+        return TAG_DENORM_ATTRIBUTES.contains(key);
+    }
+
+
     private Map<String, Object> filterPropertiesForES(Map<String, Object> props) {
         Map<String, Object> filtered = new LinkedHashMap<>(props.size());
 
@@ -1379,17 +1662,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             String key = entry.getKey();
             Object value = entry.getValue();
 
-            // --- Property name blacklist ---
-
-            // Skip typedef attribute metadata — these create ~2500+ fields in ES
-            if (key.startsWith("__type_") || key.startsWith("__type.")) {
-                continue;
-            }
-
-            // Skip relationship typedef properties
-            if (key.equals("endDef1") || key.equals("endDef2") ||
-                key.equals("relationshipCategory") || key.equals("relationshipLabel") ||
-                key.equals("tagPropagation")) {
+            if (isExcludedPropertyKey(key)) {
                 continue;
             }
 
@@ -1408,13 +1681,29 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 continue;
             }
 
-            // Fix double-encoded JSON array strings from setJsonProperty().
-            // Only parse arrays ([...]), NOT objects ({...}) — see __customAttributes bug.
+            // Fix double-encoded JSON array strings from Cassandra round-trip.
+            // List properties (e.g., __traitNames, __labels) are stored as JSON array
+            // strings like '["PII","Confidential"]'. ES expects these as actual arrays.
+            //
+            // Parse any [...] string, but if the result is a List containing Maps/Objects
+            // (e.g., rawDataTypeDefinition = '[{"name":"street","type":"string"}]'), keep
+            // the original string — ES maps these as text, not nested objects.
+            // Real list properties are always List<String>, never List<Map>.
             if (value instanceof String) {
                 String strVal = (String) value;
                 if (strVal.length() > 1 && strVal.charAt(0) == '[' && strVal.charAt(strVal.length() - 1) == ']') {
                     try {
-                        value = AtlasType.fromJson(strVal, Object.class);
+                        Object parsed = AtlasType.fromJson(strVal, Object.class);
+                        if (parsed instanceof List) {
+                            List<?> list = (List<?>) parsed;
+                            if (!list.isEmpty() && list.get(0) instanceof Map) {
+                                // List of objects (e.g., rawDataTypeDefinition) — keep as string
+                                // ES expects text, not nested objects
+                            } else {
+                                // List of primitives (e.g., __traitNames = ["PII"]) — use parsed array
+                                value = parsed;
+                            }
+                        }
                     } catch (Exception e) {
                         // Not valid JSON — keep as plain string
                     }
@@ -1425,6 +1714,54 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         }
 
         return filtered;
+    }
+
+    /**
+     * Builds the ES bulk update body for a vertex using an inline Painless script:
+     * <pre>
+     * {
+     *   "script": {
+     *     "source": "&lt;UPSERT_SCRIPT&gt;",
+     *     "lang": "painless",
+     *     "params": { "updates": { &lt;current props&gt; + &lt;removed props as null&gt; } }
+     *   },
+     *   "upsert": { &lt;current props (non-null)&gt; }
+     * }
+     * </pre>
+     *
+     * <p>The {@code script} path runs when the document already exists: non-null values are
+     * set, null values are removed from {@code _source}.  The {@code upsert} path runs when
+     * the document does not yet exist (ES indexes it directly, no script).
+     *
+     * <p>We use a script instead of {@code doc}/{@code doc_as_upsert} because ES ingest
+     * pipelines do not execute on {@code update} operations — so the
+     * {@code remove_null_fields} pipeline would silently skip null removal on partial updates.
+     * The script handles null removal explicitly.
+     *
+     * <p>The name blacklist from {@link #isExcludedPropertyKey} is applied to removed keys
+     * so tag-denorm and typedef metadata are never touched.
+     */
+    private String buildVertexUpdateDocJson(CassandraVertex v) {
+        // Non-null, filtered current properties — used both in params.updates and upsert
+        Map<String, Object> currentProps = filterPropertiesForES(v.getProperties());
+
+        // params.updates = current props + removed props as explicit null
+        Map<String, Object> updates = new LinkedHashMap<>(currentProps);
+        for (String removedKey : v.getRemovedProperties()) {
+            if (!isExcludedPropertyKey(removedKey)) {
+                updates.put(removedKey, null);
+            }
+        }
+
+        Map<String, Object> script = new LinkedHashMap<>();
+        script.put("source", UPSERT_SCRIPT);
+        script.put("lang", "painless");
+        script.put("params", Collections.singletonMap("updates", updates));
+
+        Map<String, Object> updateBody = new LinkedHashMap<>();
+        updateBody.put("script", script);
+        updateBody.put("upsert", currentProps); // indexed as-is when doc doesn't exist
+        return AtlasType.toJson(updateBody);
     }
 
     /**
@@ -1439,9 +1776,11 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
      * System vertices (patches, index recovery) lack both __typeName and __type
      * and are also excluded.
      */
-    private boolean isEntityVertex(CassandraVertex v) {
+    private boolean shouldSyncToES(CassandraVertex v) {
         Object typeName = v.getProperty(Constants.ENTITY_TYPE_PROPERTY_KEY, String.class);
-        return typeName != null;
+        if (typeName != null) return true;
+        Object taskType = v.getProperty(Constants.TASK_TYPE_PROPERTY_KEY, String.class);
+        return taskType != null;
     }
 
     // ---- Reindex (repair) operations ----
@@ -1495,7 +1834,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 continue;
             }
 
-            if (!isEntityVertex(vertex)) {
+            if (!shouldSyncToES(vertex)) {
                 notEntity++;
                 continue;
             }
@@ -1528,7 +1867,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 StringBuilder bulkBody = new StringBuilder();
                 for (String vid : pendingIds) {
                     CassandraVertex v = vertexMap.get(vid);
-                    appendESIndexAction(bulkBody, indexName, v);
+                    appendESUpdateAction(bulkBody, indexName, v);
                 }
 
                 LOG.info("reindexVertices: sending bulk request to ES index '{}', {} vertices, body length={}, attempt={}",
@@ -1825,6 +2164,10 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
     public EdgeRepository getEdgeRepository() {
         return edgeRepository;
+    }
+
+    RepairJobScheduler getRepairJobScheduler() {
+        return repairJobScheduler;
     }
 
     public IndexRepository getIndexRepository() {

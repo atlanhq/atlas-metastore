@@ -407,16 +407,15 @@ public class EdgeRepository {
             }
 
             for (Row row : rs) {
+                String edgeId      = row.getString("edge_id");
+                String label       = row.getString("edge_label");
+                String inVertexId  = row.getString("in_vertex_id");
+                String propsJson   = row.getString("properties");
+                Map<String, Object> props = parseProperties(propsJson);
+
                 String state = row.getString("state");
-                if (!"DELETED".equals(state)) {
-                    String edgeId      = row.getString("edge_id");
-                    String label       = row.getString("edge_label");
-                    String inVertexId  = row.getString("in_vertex_id");
-                    String propsJson   = row.getString("properties");
-                    Map<String, Object> props = parseProperties(propsJson);
-                    props.put("__state", state != null ? state : "ACTIVE");
-                    result.add(new CassandraEdge(edgeId, vertexId, inVertexId, label, props, graph));
-                }
+                props.put("__state", state != null ? state : "ACTIVE");
+                result.add(new CassandraEdge(edgeId, vertexId, inVertexId, label, props, graph));
             }
         }
 
@@ -429,16 +428,15 @@ public class EdgeRepository {
             }
 
             for (Row row : rs) {
+                String edgeId       = row.getString("edge_id");
+                String label        = row.getString("edge_label");
+                String outVertexId  = row.getString("out_vertex_id");
+                String propsJson    = row.getString("properties");
+                Map<String, Object> props = parseProperties(propsJson);
+
                 String state = row.getString("state");
-                if (!"DELETED".equals(state)) {
-                    String edgeId       = row.getString("edge_id");
-                    String label        = row.getString("edge_label");
-                    String outVertexId  = row.getString("out_vertex_id");
-                    String propsJson    = row.getString("properties");
-                    Map<String, Object> props = parseProperties(propsJson);
-                    props.put("__state", state != null ? state : "ACTIVE");
-                    result.add(new CassandraEdge(edgeId, outVertexId, vertexId, label, props, graph));
-                }
+                props.put("__state", state != null ? state : "ACTIVE");
+                result.add(new CassandraEdge(edgeId, outVertexId, vertexId, label, props, graph));
             }
         }
 
@@ -647,6 +645,98 @@ public class EdgeRepository {
 
         LOG.debug("getEdgesForVerticesByLabelsAsync(limited={}): {} vertices × {} labels = {} total edges",
                   limitPerLabel, vertexIds.size(), edgeLabels.size(),
+                  results.values().stream().mapToInt(List::size).sum());
+
+        return results;
+    }
+
+    /**
+     * Direction-aware edge fetch: each label is queried only in its specified direction,
+     * halving the CQL queries compared to always querying BOTH.
+     *
+     * @param edgeLabelDirections map of edge label → direction (IN, OUT, or BOTH)
+     * @param limitPerLabel       max edges per (vertex, label, direction). 0 means no limit.
+     */
+    public Map<String, List<CassandraEdge>> getEdgesForVerticesByLabelsDirectionAware(
+            Collection<String> vertexIds, Map<String, AtlasEdgeDirection> edgeLabelDirections,
+            CassandraGraph graph, int limitPerLabel) {
+        if (vertexIds == null || vertexIds.isEmpty() || edgeLabelDirections == null || edgeLabelDirections.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        // Separate labels by direction
+        Set<String> outLabels = new HashSet<>();
+        Set<String> inLabels = new HashSet<>();
+        for (Map.Entry<String, AtlasEdgeDirection> entry : edgeLabelDirections.entrySet()) {
+            String label = entry.getKey();
+            AtlasEdgeDirection dir = entry.getValue();
+            if (dir == AtlasEdgeDirection.OUT || dir == AtlasEdgeDirection.BOTH) {
+                outLabels.add(label);
+            }
+            if (dir == AtlasEdgeDirection.IN || dir == AtlasEdgeDirection.BOTH) {
+                inLabels.add(label);
+            }
+        }
+
+        PreparedStatement outStmt = limitPerLabel > 0 ? selectEdgesOutByLabelLimitStmt : selectEdgesOutByLabelStmt;
+        PreparedStatement inStmt = limitPerLabel > 0 ? selectEdgesInByLabelLimitStmt : selectEdgesInByLabelStmt;
+
+        // Fire async queries only for the correct direction per label
+        Map<String, List<CompletionStage<AsyncResultSet>>> outFutures = new LinkedHashMap<>();
+        Map<String, List<CompletionStage<AsyncResultSet>>> inFutures = new LinkedHashMap<>();
+
+        for (String vertexId : vertexIds) {
+            if (!outLabels.isEmpty()) {
+                List<CompletionStage<AsyncResultSet>> futures = new ArrayList<>(outLabels.size());
+                for (String label : outLabels) {
+                    futures.add(session.executeAsync(limitPerLabel > 0
+                            ? outStmt.bind(vertexId, label, limitPerLabel)
+                            : outStmt.bind(vertexId, label)));
+                }
+                outFutures.put(vertexId, futures);
+            }
+            if (!inLabels.isEmpty()) {
+                List<CompletionStage<AsyncResultSet>> futures = new ArrayList<>(inLabels.size());
+                for (String label : inLabels) {
+                    futures.add(session.executeAsync(limitPerLabel > 0
+                            ? inStmt.bind(vertexId, label, limitPerLabel)
+                            : inStmt.bind(vertexId, label)));
+                }
+                inFutures.put(vertexId, futures);
+            }
+        }
+
+        // Collect results
+        Map<String, List<CassandraEdge>> results = new LinkedHashMap<>();
+
+        for (Map.Entry<String, List<CompletionStage<AsyncResultSet>>> entry : outFutures.entrySet()) {
+            String vertexId = entry.getKey();
+            List<CassandraEdge> edges = results.computeIfAbsent(vertexId, k -> new ArrayList<>());
+            for (CompletionStage<AsyncResultSet> future : entry.getValue()) {
+                try {
+                    AsyncResultSet rs = future.toCompletableFuture().join();
+                    collectOutEdgePages(rs, vertexId, edges, graph);
+                } catch (Exception e) {
+                    LOG.warn("Failed to fetch out-edges (direction-aware) for vertex {}", vertexId, e);
+                }
+            }
+        }
+
+        for (Map.Entry<String, List<CompletionStage<AsyncResultSet>>> entry : inFutures.entrySet()) {
+            String vertexId = entry.getKey();
+            List<CassandraEdge> edges = results.computeIfAbsent(vertexId, k -> new ArrayList<>());
+            for (CompletionStage<AsyncResultSet> future : entry.getValue()) {
+                try {
+                    AsyncResultSet rs = future.toCompletableFuture().join();
+                    collectInEdgePages(rs, vertexId, edges, graph);
+                } catch (Exception e) {
+                    LOG.warn("Failed to fetch in-edges (direction-aware) for vertex {}", vertexId, e);
+                }
+            }
+        }
+
+        LOG.debug("getEdgesForVerticesByLabelsDirectionAware(limit={}): {} vertices, {} OUT labels, {} IN labels = {} total edges",
+                  limitPerLabel, vertexIds.size(), outLabels.size(), inLabels.size(),
                   results.values().stream().mapToInt(List::size).sum());
 
         return results;

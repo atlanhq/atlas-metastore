@@ -41,6 +41,8 @@ data:
     atlas.cassandra.graph.datacenter=datacenter1
     atlas.graph.id.strategy={{ .Values.global.graphIdStrategy | default "legacy" }}
     atlas.graph.claim.enabled={{ .Values.global.graphClaimEnabled | default false }}
+    atlas.cassandra.graph.reconciliation.interval.hours={{ .Values.global.reconciliationIntervalHours | default 6 }}
+    atlas.cassandra.graph.reconciliation.initial.delay.minutes={{ .Values.global.reconciliationInitialDelayMinutes | default 10 }}
     {{- end }}
 
     # Graph Storage

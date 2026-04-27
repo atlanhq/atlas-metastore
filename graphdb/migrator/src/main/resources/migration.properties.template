@@ -58,20 +58,22 @@ target.elasticsearch.password=
 # -----------------------------------------------------------------------------
 
 # Number of parallel CQL scanner threads (each scans a token range).
-# Recommended: 2x the number of Cassandra nodes for good parallelism.
-# Higher values = faster reads but more pressure on source Cassandra.
-migration.scanner.threads=32
+# Default: 16. Auto-sized by MigrationSizer based on vertex count + CPU cores
+# if not set explicitly. Scanner and writer threads are always equal.
+# Set explicitly to disable auto-sizing for this parameter.
+#migration.scanner.threads=16
 
 # Number of writer threads that process decoded vertices and write to target.
-# These consume from a bounded queue fed by scanner threads.
-migration.writer.threads=8
+# Default: 16 (equal to scanner threads). Auto-sized if not set explicitly.
+#migration.writer.threads=16
 
 # Batch size: how many vertices a writer thread accumulates before writing.
 # Larger batches reduce round-trips but increase memory per writer.
 migration.writer.batch.size=500
 
 # ES bulk size: documents per bulk request to Elasticsearch.
-migration.es.bulk.size=1000
+# Auto-sized: 5000 for <1M vertices, 10000 for >=1M vertices.
+#migration.es.bulk.size=5000
 
 # CQL page/fetch size for the edgestore scan.
 # Larger = fewer round-trips, more memory.
@@ -79,7 +81,7 @@ migration.scan.fetch.size=5000
 
 # Bounded queue capacity between scanner and writer threads.
 # Provides backpressure: scanners block when queue is full.
-migration.queue.capacity=10000
+migration.queue.capacity=20000
 
 # Resume: if true, skip token ranges already completed in previous runs.
 # Set to false for a fresh start (or use --fresh flag).

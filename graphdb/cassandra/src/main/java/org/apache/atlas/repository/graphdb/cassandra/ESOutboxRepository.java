@@ -24,7 +24,7 @@ import java.util.List;
  * transient queue table with LOGGED batches — no anti-entropy window needed.
  * Tombstones from completed entries are compacted within the hour.
  *
- * All rows are written with a 7-day TTL for auto-cleanup of stuck entries.
+ * All rows are written with a 24-hour TTL for auto-cleanup of stuck entries.
  */
 public class ESOutboxRepository {
 
@@ -37,8 +37,8 @@ public class ESOutboxRepository {
     static final String ACTION_INDEX  = "index";
     static final String ACTION_DELETE = "delete";
 
-    private static final int TTL_SECONDS = 7 * 24 * 3600; // 7 days
-    static final int MAX_ATTEMPTS = 10;
+    private static final int TTL_SECONDS = 24 * 3600; // 24 hours
+    static final int MAX_ATTEMPTS = 5;
 
     private final CqlSession session;
     private final PreparedStatement insertPendingStmt;
@@ -50,7 +50,7 @@ public class ESOutboxRepository {
     public ESOutboxRepository(CqlSession session) {
         this.session = session;
 
-        // INSERT into PENDING partition with 7-day TTL
+        // INSERT into PENDING partition with 24-hour TTL
         this.insertPendingStmt = session.prepare(
             "INSERT INTO es_outbox (status, vertex_id, es_action, properties_json, attempt_count, created_at, last_attempted_at) " +
             "VALUES (?, ?, ?, ?, ?, ?, ?) USING TTL " + TTL_SECONDS
@@ -61,7 +61,7 @@ public class ESOutboxRepository {
             "DELETE FROM es_outbox WHERE status = ? AND vertex_id = ?"
         );
 
-        // INSERT into FAILED partition with 7-day TTL (for observability)
+        // INSERT into FAILED partition with 24-hour TTL (for observability)
         this.insertFailedStmt = session.prepare(
             "INSERT INTO es_outbox (status, vertex_id, es_action, properties_json, attempt_count, created_at, last_attempted_at) " +
             "VALUES (?, ?, ?, ?, ?, ?, ?) USING TTL " + TTL_SECONDS
@@ -127,12 +127,15 @@ public class ESOutboxRepository {
     /**
      * Move entry from PENDING to FAILED partition. Uses LOGGED batch since it
      * spans two partitions (DELETE from PENDING + INSERT into FAILED).
+     * Preserves action and properties for debugging and potential re-enqueue.
      */
-    public void markFailed(String vertexId, int attemptCount) {
+    public void markFailed(String vertexId, int attemptCount, String action, String propertiesJson) {
         Instant now = Instant.now();
         BatchStatementBuilder batch = BatchStatement.builder(DefaultBatchType.LOGGED);
         batch.addStatement(deletePendingStmt.bind(STATUS_PENDING, vertexId));
-        batch.addStatement(insertFailedStmt.bind(STATUS_FAILED, vertexId, "", "", attemptCount, now, now));
+        batch.addStatement(insertFailedStmt.bind(STATUS_FAILED, vertexId,
+                action != null ? action : "", propertiesJson != null ? propertiesJson : "",
+                attemptCount, now, now));
         session.execute(batch.build());
     }
 
