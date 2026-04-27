@@ -89,7 +89,7 @@ public class PurgeESOperations {
 
     public long getEntityCount(String esQuery) throws Exception {
         RestClient client = getEsClient();
-        String endpoint = "/" + VERTEX_INDEX_NAME + "/_count";
+        String endpoint = "/" + getVertexIndexName() + "/_count";
 
         Request request = new Request("POST", endpoint);
         request.setEntity(new NStringEntity(esQuery, ContentType.APPLICATION_JSON));
@@ -107,7 +107,7 @@ public class PurgeESOperations {
      * @return PIT ID string
      */
     public String openPIT(RestClient client) throws Exception {
-        String endpoint = "/" + VERTEX_INDEX_NAME + "/_pit?keep_alive=" + PIT_KEEP_ALIVE;
+        String endpoint = "/" + getVertexIndexName() + "/_pit?keep_alive=" + PIT_KEEP_ALIVE;
         Request request = new Request("POST", endpoint);
 
         Response response = client.performRequest(request);
@@ -389,7 +389,7 @@ public class PurgeESOperations {
         queryBody.set("terms", terms);
         query.set("query", queryBody);
 
-        String endpoint = "/" + VERTEX_INDEX_NAME + "/_delete_by_query?conflicts=proceed&refresh=false";
+        String endpoint = "/" + getVertexIndexName() + "/_delete_by_query?conflicts=proceed&refresh=false";
         Request request = new Request("POST", endpoint);
         request.setEntity(new NStringEntity(MAPPER.writeValueAsString(query), ContentType.APPLICATION_JSON));
         client.performRequest(request);
@@ -397,7 +397,7 @@ public class PurgeESOperations {
 
     public void refreshEsIndex(RestClient client) {
         try {
-            Request refreshRequest = new Request("POST", "/" + VERTEX_INDEX_NAME + "/_refresh");
+            Request refreshRequest = new Request("POST", "/" + getVertexIndexName() + "/_refresh");
             client.performRequest(refreshRequest);
         } catch (Exception e) {
             LOG.warn("BulkPurge: ES index refresh failed (verification count may be stale)", e);
@@ -408,7 +408,7 @@ public class PurgeESOperations {
         try {
             RestClient client = getEsClient();
             String query = buildTermQuery(GUID_PROPERTY_KEY, connGuid);
-            String endpoint = "/" + VERTEX_INDEX_NAME + "/_delete_by_query?conflicts=proceed&refresh=false&requests_per_second=5000";
+            String endpoint = "/" + getVertexIndexName() + "/_delete_by_query?conflicts=proceed&refresh=false&requests_per_second=5000";
 
             Request request = new Request("POST", endpoint);
             request.setEntity(new NStringEntity(query, ContentType.APPLICATION_JSON));
@@ -437,7 +437,7 @@ public class PurgeESOperations {
         queryNode.put("size", 10000);
         queryNode.put("_source", false);
 
-        String endpoint = "/" + VERTEX_INDEX_NAME + "/_search";
+        String endpoint = "/" + getVertexIndexName() + "/_search";
         Request request = new Request("POST", endpoint);
         request.setEntity(new NStringEntity(MAPPER.writeValueAsString(queryNode), ContentType.APPLICATION_JSON));
 
@@ -487,7 +487,7 @@ public class PurgeESOperations {
         query.put("size", 10000);
         query.put("_source", false);
 
-        String endpoint = "/" + VERTEX_INDEX_NAME + "/_search";
+        String endpoint = "/" + getVertexIndexName() + "/_search";
         Request request = new Request("POST", endpoint);
         request.setEntity(new NStringEntity(query.toString(), ContentType.APPLICATION_JSON));
 
@@ -525,7 +525,7 @@ public class PurgeESOperations {
         query.put("size", 1000);
         query.put("_source", false);
 
-        String endpoint = "/" + VERTEX_INDEX_NAME + "/_search";
+        String endpoint = "/" + getVertexIndexName() + "/_search";
         Request request = new Request("POST", endpoint);
         request.setEntity(new NStringEntity(query.toString(), ContentType.APPLICATION_JSON));
 
@@ -566,7 +566,7 @@ public class PurgeESOperations {
         query.put("size", 10000);
         query.put("_source", false);
 
-        String endpoint = "/" + VERTEX_INDEX_NAME + "/_search";
+        String endpoint = "/" + getVertexIndexName() + "/_search";
         Request request = new Request("POST", endpoint);
         request.setEntity(new NStringEntity(query.toString(), ContentType.APPLICATION_JSON));
 

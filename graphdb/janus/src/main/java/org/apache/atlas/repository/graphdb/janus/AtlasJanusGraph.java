@@ -325,7 +325,7 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
     public AtlasIndexQuery<AtlasJanusVertex, AtlasJanusEdge> elasticsearchQuery(String indexName, SearchSourceBuilder sourceBuilder) {
         assert elasticsearchClient != null;
-        return new AtlasElasticsearchQuery(this, elasticsearchClient, INDEX_PREFIX + indexName, sourceBuilder);
+        return new AtlasElasticsearchQuery(this, elasticsearchClient, getIndexPrefix() + indexName, sourceBuilder);
     }
 
     public AtlasIndexQuery<AtlasJanusVertex, AtlasJanusEdge> elasticsearchQuery(String indexName, SearchParams searchParams) throws AtlasBaseException {
@@ -333,7 +333,7 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
             LOG.error("restClient is not initiated, failed to run query on ES");
             throw new AtlasBaseException(INDEX_SEARCH_CLIENT_NOT_INITIATED);
         }
-        return new AtlasElasticsearchQuery(this, restClient, INDEX_PREFIX + indexName, searchParams, esUiClusterClient, esNonUiClusterClient);
+        return new AtlasElasticsearchQuery(this, restClient, getIndexPrefix() + indexName, searchParams, esUiClusterClient, esNonUiClusterClient);
     }
 
     @Override

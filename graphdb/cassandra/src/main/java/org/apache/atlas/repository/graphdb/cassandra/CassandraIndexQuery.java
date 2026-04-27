@@ -113,16 +113,18 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
     }
 
     /**
-     * Normalizes ES index names by prepending Constants.INDEX_PREFIX if not already present.
-     * Callers may pass raw names like "vertex_index" (the JanusGraph internal name),
-     * but ES has the index as "atlas_graph_vertex_index".
+     * Normalizes ES index names by prepending {@link Constants#getIndexPrefix()}
+     * if not already present. Callers may pass raw names like "vertex_index"
+     * (the JanusGraph internal name), but ES has the index as
+     * "atlas_graph_vertex_index" / "janusgraph_vertex_index" depending on backend.
      */
     private static String normalizeIndexName(String indexName) {
         if (indexName == null) {
             return null;
         }
-        if (!indexName.startsWith(Constants.INDEX_PREFIX) && !CassandraGraph.EXCLUDE_ES_INDEXES_PREFIXING.contains(indexName)) {
-            String normalized = Constants.INDEX_PREFIX + indexName;
+        String prefix = Constants.getIndexPrefix();
+        if (!indexName.startsWith(prefix) && !CassandraGraph.EXCLUDE_ES_INDEXES_PREFIXING.contains(indexName)) {
+            String normalized = prefix + indexName;
             LOG.debug("Normalized ES index name: '{}' -> '{}'", indexName, normalized);
             return normalized;
         }

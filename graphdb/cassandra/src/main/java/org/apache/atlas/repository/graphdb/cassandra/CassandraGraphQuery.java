@@ -330,7 +330,7 @@ public class CassandraGraphQuery implements AtlasGraphQuery<CassandraVertex, Cas
                 return null;
             }
 
-            String indexName = Constants.VERTEX_INDEX_NAME;
+            String indexName = Constants.getVertexIndexName();
             // Search ES for __guid field match; the _id is the vertex_id (UUID)
             String query = "{\"query\":{\"term\":{\"__guid\":\"" + guid + "\"}},\"size\":1,\"_source\":false}";
             Request req = new Request("POST", "/" + indexName + "/_search");

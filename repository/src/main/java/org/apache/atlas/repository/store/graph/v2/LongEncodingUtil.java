@@ -38,24 +38,26 @@ public final class LongEncodingUtil {
     private static final String BASE_SYMBOLS = "0123456789abcdefghijklmnopqrstuvwxyz";
     private static final int    BASE         = BASE_SYMBOLS.length(); // 36
 
-    private static final boolean IS_CASSANDRA_BACKEND;
+    private LongEncodingUtil() {
+        // utility class
+    }
 
-    static {
-        boolean cassandra = false;
+    /**
+     * Resolved on every call so the value tracks the runtime graphdb backend
+     * (StaticConfigStore overlays {@code atlas.graphdb.backend} into
+     * {@link ApplicationProperties} after Cassandra reads complete; caching this
+     * in a {@code static {}} block snapshots the file value too early and silently
+     * encodes vertex IDs against the wrong scheme after a JG↔ZG rollback).
+     */
+    private static boolean isCassandraBackend() {
         try {
             String backend = ApplicationProperties.get().getString(
                     ApplicationProperties.GRAPHDB_BACKEND_CONF,
                     ApplicationProperties.DEFAULT_GRAPHDB_BACKEND);
-            cassandra = ApplicationProperties.GRAPHDB_BACKEND_CASSANDRA.equalsIgnoreCase(backend);
+            return ApplicationProperties.GRAPHDB_BACKEND_CASSANDRA.equalsIgnoreCase(backend);
         } catch (Exception e) {
-            LOG.warn("Failed to read graphdb backend config, defaulting to JanusGraph encoding", e);
+            return false;
         }
-        IS_CASSANDRA_BACKEND = cassandra;
-        LOG.info("LongEncodingUtil: IS_CASSANDRA_BACKEND={}", IS_CASSANDRA_BACKEND);
-    }
-
-    private LongEncodingUtil() {
-        // utility class
     }
 
     /**
@@ -109,7 +111,7 @@ public final class LongEncodingUtil {
      * or a new deterministic SHA-256 hex / UUID. So we return as-is.
      */
     public static String vertexIdToDocId(String vertexId) {
-        if (IS_CASSANDRA_BACKEND) {
+        if (isCassandraBackend()) {
             return vertexId;
         }
 

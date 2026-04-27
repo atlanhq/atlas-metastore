@@ -242,7 +242,7 @@ public class ESReconciliationJob implements Runnable {
                                          Map<String, String> guidToVertexId) {
         Set<String> missing = new LinkedHashSet<>();
         try {
-            String indexName = Constants.VERTEX_INDEX_NAME;
+            String indexName = Constants.getVertexIndexName();
 
             StringBuilder mgetBody = new StringBuilder("{\"docs\":[");
             boolean first = true;

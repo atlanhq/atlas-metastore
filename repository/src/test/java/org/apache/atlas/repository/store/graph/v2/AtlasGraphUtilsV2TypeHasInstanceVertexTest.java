@@ -134,7 +134,7 @@ class AtlasGraphUtilsV2TypeHasInstanceVertexTest {
 
         AtlasTypeDefESUtils.typeHasInstanceVertex("DataSet");
 
-        verify(mockGraph).elasticsearchQuery(Constants.VERTEX_INDEX_NAME);
+        verify(mockGraph).elasticsearchQuery(Constants.getVertexIndexName());
         verify(mockIndexQuery).countIndexQuery(contains("DataSet"));
         verify(mockIndexQuery).countIndexQuery(contains(Constants.TYPE_NAME_PROPERTY_KEY + ".keyword"));
     }

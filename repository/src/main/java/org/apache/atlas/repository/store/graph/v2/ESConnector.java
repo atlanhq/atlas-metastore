@@ -30,7 +30,7 @@ import static org.apache.atlas.repository.Constants.CLASSIFICATION_TEXT_KEY;
 import static org.apache.atlas.repository.Constants.PROPAGATED_CLASSIFICATION_NAMES_KEY;
 import static org.apache.atlas.repository.Constants.PROPAGATED_TRAIT_NAMES_PROPERTY_KEY;
 import static org.apache.atlas.repository.Constants.TRAIT_NAMES_PROPERTY_KEY;
-import static org.apache.atlas.repository.Constants.VERTEX_INDEX_NAME;
+import static org.apache.atlas.repository.Constants.getVertexIndexName;
 import static org.apache.atlas.repository.audit.ESBasedAuditRepository.getHttpHosts;
 
 public class ESConnector implements Closeable {
@@ -39,7 +39,6 @@ public class ESConnector implements Closeable {
     private static RestClient lowLevelClient;
 
     private static Set<String> DENORM_ATTRS;
-    private static String GET_DOCS_BY_ID = VERTEX_INDEX_NAME + "/_mget";
 
     static {
         try {
@@ -112,7 +111,8 @@ public class ESConnector implements Closeable {
 
                 String docId = LongEncodingUtil.vertexIdToDocId(assetVertexId);
                 docIdToVertexId.put(docId, assetVertexId);
-                bulkRequestBody.append("{\"update\":{\"_index\":\"" + VERTEX_INDEX_NAME + "\",\"_id\":\"").append(docId).append("\" }}\n");
+                bulkRequestBody.append("{\"update\":{\"_index\":\"").append(getVertexIndexName())
+                        .append("\",\"_id\":\"").append(docId).append("\" }}\n");
 
                 bulkRequestBody.append("{");
                 String attrsToUpdate = AtlasType.toJson(toUpdate);
@@ -156,7 +156,8 @@ public class ESConnector implements Closeable {
                         Map<String, Object> toUpdate = new HashMap<>();
                         DENORM_ATTRS.stream().filter(entry::containsKey).forEach(x -> toUpdate.put(x, entry.get(x)));
 
-                        currentBody.append("{\"update\":{\"_index\":\"" + VERTEX_INDEX_NAME + "\",\"_id\":\"").append(docId).append("\" }}\n");
+                        currentBody.append("{\"update\":{\"_index\":\"").append(getVertexIndexName())
+                                .append("\",\"_id\":\"").append(docId).append("\" }}\n");
                         currentBody.append("{");
                         String attrsToUpdate = AtlasType.toJson(toUpdate);
                         currentBody.append("\"doc\":").append(attrsToUpdate);

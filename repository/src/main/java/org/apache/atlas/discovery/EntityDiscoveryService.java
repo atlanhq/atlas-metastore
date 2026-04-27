@@ -510,7 +510,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 LOG.debug("Performing ES relationship search for the params ({})", searchParams);
             }
 
-            indexQuery = graph.elasticsearchQuery(EDGE_INDEX_NAME);
+            indexQuery = graph.elasticsearchQuery(getEdgeIndexName());
             AtlasPerfMetrics.MetricRecorder elasticSearchQueryMetric = RequestContext.get().startMetricRecord("elasticSearchQueryEdge");
             DirectIndexQueryResult indexQueryResult = indexQuery.vertices(searchParams);
             if (indexQueryResult == null) {
@@ -690,7 +690,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     }
 
     private String getIndexName(IndexSearchParams params) throws AtlasBaseException {
-        String vertexIndexName = VERTEX_INDEX_NAME;
+        String vertexIndexName = getVertexIndexName();
 
         if (StringUtils.isEmpty(params.getPersona()) && StringUtils.isEmpty(params.getPurpose())) {
             return vertexIndexName;
@@ -751,7 +751,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         mustClauses.add(mustClause);
 
         List<Map<String, Object>> filterClauses = new ArrayList<>();
-        filterClauses.add(getMap("terms", getMap("_index", Collections.singletonList(VERTEX_INDEX_NAME))));
+        filterClauses.add(getMap("terms", getMap("_index", Collections.singletonList(getVertexIndexName()))));
 
         Map<String, Object> boolQuery = new HashMap<>();
         boolQuery.put("must", mustClauses);

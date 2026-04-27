@@ -338,7 +338,7 @@ public final class AccessControlUtils {
         String aliasName = getESAliasName(qualifiedName);
 
         if (ApplicationProperties.GRAPHDB_BACKEND_CASSANDRA.equalsIgnoreCase(getGraphDbBackend())) {
-            return Constants.INDEX_PREFIX + aliasName;
+            return Constants.getIndexPrefix() + aliasName;
         }
         return aliasName;
     }
@@ -458,7 +458,7 @@ public final class AccessControlUtils {
 
     private static boolean hasMatchingVertex(AtlasGraph graph, List<String> newTags,
                                                IndexSearchParams indexSearchParams) throws AtlasBaseException {
-        String vertexIndexName = VERTEX_INDEX_NAME;
+        String vertexIndexName = Constants.getVertexIndexName();
         AtlasIndexQuery indexQuery = graph.elasticsearchQuery(vertexIndexName);
 
         DirectIndexQueryResult indexQueryResult = indexQuery.vertices(indexSearchParams);
@@ -501,7 +501,7 @@ public final class AccessControlUtils {
     }
 
     private static boolean checkEntityExists(AtlasGraph graph, IndexSearchParams indexSearchParams) throws AtlasBaseException {
-        AtlasIndexQuery indexQuery = graph.elasticsearchQuery(VERTEX_INDEX_NAME);
+        AtlasIndexQuery indexQuery = graph.elasticsearchQuery(Constants.getVertexIndexName());
 
         DirectIndexQueryResult indexQueryResult = indexQuery.vertices(indexSearchParams);
         if (indexQueryResult == null || indexQueryResult.getIterator() == null) {
