@@ -6504,7 +6504,8 @@ public class EntityGraphMapper {
 
     /**
      * Wrapper around {@link #flushTagDenormToES()} that catches exceptions and logs them.
-     * DLQ handles recovery, so callers should not fail on flush errors.
+     * Kafka DLQ (Layer 1 / current) and the Cassandra outbox (Layer 2 / MS-1010) handle
+     * recovery, so callers should not fail on flush errors.
      *
      * @param operation human-readable label for log context (e.g. "propagation add")
      */
@@ -6512,7 +6513,17 @@ public class EntityGraphMapper {
         try {
             flushTagDenormToES();
         } catch (Exception e) {
-            LOG.error("flushTagDenormToES failed during {}, DLQ handles recovery", operation, e);
+            // 4c: still don't propagate to caller, but surface the failure to the outbox
+            // hook so MS-1010 can replay. Existing Kafka DLQ inside flushTagDenormToES
+            // remains the immediate safety net.
+            LOG.error("flushTagDenormToES failed during {}, DLQ/outbox handles recovery", operation, e);
+            org.apache.atlas.repository.store.graph.v2.ESConnectorMetrics.recordFailure("propagation_flush_exception");
+            org.apache.atlas.repository.store.graph.v2.ESWriteFailureRegistry.record(
+                    new org.apache.atlas.repository.store.graph.v2.ESWriteFailureRegistry.ESWriteFailure(
+                            java.util.Collections.emptyList(),
+                            java.util.Collections.emptyList(),
+                            e,
+                            "propagation-flush:" + operation));
         }
     }
 

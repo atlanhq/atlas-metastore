@@ -186,6 +186,44 @@ public enum AtlasConfiguration {
     CASSANDRA_BATCH_SIZE("atlas.cassandra.batch.size", 100),
     ES_MAX_RETRIES("atlas.es.max.retries", 5),
     ES_RETRY_DELAY_MS("atlas.es.retry.delay.ms", 1000),
+    ES_RETRY_MAX_DELAY_MS("atlas.es.retry.max.delay.ms", 60000),
+    ES_RETRY_JITTER_ENABLED("atlas.es.retry.jitter.enabled", true),
+
+    ES_CIRCUIT_BREAKER_ENABLED("atlas.es.circuit.breaker.enabled", true),
+    ES_CIRCUIT_BREAKER_FAILURE_THRESHOLD("atlas.es.circuit.breaker.failure.threshold", 10),
+    ES_CIRCUIT_BREAKER_COOLDOWN_MS("atlas.es.circuit.breaker.cooldown.ms", 30000),
+
+    // MS-1010: Asset Sync failure-only outbox
+    ASSET_SYNC_OUTBOX_ENABLED("atlas.asset.sync.outbox.enabled", true),
+    ASSET_SYNC_OUTBOX_KEYSPACE("atlas.asset.sync.outbox.keyspace", "atlas_asset_sync"),
+    ASSET_SYNC_OUTBOX_REPLICATION_FACTOR("atlas.asset.sync.outbox.replication.factor", 1),
+    ASSET_SYNC_OUTBOX_MAX_ATTEMPTS("atlas.asset.sync.outbox.max.attempts", 10),
+    ASSET_SYNC_OUTBOX_TTL_SECONDS("atlas.asset.sync.outbox.ttl.seconds", 86400),               // 24h
+    ASSET_SYNC_RELAY_LEASE_TTL_SECONDS("atlas.asset.sync.relay.lease.ttl.seconds", 30),
+    ASSET_SYNC_RELAY_LEASE_HEARTBEAT_SECONDS("atlas.asset.sync.relay.lease.heartbeat.seconds", 10),
+    ASSET_SYNC_RELAY_IDLE_POLL_SECONDS("atlas.asset.sync.relay.idle.poll.seconds", 30),
+    ASSET_SYNC_RELAY_DRAIN_POLL_SECONDS("atlas.asset.sync.relay.drain.poll.seconds", 2),
+    ASSET_SYNC_RELAY_IDLE_BATCH_SIZE("atlas.asset.sync.relay.idle.batch.size", 100),
+    ASSET_SYNC_RELAY_DRAIN_BATCH_SIZE("atlas.asset.sync.relay.drain.batch.size", 500),
+    ASSET_SYNC_RELAY_CLAIM_TTL_SECONDS("atlas.asset.sync.relay.claim.ttl.seconds", 60),
+    ASSET_SYNC_RELAY_BACKOFF_BASE_MS("atlas.asset.sync.relay.backoff.base.ms", 1000),
+    ASSET_SYNC_RELAY_BACKOFF_MAX_MS("atlas.asset.sync.relay.backoff.max.ms", 60000),
+
+    // Post-commit ES verifier (Option B): after each Atlas commit, async-verify the
+    // committed entity GUIDs are in ES; misses are enqueued to the asset-sync outbox.
+    ASSET_SYNC_VERIFY_ENABLED("atlas.asset.sync.verify.enabled", true),
+    ASSET_SYNC_VERIFY_DELAY_SECONDS("atlas.asset.sync.verify.delay.seconds", 2),
+    ASSET_SYNC_VERIFY_BATCH_SIZE("atlas.asset.sync.verify.batch.size", 200),
+    ASSET_SYNC_VERIFY_THREAD_POOL_SIZE("atlas.asset.sync.verify.thread.pool.size", 2),
+
+    // Reconciler: hourly sweeper that catches outbox entries the relay can't self-heal.
+    // Scans FAILED and orphaned-PENDING rows, verifies ES presence, and re-fires
+    // RepairIndex.restoreByIds for those still missing. Lease-gated on the relay lease.
+    ASSET_SYNC_RECONCILER_ENABLED("atlas.asset.sync.reconciler.enabled", true),
+    ASSET_SYNC_RECONCILER_INTERVAL_SECONDS("atlas.asset.sync.reconciler.interval.seconds", 3600),
+    ASSET_SYNC_RECONCILER_JITTER_SECONDS("atlas.asset.sync.reconciler.jitter.seconds", 300),
+    ASSET_SYNC_RECONCILER_BATCH_SIZE("atlas.asset.sync.reconciler.batch.size", 500),
+    ASSET_SYNC_RECONCILER_STUCK_PENDING_THRESHOLD_SECONDS("atlas.asset.sync.reconciler.stuck.pending.threshold.seconds", 1800),
 
     // Entity audit: async retry with backoff, then publish to Kafka DLQ if still failing (main request never fails)
     ENTITY_AUDIT_DLQ_ENABLED("atlas.entity.audit.dlq.enabled", true),
